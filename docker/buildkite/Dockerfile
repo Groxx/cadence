@@ -1,27 +1,26 @@
 FROM golang:1.17
 
-# Tried to set Python to ignore warnings due to the instructions at this link:
-# https://github.com/yaml/pyyaml/wiki/PyYAML-yaml.load(input)-Deprecation
-# But this causes all the pip installs to fail, so don't do this:
-# ENV PYTHONWARNINGS=ignore::yaml.YAMLLoadWarning
-# ENV PYTHONWARNINGS=ignore
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends python3 python3-dev python3-setuptools python3-pip \
+  && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl \
-      gettext-base \
-      libyaml-dev \
-      python \
-      python-dev \
-      python-setuptools \
-      time \
-      unzip \
-    && rm -rf /var/lib/apt/lists/*
+# only external lib required by cqlsh (and possibly futures)
+RUN pip3 install six
 
-# pip 21+ drops support for python2 entirely, we seem to need at least 19 to build cqlsh
-RUN curl https://bootstrap.pypa.io/pip/2.7/get-pip.py -o get-pip.py
-RUN python get-pip.py
-RUN pip install -U 'pip<21'
-RUN pip install PyYAML==3.13 cqlsh==5.0.4
+# pull cassandra source, trim to enough to run cqlsh, currently only 1MB or so.
+RUN mkdir -p cqlsh \
+  && cd cqlsh \
+  && curl -LO https://archive.apache.org/dist/cassandra/4.0.4/apache-cassandra-4.0.4-src.tar.gz \
+  && echo '6c15b0617db5e86550e0b790bda49ee291d4c093  apache-cassandra-4.0.4-src.tar.gz' | shasum -c \
+  && tar --strip-components 1 -xvf apache-cassandra-4.0.4-src.tar.gz \
+    apache-cassandra-4.0.4-src/bin \
+    apache-cassandra-4.0.4-src/lib \
+    apache-cassandra-4.0.4-src/pylib \
+  && ln -s $(pwd)/bin/cqlsh /usr/local/bin/cqlsh \
+  && pwd && ls -alh \
+  && rm apache-cassandra-4.0.4-src.tar.gz
+
+RUN cqlsh -h
 
 # verbose test output from `make`, can be disabled with V=0
 ENV V=1

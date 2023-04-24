@@ -1158,8 +1158,10 @@ func FromHistoryTerminateWorkflowExecutionRequest(t *types.HistoryTerminateWorkf
 		return nil
 	}
 	return &history.TerminateWorkflowExecutionRequest{
-		DomainUUID:       &t.DomainUUID,
-		TerminateRequest: FromTerminateWorkflowExecutionRequest(t.TerminateRequest),
+		DomainUUID:                &t.DomainUUID,
+		TerminateRequest:          FromTerminateWorkflowExecutionRequest(t.TerminateRequest),
+		ExternalWorkflowExecution: FromWorkflowExecution(t.ExternalWorkflowExecution),
+		ChildWorkflowOnly:         &t.ChildWorkflowOnly,
 	}
 }
 
@@ -1169,8 +1171,10 @@ func ToHistoryTerminateWorkflowExecutionRequest(t *history.TerminateWorkflowExec
 		return nil
 	}
 	return &types.HistoryTerminateWorkflowExecutionRequest{
-		DomainUUID:       t.GetDomainUUID(),
-		TerminateRequest: ToTerminateWorkflowExecutionRequest(t.TerminateRequest),
+		DomainUUID:                t.GetDomainUUID(),
+		TerminateRequest:          ToTerminateWorkflowExecutionRequest(t.TerminateRequest),
+		ExternalWorkflowExecution: ToWorkflowExecution(t.ExternalWorkflowExecution),
+		ChildWorkflowOnly:         t.GetChildWorkflowOnly(),
 	}
 }
 
@@ -1244,4 +1248,46 @@ func ToProcessingQueueStateArrayMap(t map[string][]*history.ProcessingQueueState
 		v[key] = ToProcessingQueueStateArray(t[key])
 	}
 	return v
+}
+
+// FromGetFailoverInfoRequest converts internal GetFailoverInfoRequest type to thrift
+func FromGetFailoverInfoRequest(t *types.GetFailoverInfoRequest) *history.GetFailoverInfoRequest {
+	if t == nil {
+		return nil
+	}
+	return &history.GetFailoverInfoRequest{
+		DomainID: &t.DomainID,
+	}
+}
+
+// ToGetFailoverInfoRequest converts thrift GetFailoverInfoRequest type to internal
+func ToGetFailoverInfoRequest(t *history.GetFailoverInfoRequest) *types.GetFailoverInfoRequest {
+	if t == nil {
+		return nil
+	}
+	return &types.GetFailoverInfoRequest{
+		DomainID: t.GetDomainID(),
+	}
+}
+
+// FromGetFailoverInfoResponse converts internal GetFailoverInfoRequest type to thrift
+func FromGetFailoverInfoResponse(t *types.GetFailoverInfoResponse) *history.GetFailoverInfoResponse {
+	if t == nil {
+		return nil
+	}
+	return &history.GetFailoverInfoResponse{
+		CompletedShardCount: &t.CompletedShardCount,
+		PendingShards:       t.GetPendingShards(),
+	}
+}
+
+// ToGetFailoverInfoResponse converts thrift GetFailoverInfoResponse type to internal
+func ToGetFailoverInfoResponse(t *history.GetFailoverInfoResponse) *types.GetFailoverInfoResponse {
+	if t == nil {
+		return nil
+	}
+	return &types.GetFailoverInfoResponse{
+		CompletedShardCount: t.GetCompletedShardCount(),
+		PendingShards:       t.GetPendingShards(),
+	}
 }

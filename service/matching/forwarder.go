@@ -82,10 +82,10 @@ var noopForwarderTokenC <-chan *ForwarderReqToken = make(chan *ForwarderReqToken
 // forwarder is tied to a single task list. All of the exposed
 // methods can return the following errors:
 // Returns following errors:
-//  - errNoParent: If this task list doesn't have a parent to forward to
-//  - errTaskListKind: If the task list is a sticky task list. Sticky task lists are never partitioned
-//  - errForwarderSlowDown: When the rate limit is exceeded
-//  - errInvalidTaskType: If the task list type is invalid
+//   - errNoParent: If this task list doesn't have a parent to forward to
+//   - errTaskListKind: If the task list is a sticky task list. Sticky task lists are never partitioned
+//   - errForwarderSlowDown: When the rate limit is exceeded
+//   - errInvalidTaskType: If the task list type is invalid
 func newForwarder(
 	cfg *forwarderConfig,
 	taskListID *taskListID,
@@ -108,7 +108,7 @@ func newForwarder(
 }
 
 // ForwardTask forwards an activity or decision task to the parent task list partition if it exist
-func (fwdr *Forwarder) ForwardTask(ctx context.Context, task *internalTask) error {
+func (fwdr *Forwarder) ForwardTask(ctx context.Context, task *InternalTask) error {
 	if fwdr.taskListKind == types.TaskListKindSticky {
 		return errTaskListKind
 	}
@@ -162,7 +162,7 @@ func (fwdr *Forwarder) ForwardTask(ctx context.Context, task *internalTask) erro
 // ForwardQueryTask forwards a query task to parent task list partition, if it exist
 func (fwdr *Forwarder) ForwardQueryTask(
 	ctx context.Context,
-	task *internalTask,
+	task *InternalTask,
 ) (*types.QueryWorkflowResponse, error) {
 
 	if fwdr.taskListKind == types.TaskListKindSticky {
@@ -188,7 +188,7 @@ func (fwdr *Forwarder) ForwardQueryTask(
 }
 
 // ForwardPoll forwards a poll request to parent task list partition if it exist
-func (fwdr *Forwarder) ForwardPoll(ctx context.Context) (*internalTask, error) {
+func (fwdr *Forwarder) ForwardPoll(ctx context.Context) (*InternalTask, error) {
 	if fwdr.taskListKind == types.TaskListKindSticky {
 		return nil, errTaskListKind
 	}

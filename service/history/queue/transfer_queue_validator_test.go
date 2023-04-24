@@ -29,12 +29,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/uber/cadence/common/clock"
 	"github.com/uber/cadence/common/dynamicconfig"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/metrics/mocks"
 	"github.com/uber/cadence/common/persistence"
+	hcommon "github.com/uber/cadence/service/history/common"
 	"github.com/uber/cadence/service/history/config"
 	"github.com/uber/cadence/service/history/shard"
 	"github.com/uber/cadence/service/history/task"
@@ -50,9 +50,8 @@ type (
 		mockLogger      *log.MockLogger
 		mockMetricScope *mocks.Scope
 
-		timeSource clock.TimeSource
-		processor  *transferQueueProcessorBase
-		validator  *transferQueueValidator
+		processor *transferQueueProcessorBase
+		validator *transferQueueValidator
 	}
 )
 
@@ -80,9 +79,9 @@ func (s *transferQueueValidatorSuite) SetupTest() {
 	s.mockLogger = &log.MockLogger{}
 	s.mockMetricScope = &mocks.Scope{}
 
-	s.timeSource = clock.NewRealTimeSource()
 	s.processor = &transferQueueProcessorBase{
 		processorBase: &processorBase{
+			shard: s.mockShard,
 			processingQueueCollections: newProcessingQueueCollections(
 				[]ProcessingQueueState{
 					NewProcessingQueueState(
@@ -99,7 +98,6 @@ func (s *transferQueueValidatorSuite) SetupTest() {
 	}
 	s.validator = newTransferQueueValidator(
 		s.processor,
-		s.timeSource,
 		dynamicconfig.GetDurationPropertyFn(testValidationInterval),
 		s.mockLogger,
 		s.mockMetricScope,
@@ -121,7 +119,7 @@ func (s *transferQueueValidatorSuite) TestAddTasks_NoTaskDropped() {
 	}
 	expectedPendingTasksLen := len(tasks)
 
-	s.validator.addTasks(executionInfo, tasks)
+	s.validator.addTasks(&hcommon.NotifyTaskInfo{ExecutionInfo: executionInfo, Tasks: tasks, PersistenceError: false})
 	s.Len(s.validator.pendingTaskInfos, expectedPendingTasksLen)
 
 	tasks = []persistence.Task{
@@ -130,7 +128,7 @@ func (s *transferQueueValidatorSuite) TestAddTasks_NoTaskDropped() {
 	}
 	expectedPendingTasksLen += len(tasks)
 
-	s.validator.addTasks(executionInfo, tasks)
+	s.validator.addTasks(&hcommon.NotifyTaskInfo{ExecutionInfo: executionInfo, Tasks: tasks, PersistenceError: false})
 	s.Len(s.validator.pendingTaskInfos, expectedPendingTasksLen)
 }
 
@@ -143,7 +141,7 @@ func (s *transferQueueValidatorSuite) TestAddTasks_TaskDropped() {
 	}
 	expectedPendingTasksLen := len(tasks)
 
-	s.validator.addTasks(executionInfo, tasks)
+	s.validator.addTasks(&hcommon.NotifyTaskInfo{ExecutionInfo: executionInfo, Tasks: tasks, PersistenceError: false})
 	s.Len(s.validator.pendingTaskInfos, expectedPendingTasksLen)
 
 	tasks = []persistence.Task{}
@@ -155,7 +153,7 @@ func (s *transferQueueValidatorSuite) TestAddTasks_TaskDropped() {
 	s.mockLogger.On("Warn", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Times(1)
 	s.mockMetricScope.On("AddCounter", metrics.QueueValidatorDropTaskCounter, int64(numDroppedTasks)).Times(1)
 
-	s.validator.addTasks(executionInfo, tasks)
+	s.validator.addTasks(&hcommon.NotifyTaskInfo{ExecutionInfo: executionInfo, Tasks: tasks, PersistenceError: false})
 	s.Len(s.validator.pendingTaskInfos, defaultMaxPendingTasksSize)
 }
 
@@ -167,7 +165,7 @@ func (s *transferQueueValidatorSuite) TestAckTasks_NoTaskLost() {
 		&persistence.DecisionTask{TaskID: 2},
 		&persistence.DecisionTask{TaskID: 100},
 	}
-	s.validator.addTasks(executionInfo, pendingTasks)
+	s.validator.addTasks(&hcommon.NotifyTaskInfo{ExecutionInfo: executionInfo, Tasks: pendingTasks, PersistenceError: false})
 
 	loadedTasks := make(map[task.Key]task.Task, len(pendingTasks))
 	for _, pendingTask := range pendingTasks[:len(pendingTasks)-1] {
@@ -177,9 +175,7 @@ func (s *transferQueueValidatorSuite) TestAckTasks_NoTaskLost() {
 				TaskID: pendingTask.GetTaskID(),
 			},
 			task.QueueTypeActiveTransfer,
-			nil, nil, nil, nil, nil,
-			s.timeSource,
-			nil,
+			nil, nil, nil, nil, nil, nil,
 		)
 	}
 
@@ -200,7 +196,7 @@ func (s *transferQueueValidatorSuite) TestAckTasks_TaskLost() {
 		&persistence.DecisionTask{TaskID: 1},
 		&persistence.DecisionTask{TaskID: 2},
 	}
-	s.validator.addTasks(executionInfo, pendingTasks)
+	s.validator.addTasks(&hcommon.NotifyTaskInfo{ExecutionInfo: executionInfo, Tasks: pendingTasks, PersistenceError: false})
 
 	loadedTasks := make(map[task.Key]task.Task, len(pendingTasks))
 	for _, pendingTask := range pendingTasks[1:] {
@@ -210,9 +206,7 @@ func (s *transferQueueValidatorSuite) TestAckTasks_TaskLost() {
 				TaskID: pendingTask.GetTaskID(),
 			},
 			task.QueueTypeActiveTransfer,
-			nil, nil, nil, nil, nil,
-			s.timeSource,
-			nil,
+			nil, nil, nil, nil, nil, nil,
 		)
 	}
 

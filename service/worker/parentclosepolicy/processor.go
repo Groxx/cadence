@@ -30,6 +30,7 @@ import (
 
 	"github.com/uber/cadence/client"
 	"github.com/uber/cadence/common"
+	"github.com/uber/cadence/common/cache"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/log/tag"
 	"github.com/uber/cadence/common/metrics"
@@ -47,14 +48,20 @@ type (
 		Logger        log.Logger
 		// TallyScope is an instance of tally metrics scope
 		TallyScope tally.Scope
-		// ClientBean is an instance of client.Bean for a collection of clients
+		// ClientBean is the collection of clients
 		ClientBean client.Bean
+		// DomainCache is the cache for domain information and configuration
+		DomainCache cache.DomainCache
+		// NumWorkflows is the total number of workflows for processing parent close policy
+		NumWorkflows int
 	}
 
 	// Processor is the background sub-system that execute workflow for ParentClosePolicy
 	Processor struct {
 		svcClient     workflowserviceclient.Interface
 		clientBean    client.Bean
+		domainCache   cache.DomainCache
+		numWorkflows  int
 		metricsClient metrics.Client
 		tallyScope    tally.Scope
 		logger        log.Logger
@@ -65,10 +72,12 @@ type (
 func New(params *BootstrapParams) *Processor {
 	return &Processor{
 		svcClient:     params.ServiceClient,
+		clientBean:    params.ClientBean,
+		domainCache:   params.DomainCache,
+		numWorkflows:  params.NumWorkflows,
 		metricsClient: params.MetricsClient,
 		tallyScope:    params.TallyScope,
 		logger:        params.Logger.WithTags(tag.ComponentBatcher),
-		clientBean:    params.ClientBean,
 	}
 }
 

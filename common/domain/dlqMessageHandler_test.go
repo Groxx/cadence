@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/uber/cadence/common/log/loggerimpl"
+	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/types"
 )
 
@@ -71,6 +72,7 @@ func (s *dlqMessageHandlerSuite) SetupTest() {
 		s.mockReplicationTaskExecutor,
 		s.mockReplicationQueue,
 		logger,
+		metrics.NewNoopMetricsClient(),
 	).(*dlqMessageHandlerImpl)
 }
 
@@ -283,9 +285,7 @@ func (s *dlqMessageHandlerSuite) TestMergeMessages_ThrowErrorOnHandleReceivingTa
 		Return(tasks, nil, nil).Times(1)
 	s.mockReplicationTaskExecutor.EXPECT().Execute(domainAttribute1).Return(nil).Times(1)
 	s.mockReplicationTaskExecutor.EXPECT().Execute(domainAttribute2).Return(testError).Times(1)
-	s.mockReplicationQueue.EXPECT().DeleteMessageFromDLQ(gomock.Any(), messageID1).Return(nil).Times(1)
 	s.mockReplicationQueue.EXPECT().DeleteMessageFromDLQ(gomock.Any(), messageID2).Times(0)
-	s.mockReplicationQueue.EXPECT().UpdateDLQAckLevel(gomock.Any(), messageID1).Return(nil).Times(1)
 
 	token, err := s.dlqMessageHandler.Merge(context.Background(), lastMessageID, pageSize, pageToken)
 	s.Equal(testError, err)
@@ -324,7 +324,6 @@ func (s *dlqMessageHandlerSuite) TestMergeMessages_ThrowErrorOnDeleteMessages() 
 	s.mockReplicationTaskExecutor.EXPECT().Execute(domainAttribute1).Return(nil).Times(1)
 	s.mockReplicationTaskExecutor.EXPECT().Execute(domainAttribute2).Return(nil).Times(1)
 	s.mockReplicationQueue.EXPECT().RangeDeleteMessagesFromDLQ(gomock.Any(), ackLevel, messageID2).Return(testError).Times(1)
-	s.mockReplicationQueue.EXPECT().UpdateDLQAckLevel(gomock.Any(), messageID1).Return(nil).Times(1)
 
 	token, err := s.dlqMessageHandler.Merge(context.Background(), lastMessageID, pageSize, pageToken)
 	s.Error(err)

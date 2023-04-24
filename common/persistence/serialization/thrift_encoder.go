@@ -25,7 +25,7 @@ package serialization
 import (
 	"bytes"
 
-	"go.uber.org/thriftrw/protocol"
+	"go.uber.org/thriftrw/protocol/binary"
 
 	"github.com/uber/cadence/common"
 )
@@ -84,6 +84,10 @@ func (e *thriftEncoder) transferTaskInfoToBlob(info *TransferTaskInfo) ([]byte, 
 	return thriftRWEncode(transferTaskInfoToThrift(info))
 }
 
+func (e *thriftEncoder) crossClusterTaskInfoToBlob(info *CrossClusterTaskInfo) ([]byte, error) {
+	return thriftRWEncode(crossClusterTaskInfoToThrift(info))
+}
+
 func (e *thriftEncoder) timerTaskInfoToBlob(info *TimerTaskInfo) ([]byte, error) {
 	return thriftRWEncode(timerTaskInfoToThrift(info))
 }
@@ -97,12 +101,10 @@ func (e *thriftEncoder) encodingType() common.EncodingType {
 }
 
 func thriftRWEncode(t thriftRWType) ([]byte, error) {
-	value, err := t.ToWire()
-	if err != nil {
-		return nil, err
-	}
 	var b bytes.Buffer
-	if err := protocol.Binary.Encode(value, &b); err != nil {
+	sw := binary.Default.Writer(&b)
+	defer sw.Close()
+	if err := t.Encode(sw); err != nil {
 		return nil, err
 	}
 	return b.Bytes(), nil

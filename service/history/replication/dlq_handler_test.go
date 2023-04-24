@@ -32,7 +32,6 @@ import (
 
 	"github.com/uber/cadence/client"
 	"github.com/uber/cadence/client/admin"
-	"github.com/uber/cadence/common/cluster"
 	"github.com/uber/cadence/common/mocks"
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/types"
@@ -50,10 +49,9 @@ type (
 		config           *config.Config
 		mockClientBean   *client.MockBean
 		adminClient      *admin.MockClient
-		clusterMetadata  *cluster.MockMetadata
 		executionManager *mocks.ExecutionManager
 		shardManager     *mocks.ShardManager
-		taskExecutor     *MockTaskExecutor
+		taskExecutor     *fakeTaskExecutor
 		taskExecutors    map[string]TaskExecutor
 		sourceCluster    string
 
@@ -92,13 +90,11 @@ func (s *dlqHandlerSuite) SetupTest() {
 
 	s.mockClientBean = s.mockShard.Resource.ClientBean
 	s.adminClient = s.mockShard.Resource.RemoteAdminClient
-	s.clusterMetadata = s.mockShard.Resource.ClusterMetadata
 	s.executionManager = s.mockShard.Resource.ExecutionMgr
 	s.shardManager = s.mockShard.Resource.ShardMgr
 
-	s.clusterMetadata.EXPECT().GetCurrentClusterName().Return("active").AnyTimes()
 	s.taskExecutors = make(map[string]TaskExecutor)
-	s.taskExecutor = NewMockTaskExecutor(s.controller)
+	s.taskExecutor = &fakeTaskExecutor{}
 	s.sourceCluster = "test"
 	s.taskExecutors[s.sourceCluster] = s.taskExecutor
 
@@ -162,7 +158,7 @@ func (s *dlqHandlerSuite) TestPurgeMessages_OK() {
 			SourceClusterName:    sourceCluster,
 			ExclusiveBeginTaskID: -1,
 			InclusiveEndTaskID:   lastMessageID,
-		}).Return(nil).Times(1)
+		}).Return(&persistence.RangeDeleteReplicationTaskFromDLQResponse{TasksCompleted: persistence.UnknownNumRowsAffected}, nil).Times(1)
 
 	err := s.messageHandler.PurgeMessages(context.Background(), sourceCluster, lastMessageID)
 	s.NoError(err)
@@ -170,7 +166,7 @@ func (s *dlqHandlerSuite) TestPurgeMessages_OK() {
 
 func (s *dlqHandlerSuite) TestMergeMessages_OK() {
 	ctx := context.Background()
-	lastMessageID := int64(1)
+	lastMessageID := int64(2)
 	pageSize := 1
 	pageToken := []byte{}
 
@@ -182,6 +178,13 @@ func (s *dlqHandlerSuite) TestMergeMessages_OK() {
 				RunID:      uuid.New(),
 				TaskType:   0,
 				TaskID:     1,
+			},
+			{
+				DomainID:   uuid.New(),
+				WorkflowID: uuid.New(),
+				RunID:      uuid.New(),
+				TaskType:   0,
+				TaskID:     2,
 			},
 		},
 	}
@@ -198,22 +201,34 @@ func (s *dlqHandlerSuite) TestMergeMessages_OK() {
 	s.mockClientBean.EXPECT().GetRemoteAdminClient(s.sourceCluster).Return(s.adminClient).AnyTimes()
 	replicationTask := &types.ReplicationTask{
 		TaskType:     types.ReplicationTaskTypeHistory.Ptr(),
-		SourceTaskID: lastMessageID,
+		SourceTaskID: 1,
 	}
 	s.adminClient.EXPECT().
 		GetDLQReplicationMessages(ctx, gomock.Any()).
 		Return(&types.GetDLQReplicationMessagesResponse{
 			ReplicationTasks: []*types.ReplicationTask{replicationTask},
 		}, nil)
-	s.taskExecutor.EXPECT().execute(replicationTask, true).Return(0, nil).Times(1)
 	s.executionManager.On("RangeDeleteReplicationTaskFromDLQ", mock.Anything,
 		&persistence.RangeDeleteReplicationTaskFromDLQRequest{
 			SourceClusterName:    s.sourceCluster,
 			ExclusiveBeginTaskID: -1,
 			InclusiveEndTaskID:   lastMessageID,
-		}).Return(nil).Times(1)
+		}).Return(&persistence.RangeDeleteReplicationTaskFromDLQResponse{TasksCompleted: persistence.UnknownNumRowsAffected}, nil).Times(1)
 
 	token, err := s.messageHandler.MergeMessages(ctx, s.sourceCluster, lastMessageID, pageSize, pageToken)
 	s.NoError(err)
 	s.Nil(token)
+	s.Equal(1, len(s.taskExecutor.executedTasks))
+}
+
+type fakeTaskExecutor struct {
+	scope int
+	err   error
+
+	executedTasks []*types.ReplicationTask
+}
+
+func (e *fakeTaskExecutor) execute(replicationTask *types.ReplicationTask, forceApply bool) (int, error) {
+	e.executedTasks = append(e.executedTasks, replicationTask)
+	return e.scope, e.err
 }

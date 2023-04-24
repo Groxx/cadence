@@ -23,23 +23,83 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/urfave/cli"
 
 	"github.com/uber/cadence/common"
-	"github.com/uber/cadence/common/dynamicconfig"
-	"github.com/uber/cadence/common/log/loggerimpl"
+	"github.com/uber/cadence/common/cache"
+	"github.com/uber/cadence/common/codec"
 	"github.com/uber/cadence/common/persistence"
-	"github.com/uber/cadence/common/persistence/cassandra"
 	"github.com/uber/cadence/common/reconciliation/entity"
 	"github.com/uber/cadence/common/reconciliation/invariant"
 	"github.com/uber/cadence/common/reconciliation/store"
 	"github.com/uber/cadence/service/worker/scanner/executions"
 )
+
+// AdminDBDataDecodeThrift is the command to decode thrift binary into JSON
+func AdminDBDataDecodeThrift(c *cli.Context) {
+	dataInput, err := decodeInput(c)
+	if err != nil {
+		ErrorAndExit("failed to decode input", err)
+	}
+
+	encoder := codec.NewThriftRWEncoder()
+	// this is an inconsistency in the code base, some place use ThriftRWEncoder(version0Thriftrw.go) some use thriftEncoder(thrift_encoder.go)
+	dataWithPrepend := []byte{0x59}
+	dataWithPrepend = append(dataWithPrepend, dataInput...)
+	datas := [][]byte{dataInput, dataWithPrepend}
+
+	found := false
+	for _, data := range datas {
+		for typeName, t := range decodingTypes {
+			err = encoder.Decode(data, t)
+			if err == nil {
+				// encoding back to confirm
+				data2, err := encoder.Encode(t)
+				if err != nil {
+					ErrorAndExit("cannot encode back to confirm", err)
+				}
+				if bytes.Equal(data, data2) {
+					fmt.Printf("======= Decode into type %v ========\n", typeName)
+					spew.Dump(t)
+					// json-ify it for easier mechanical use
+					js, err := json.Marshal(t)
+					if err == nil {
+						fmt.Println("======= As JSON ========")
+						fmt.Println(string(js))
+					}
+					found = true
+				}
+			}
+		}
+	}
+
+	if !found {
+		ErrorAndExit("input data cannot be decoded into any struct", nil)
+	}
+}
+
+func decodeInput(c *cli.Context) ([]byte, error) {
+	input := getRequiredOption(c, FlagInput)
+	encoding := c.String(FlagInputEncoding)
+
+	switch encoding {
+	case "", "hex":
+		return hex.DecodeString(input)
+	case "base64":
+		return base64.StdEncoding.DecodeString(input)
+	}
+
+	return nil, fmt.Errorf("unknown input encoding: %s", encoding)
+}
 
 // AdminDBClean is the command to clean up unhealthy executions.
 // Input is a JSON stream provided via STDIN or a file.
@@ -114,29 +174,14 @@ func fixExecution(
 	invariants []executions.InvariantFactory,
 	execution *store.ScanOutputEntity,
 ) invariant.ManagerFixResult {
-	client, session := connectToCassandra(c)
-	defer session.Close()
-	logger := loggerimpl.NewNopLogger()
+	execManager := initializeExecutionStore(c, execution.Execution.(entity.Entity).GetShardID())
+	defer execManager.Close()
 
-	execStore, err := cassandra.NewWorkflowExecutionPersistence(
-		execution.Execution.(entity.Entity).GetShardID(),
-		client,
-		session,
-		logger,
-	)
-
-	if err != nil {
-		ErrorAndExit("Failed to get execution store", err)
-	}
-
-	historyV2Mgr := persistence.NewHistoryV2ManagerImpl(
-		cassandra.NewHistoryV2PersistenceFromSession(client, session, logger),
-		logger,
-		dynamicconfig.GetIntPropertyFn(common.DefaultTransactionSizeLimit),
-	)
+	historyV2Mgr := initializeHistoryManager(c)
+	defer historyV2Mgr.Close()
 
 	pr := persistence.NewPersistenceRetryer(
-		persistence.NewExecutionManagerImpl(execStore, logger),
+		execManager,
 		historyV2Mgr,
 		common.CreatePersistenceRetryPolicy(),
 	)
@@ -144,7 +189,7 @@ func fixExecution(
 	var ivs []invariant.Invariant
 
 	for _, fn := range invariants {
-		ivs = append(ivs, fn(pr))
+		ivs = append(ivs, fn(pr, cache.NewNoOpDomainCache()))
 	}
 
 	ctx, cancel := newContext(c)

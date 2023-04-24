@@ -23,7 +23,7 @@
 package filestore
 
 import (
-	"io/ioutil"
+	"context"
 	"os"
 	"testing"
 
@@ -57,15 +57,14 @@ func (s *ClientSuite) TestNewFilestoreClient_InvalidConfig() {
 }
 
 func (s *ClientSuite) TestNewFilestoreClient_DirectoryAlreadyExists() {
-	name := s.createTempDir("TestNewFilestoreClient_DirectoryAlreadyExists")
-	defer os.RemoveAll(name)
+	name := s.T().TempDir()
 	c, err := NewFilestoreClient(&config.FileBlobstore{OutputDirectory: name})
 	s.NoError(err)
 	s.Equal(name, c.(*client).outputDirectory)
 }
 
 func (s *ClientSuite) TestNewFilestoreClient_DirectoryNotAlreadyExists() {
-	name := s.createTempDir("TestNewFilestoreClient_DirectoryNotAlreadyExists")
+	name := s.T().TempDir()
 	os.RemoveAll(name)
 	exists, err := util.DirectoryExists(name)
 	s.NoError(err)
@@ -80,10 +79,10 @@ func (s *ClientSuite) TestNewFilestoreClient_DirectoryNotAlreadyExists() {
 }
 
 func (s *ClientSuite) TestCrudOperations() {
-	name := s.createTempDir("TestCrudOperations")
-	defer os.RemoveAll(name)
+	name := s.T().TempDir()
 	c, err := NewFilestoreClient(&config.FileBlobstore{OutputDirectory: name})
 	s.NoError(err)
+	ctx := context.Background()
 
 	// put three blobs in blobstore
 	key1 := uuid.New()
@@ -101,60 +100,54 @@ func (s *ClientSuite) TestCrudOperations() {
 		Tags: map[string]string{"key1": "value1", "key2": "value2"},
 		Body: []byte{1, 2, 3, 4, 5},
 	}
-	_, err = c.Put(nil, &blobstore.PutRequest{
+	_, err = c.Put(ctx, &blobstore.PutRequest{
 		Key:  key1,
 		Blob: blob1,
 	})
 	s.NoError(err)
-	_, err = c.Put(nil, &blobstore.PutRequest{
+	_, err = c.Put(ctx, &blobstore.PutRequest{
 		Key:  key2,
 		Blob: blob2,
 	})
 	s.NoError(err)
-	_, err = c.Put(nil, &blobstore.PutRequest{
+	_, err = c.Put(ctx, &blobstore.PutRequest{
 		Key:  key3,
 		Blob: blob3,
 	})
 	s.NoError(err)
 
 	// get the blobs back
-	get1, err := c.Get(nil, &blobstore.GetRequest{Key: key1})
+	get1, err := c.Get(ctx, &blobstore.GetRequest{Key: key1})
 	s.NoError(err)
 	s.Nil(get1.Blob.Tags)
 	s.Equal([]byte{1, 2, 3}, get1.Blob.Body)
-	get2, err := c.Get(nil, &blobstore.GetRequest{Key: key2})
+	get2, err := c.Get(ctx, &blobstore.GetRequest{Key: key2})
 	s.NoError(err)
 	s.Equal(map[string]string{"key1": "value1"}, get2.Blob.Tags)
 	s.Empty(get2.Blob.Body)
-	get3, err := c.Get(nil, &blobstore.GetRequest{Key: key3})
+	get3, err := c.Get(ctx, &blobstore.GetRequest{Key: key3})
 	s.NoError(err)
 	s.Equal(map[string]string{"key1": "value1", "key2": "value2"}, get3.Blob.Tags)
 	s.Equal([]byte{1, 2, 3, 4, 5}, get3.Blob.Body)
 
 	// confirm all the blobs exist
-	exists1, err := c.Exists(nil, &blobstore.ExistsRequest{Key: key1})
+	exists1, err := c.Exists(ctx, &blobstore.ExistsRequest{Key: key1})
 	s.NoError(err)
 	s.True(exists1.Exists)
-	exists2, err := c.Exists(nil, &blobstore.ExistsRequest{Key: key2})
+	exists2, err := c.Exists(ctx, &blobstore.ExistsRequest{Key: key2})
 	s.NoError(err)
 	s.True(exists2.Exists)
-	exists3, err := c.Exists(nil, &blobstore.ExistsRequest{Key: key3})
+	exists3, err := c.Exists(ctx, &blobstore.ExistsRequest{Key: key3})
 	s.NoError(err)
 	s.True(exists3.Exists)
 
 	// delete a blob and confirm no longer can get and that no longer exists
-	_, err = c.Delete(nil, &blobstore.DeleteRequest{Key: key1})
+	_, err = c.Delete(ctx, &blobstore.DeleteRequest{Key: key1})
 	s.NoError(err)
-	exists1, err = c.Exists(nil, &blobstore.ExistsRequest{Key: key1})
+	exists1, err = c.Exists(ctx, &blobstore.ExistsRequest{Key: key1})
 	s.NoError(err)
 	s.False(exists1.Exists)
-	get1, err = c.Get(nil, &blobstore.GetRequest{Key: key1})
+	get1, err = c.Get(ctx, &blobstore.GetRequest{Key: key1})
 	s.Error(err)
 	s.Nil(get1)
-}
-
-func (s *ClientSuite) createTempDir(prefix string) string {
-	name, err := ioutil.TempDir("", prefix)
-	s.NoError(err)
-	return name
 }

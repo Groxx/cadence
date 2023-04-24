@@ -21,10 +21,15 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/fatih/color"
+	"github.com/pborman/uuid"
 	"github.com/urfave/cli"
+
+	"github.com/uber/cadence/common"
+	"github.com/uber/cadence/service/worker/failovermanager"
 
 	"github.com/uber/cadence/common/types"
 )
@@ -59,7 +64,7 @@ func AdminAddSearchAttribute(c *cli.Context) {
 	if err != nil {
 		ErrorAndExit("Add search attribute failed.", err)
 	}
-	fmt.Println("Success")
+	fmt.Println("Success. Note that for a multil-node Cadence cluster, DynamicConfig MUST be updated separately to whitelist the new attributes.")
 }
 
 // AdminDescribeCluster is used to dump information about the cluster
@@ -74,6 +79,59 @@ func AdminDescribeCluster(c *cli.Context) {
 	}
 
 	prettyPrintJSONObject(response)
+}
+
+func AdminRebalanceStart(c *cli.Context) {
+	client := getCadenceClient(c)
+	tcCtx, cancel := newContext(c)
+	defer cancel()
+
+	workflowID := failovermanager.RebalanceWorkflowID
+	rbParams := &failovermanager.RebalanceParams{
+		BatchFailoverSize:              100,
+		BatchFailoverWaitTimeInSeconds: 10,
+	}
+	input, err := json.Marshal(rbParams)
+	if err != nil {
+		ErrorAndExit("Failed to serialize params for failover workflow", err)
+	}
+	memo, err := getWorkflowMemo(map[string]interface{}{
+		common.MemoKeyForOperator: getOperator(),
+	})
+	if err != nil {
+		ErrorAndExit("Failed to serialize memo", err)
+	}
+	request := &types.StartWorkflowExecutionRequest{
+		Domain:                              common.SystemLocalDomainName,
+		WorkflowID:                          workflowID,
+		RequestID:                           uuid.New(),
+		Identity:                            getCliIdentity(),
+		WorkflowIDReusePolicy:               types.WorkflowIDReusePolicyAllowDuplicate.Ptr(),
+		ExecutionStartToCloseTimeoutSeconds: common.Int32Ptr(60),
+		TaskStartToCloseTimeoutSeconds:      common.Int32Ptr(int32(defaultDecisionTimeoutInSeconds)),
+		Input:                               input,
+		TaskList: &types.TaskList{
+			Name: failovermanager.TaskListName,
+		},
+		Memo: memo,
+		WorkflowType: &types.WorkflowType{
+			Name: failovermanager.RebalanceWorkflowTypeName,
+		},
+	}
+
+	resp, err := client.StartWorkflowExecution(tcCtx, request)
+	if err != nil {
+		ErrorAndExit("Failed to start failover workflow", err)
+	}
+	fmt.Println("Rebalance workflow started")
+	fmt.Println("wid: " + workflowID)
+	fmt.Println("rid: " + resp.GetRunID())
+}
+
+func AdminRebalanceList(c *cli.Context) {
+	c.Set(FlagWorkflowID, failovermanager.RebalanceWorkflowID)
+	c.GlobalSet(FlagDomain, common.SystemLocalDomainName)
+	ListWorkflow(c)
 }
 
 func intValTypeToString(valType int) string {

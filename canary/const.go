@@ -35,12 +35,22 @@ const (
 	activityTaskTimeout           = 3 * time.Minute
 	childWorkflowTimeout          = 6 * time.Minute
 	taskListName                  = "canary-task-queue"
-	ctxKeyActivityRuntime         = "runtime"
-	ctxKeyActivityArchivalRuntime = "runtime-archival"
-	ctxKeyActivitySystemClient    = "system-client"
+	crossClusterSrcTasklist       = "cross-cluster-src-tasklist"
+	crossClusterDestTasklist      = "cross-cluster-dest-tasklist"
+	ctxKeyActivityRuntime         = contextKey("runtime")
+	ctxKeyActivityArchivalRuntime = contextKey("runtime-archival")
+	ctxKeyActivitySystemClient    = contextKey("system-client")
+	ctxKeyActivityBatcherClient   = contextKey("batcher-client")
+	ctxKeyConfig                  = contextKey("runtime-config")
 	archivalDomain                = "canary-archival-domain"
-	systemDomain                  = "cadence-system"
 	archivalTaskListName          = "canary-archival-task-queue"
+)
+
+// canary running modes
+const (
+	ModeAll        = "all"
+	ModeWorker     = "worker"
+	ModeCronCanary = "cronCanary"
 )
 
 // workflowVersion represents the current version of every single
@@ -50,11 +60,6 @@ const (
 // also see beingWorkflow function
 const workflowVersion = workflow.Version(3)
 const workflowChangeID = "initial version"
-
-const (
-	cronJobTimeout         = 9 * time.Minute
-	cronWFExecutionTimeout = 18 * time.Minute
-)
 
 // wfType/activityType refers to the friendly short names given to
 // workflows and activities - at the time of registration, these names
@@ -80,28 +85,32 @@ const (
 	wfTypeVisibilityArchival   = "workflow.archival.visibility"
 	wfTypeArchivalExternal     = "workflow.archival.external"
 	wfTypeBatch                = "workflow.batch"
+	wfTypeCrossClusterParent   = "workflow.CrossCluster.parent"
+	wfTypeCrossClusterChild    = "workflow.CrossCluster.child"
 	wfTypeBatchParent          = "workflow.batch.parent"
 	wfTypeBatchChild           = "workflow.batch.child"
 
-	activityTypeEcho               = "activity.echo"
-	activityTypeCron               = "activity.cron"
-	activityTypeSignal             = "activity.signal"
-	activityTypeVisibility         = "activity.visibility"
-	activityTypeSearchAttributes   = "activity.searchAttributes"
-	activityTypeConcurrentExec     = "activity.concurrent-execution"
-	activityTypeQuery1             = "activity.query1"
-	activityTypeQuery2             = "activity.query2"
-	activityTypeTimeout            = "activity.timeout"
-	activityTypeCancellation       = "activity.cancellation"
-	activityTypeCancellationChild  = "activity.cancellation.child"
-	activityTypeRetryOnTimeout     = "activity.retry-on-timeout"
-	activityTypeRetryOnFailure     = "activity.retry-on-failure"
-	activityTypeTriggerReset       = "activity.reset.trigger"
-	activityTypeVerifyReset        = "activity.reset.verify"
-	activityTypeResetBase          = "activity.reset.base"
-	activityTypeHistoryArchival    = "activity.archival.history"
-	activityTypeVisibilityArchival = "activity.archival.visibility"
-	activityTypeLargeResult        = "activity.largeResult"
-	activityTypeVerifyBatch        = "activity.batch.verify"
-	activityTypeStartBatch         = "activity.batch.start.batch"
+	activityTypeEcho                 = "activity.echo"
+	activityTypeCron                 = "activity.cron"
+	activityTypeSignal               = "activity.signal"
+	activityTypeVisibility           = "activity.visibility"
+	activityTypeSearchAttributes     = "activity.searchAttributes"
+	activityTypeConcurrentExec       = "activity.concurrent-execution"
+	activityTypeQuery1               = "activity.query1"
+	activityTypeQuery2               = "activity.query2"
+	activityTypeTimeout              = "activity.timeout"
+	activityTypeCancellation         = "activity.cancellation"
+	activityTypeCancellationChild    = "activity.cancellation.child"
+	activityTypeRetryOnTimeout       = "activity.retry-on-timeout"
+	activityTypeRetryOnFailure       = "activity.retry-on-failure"
+	activityTypeTriggerReset         = "activity.reset.trigger"
+	activityTypeVerifyReset          = "activity.reset.verify"
+	activityTypeResetBase            = "activity.reset.base"
+	activityTypeHistoryArchival      = "activity.archival.history"
+	activityTypeVisibilityArchival   = "activity.archival.visibility"
+	activityTypeLargeResult          = "activity.largeResult"
+	activityTypeVerifyBatch          = "activity.batch.verify"
+	activityTypeStartBatch           = "activity.batch.start.batch"
+	activityTypeCrossCluster         = "activity.crosscluster.sample"
+	activityTypeCrossClusterFailover = "activity.crosscluster.failover"
 )

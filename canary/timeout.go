@@ -43,7 +43,9 @@ func init() {
 }
 
 // timeoutWorkflow is the workflow implementation to test for querying workflow status
-func timeoutWorkflow(ctx workflow.Context, scheduledTimeNanos int64, domain string) error {
+func timeoutWorkflow(ctx workflow.Context, inputScheduledTimeNanos int64) error {
+	scheduledTimeNanos := getScheduledTimeFromInputIfNonZero(ctx, inputScheduledTimeNanos)
+
 	profile, err := beginWorkflow(ctx, wfTypeConcurrentExec, scheduledTimeNanos)
 	if err != nil {
 		return err
@@ -80,9 +82,7 @@ func timeoutActivity(ctx context.Context, scheduledTimeNanos int64) error {
 	defer recordActivityEnd(scope, sw, err)
 
 	timer := time.NewTimer(activityDelay)
-	select {
-	case <-timer.C:
-	}
+	<-timer.C
 	timer.Stop()
 
 	return nil

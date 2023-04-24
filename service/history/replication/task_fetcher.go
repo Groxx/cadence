@@ -18,8 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-//go:generate mockgen -package $GOPACKAGE -source $GOFILE -destination task_fetcher_mock.go  -self_package github.com/uber/cadence/service/history/replication
-
 package replication
 
 import (
@@ -38,6 +36,8 @@ import (
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/service/history/config"
 )
+
+// TODO: reuse the interface and implementation defined in history/task package
 
 const (
 	fetchTaskRequestTimeout = 60 * time.Second
@@ -93,24 +93,19 @@ func NewTaskFetchers(
 	clientBean client.Bean,
 ) TaskFetchers {
 
-	var fetchers []TaskFetcher
-	for clusterName, info := range clusterMetadata.GetAllClusterInfo() {
-		if !info.Enabled {
-			continue
-		}
+	currentCluster := clusterMetadata.GetCurrentClusterName()
 
-		currentCluster := clusterMetadata.GetCurrentClusterName()
-		if clusterName != currentCluster {
-			remoteFrontendClient := clientBean.GetRemoteAdminClient(clusterName)
-			fetcher := newReplicationTaskFetcher(
-				logger,
-				clusterName,
-				currentCluster,
-				config,
-				remoteFrontendClient,
-			)
-			fetchers = append(fetchers, fetcher)
-		}
+	var fetchers []TaskFetcher
+	for clusterName := range clusterMetadata.GetRemoteClusterInfo() {
+		remoteFrontendClient := clientBean.GetRemoteAdminClient(clusterName)
+		fetcher := newReplicationTaskFetcher(
+			logger,
+			clusterName,
+			currentCluster,
+			config,
+			remoteFrontendClient,
+		)
+		fetchers = append(fetchers, fetcher)
 	}
 
 	return &taskFetchersImpl{
@@ -165,11 +160,9 @@ func newReplicationTaskFetcher(
 		remotePeer:     sourceFrontend,
 		currentCluster: currentCluster,
 		sourceCluster:  sourceCluster,
-		rateLimiter: quotas.NewDynamicRateLimiter(func() float64 {
-			return config.ReplicationTaskProcessorHostQPS()
-		}),
-		requestChan: make(chan *request, requestChanBufferSize),
-		done:        make(chan struct{}),
+		rateLimiter:    quotas.NewDynamicRateLimiter(config.ReplicationTaskProcessorHostQPS.AsFloat64()),
+		requestChan:    make(chan *request, requestChanBufferSize),
+		done:           make(chan struct{}),
 	}
 }
 
@@ -213,7 +206,7 @@ func (f *taskFetcherImpl) fetchTasks() {
 				// and replication task processor is per shard
 				// during shard movement, duplicated requests can appear
 				// if shard moved from this host, to this host.
-				f.logger.Error("Get replication task request already exist for shard.")
+				f.logger.Error("Get replication task request already exist for shard.", tag.ShardID(int(request.token.GetShardID())))
 				close(req.respChan)
 			}
 			requestByShard[request.token.GetShardID()] = request
@@ -224,7 +217,7 @@ func (f *taskFetcherImpl) fetchTasks() {
 			if err != nil {
 				if _, ok := err.(*types.ServiceBusyError); ok {
 					// slow down replication when source cluster is busy
-					timer.Reset(f.config.ReplicationTaskFetcherErrorRetryWait())
+					timer.Reset(f.config.ReplicationTaskFetcherServiceBusyWait())
 				} else {
 					timer.Reset(backoff.JitDuration(
 						f.config.ReplicationTaskFetcherErrorRetryWait(),
@@ -288,12 +281,10 @@ func (f *taskFetcherImpl) getMessages(
 	}
 	response, err := f.remotePeer.GetReplicationMessages(ctx, request)
 	if err != nil {
-		if _, ok := err.(*types.ServiceBusyError); !ok {
-			return nil, err
-		}
+		return nil, err
 	}
 
-	return response.GetMessagesByShard(), err
+	return response.GetMessagesByShard(), nil
 }
 
 // GetSourceCluster returns the source cluster for the fetcher

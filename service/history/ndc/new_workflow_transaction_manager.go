@@ -29,6 +29,7 @@ import (
 
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/types"
+	"github.com/uber/cadence/service/history/events"
 	"github.com/uber/cadence/service/history/execution"
 )
 
@@ -157,10 +158,20 @@ func (r *transactionManagerForNewWorkflowImpl) createAsCurrent(
 		return err
 	}
 
-	targetWorkflowHistorySize, err := targetWorkflow.GetContext().PersistFirstWorkflowEvents(
-		ctx,
-		targetWorkflowEventsSeq[0],
-	)
+	var targetWorkflowHistoryBlob events.PersistedBlob
+	if len(targetWorkflowEventsSeq[0].Events) > 0 {
+		if targetWorkflowEventsSeq[0].Events[0].GetEventType() == types.EventTypeWorkflowExecutionStarted {
+			targetWorkflowHistoryBlob, err = targetWorkflow.GetContext().PersistStartWorkflowBatchEvents(
+				ctx,
+				targetWorkflowEventsSeq[0],
+			)
+		} else { // reset workflows fall into else branch
+			targetWorkflowHistoryBlob, err = targetWorkflow.GetContext().PersistNonStartWorkflowBatchEvents(
+				ctx,
+				targetWorkflowEventsSeq[0],
+			)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -177,8 +188,7 @@ func (r *transactionManagerForNewWorkflowImpl) createAsCurrent(
 		return targetWorkflow.GetContext().CreateWorkflowExecution(
 			ctx,
 			targetWorkflowSnapshot,
-			targetWorkflowHistorySize,
-			now,
+			targetWorkflowHistoryBlob,
 			createMode,
 			prevRunID,
 			prevLastWriteVersion,
@@ -192,8 +202,7 @@ func (r *transactionManagerForNewWorkflowImpl) createAsCurrent(
 	return targetWorkflow.GetContext().CreateWorkflowExecution(
 		ctx,
 		targetWorkflowSnapshot,
-		targetWorkflowHistorySize,
-		now,
+		targetWorkflowHistoryBlob,
 		createMode,
 		prevRunID,
 		prevLastWriteVersion,
@@ -227,10 +236,20 @@ func (r *transactionManagerForNewWorkflowImpl) createAsZombie(
 		return err
 	}
 
-	targetWorkflowHistorySize, err := targetWorkflow.GetContext().PersistFirstWorkflowEvents(
-		ctx,
-		targetWorkflowEventsSeq[0],
-	)
+	var targetWorkflowHistoryBlob events.PersistedBlob
+	if len(targetWorkflowEventsSeq[0].Events) > 0 {
+		if targetWorkflowEventsSeq[0].Events[0].GetEventType() == types.EventTypeWorkflowExecutionStarted {
+			targetWorkflowHistoryBlob, err = targetWorkflow.GetContext().PersistStartWorkflowBatchEvents(
+				ctx,
+				targetWorkflowEventsSeq[0],
+			)
+		} else { // reset workflows fall into else branch
+			targetWorkflowHistoryBlob, err = targetWorkflow.GetContext().PersistNonStartWorkflowBatchEvents(
+				ctx,
+				targetWorkflowEventsSeq[0],
+			)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -253,8 +272,7 @@ func (r *transactionManagerForNewWorkflowImpl) createAsZombie(
 	err = targetWorkflow.GetContext().CreateWorkflowExecution(
 		ctx,
 		targetWorkflowSnapshot,
-		targetWorkflowHistorySize,
-		now,
+		targetWorkflowHistoryBlob,
 		createMode,
 		prevRunID,
 		prevLastWriteVersion,

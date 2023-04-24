@@ -21,12 +21,48 @@
 package execution
 
 import (
+	"strconv"
 	"time"
 
+	"github.com/uber/cadence/common"
+
+	"github.com/uber/cadence/common/log"
+	"github.com/uber/cadence/common/log/tag"
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/types"
 )
+
+func (c *contextImpl) emitLargeWorkflowShardIDStats(blobSize int64, oldHistoryCount int64, oldHistorySize int64, newHistoryCount int64) {
+	if c.shard.GetConfig().EnableShardIDMetrics() {
+		shardIDStr := strconv.Itoa(c.shard.GetShardID())
+
+		blobSizeWarn := common.MinInt64(int64(c.shard.GetConfig().LargeShardHistoryBlobMetricThreshold()), int64(c.shard.GetConfig().BlobSizeLimitWarn(c.GetDomainName())))
+		// check if blob size is larger than threshold in Dynamic config if so alert on it every time
+		if blobSize > blobSizeWarn {
+			c.logger.SampleInfo("Workflow writing a large blob", c.shard.GetConfig().SampleLoggingRate(), tag.WorkflowDomainName(c.GetDomainName()),
+				tag.WorkflowID(c.workflowExecution.GetWorkflowID()), tag.ShardID(c.shard.GetShardID()), tag.WorkflowRunID(c.workflowExecution.GetRunID()))
+			c.metricsClient.Scope(metrics.LargeExecutionBlobShardScope, metrics.ShardIDTag(shardIDStr)).IncCounter(metrics.LargeHistoryBlobCount)
+		}
+
+		historyCountWarn := common.MinInt64(int64(c.shard.GetConfig().LargeShardHistoryEventMetricThreshold()), int64(c.shard.GetConfig().HistoryCountLimitWarn(c.GetDomainName())))
+		// check if the new history count is greater than our threshold and only count/log it once when it passes it
+		// this seems to double count and I can't figure out why but should be ok to get a rough idea and identify bad actors
+		if oldHistoryCount < historyCountWarn && newHistoryCount >= historyCountWarn {
+			c.logger.Warn("Workflow history event count is reaching dangerous levels", tag.WorkflowDomainName(c.GetDomainName()),
+				tag.WorkflowID(c.workflowExecution.GetWorkflowID()), tag.ShardID(c.shard.GetShardID()), tag.WorkflowRunID(c.workflowExecution.GetRunID()))
+			c.metricsClient.Scope(metrics.LargeExecutionCountShardScope, metrics.ShardIDTag(shardIDStr)).IncCounter(metrics.LargeHistoryEventCount)
+		}
+
+		historySizeWarn := common.MinInt64(int64(c.shard.GetConfig().LargeShardHistorySizeMetricThreshold()), int64(c.shard.GetConfig().HistorySizeLimitWarn(c.GetDomainName())))
+		// check if the new history size is greater than our threshold and only count/log it once when it passes it
+		if oldHistorySize < historySizeWarn && c.stats.HistorySize >= historySizeWarn {
+			c.logger.Warn("Workflow history event size is reaching dangerous levels", tag.WorkflowDomainName(c.GetDomainName()),
+				tag.WorkflowID(c.workflowExecution.GetWorkflowID()), tag.ShardID(c.shard.GetShardID()), tag.WorkflowRunID(c.workflowExecution.GetRunID()))
+			c.metricsClient.Scope(metrics.LargeExecutionSizeShardScope, metrics.ShardIDTag(shardIDStr)).IncCounter(metrics.LargeHistorySizeCount)
+		}
+	}
+}
 
 func emitWorkflowHistoryStats(
 	metricsClient metrics.Client,
@@ -106,13 +142,17 @@ func emitSessionUpdateStats(
 	countScope.RecordTimer(metrics.DeleteRequestCancelInfoCount, time.Duration(stats.DeleteRequestCancelInfoCount))
 	countScope.RecordTimer(metrics.TransferTasksCount, time.Duration(stats.TransferTasksCount))
 	countScope.RecordTimer(metrics.TimerTasksCount, time.Duration(stats.TimerTasksCount))
+	countScope.RecordTimer(metrics.CrossClusterTasksCount, time.Duration(stats.CrossClusterTaskCount))
 	countScope.RecordTimer(metrics.ReplicationTasksCount, time.Duration(stats.ReplicationTasksCount))
 }
 
 func emitWorkflowCompletionStats(
 	metricsClient metrics.Client,
+	logger log.Logger,
 	domainName string,
 	workflowType string,
+	workflowID string,
+	runID string,
 	taskList string,
 	event *types.HistoryEvent,
 ) {
@@ -137,7 +177,27 @@ func emitWorkflowCompletionStats(
 		scope.IncCounter(metrics.WorkflowFailedCount)
 	case types.EventTypeWorkflowExecutionTimedOut:
 		scope.IncCounter(metrics.WorkflowTimeoutCount)
+		logger.Info("workflow execution timed out",
+			tag.WorkflowID(workflowID),
+			tag.WorkflowRunID(runID),
+			tag.WorkflowDomainName(domainName),
+		)
 	case types.EventTypeWorkflowExecutionTerminated:
 		scope.IncCounter(metrics.WorkflowTerminateCount)
+		logger.Info("workflow terminated",
+			tag.WorkflowID(workflowID),
+			tag.WorkflowRunID(runID),
+			tag.WorkflowDomainName(domainName),
+		)
+	case types.EventTypeWorkflowExecutionContinuedAsNew:
+		scope.IncCounter(metrics.WorkflowContinuedAsNew)
+	default:
+		scope.IncCounter(metrics.WorkflowCompletedUnknownType)
+		logger.Warn("Workflow completed with an unknown event type",
+			tag.WorkflowEventType(event.EventType.String()),
+			tag.WorkflowID(workflowID),
+			tag.WorkflowRunID(runID),
+			tag.WorkflowDomainName(domainName),
+		)
 	}
 }

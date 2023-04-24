@@ -48,6 +48,7 @@ func CurrentExecution(
 	req := persistence.GetCurrentExecutionRequest{
 		DomainID:   request.DomainID,
 		WorkflowID: request.WorkflowID,
+		DomainName: request.DomainName,
 	}
 	e, err := retryer.GetCurrentExecution(ctx, &req)
 	if err != nil {
@@ -81,7 +82,7 @@ func getCurrentExecution(
 		if err != nil {
 			return pagination.Page{}, err
 		}
-		executions := make([]pagination.Entity, len(resp.Executions), len(resp.Executions))
+		executions := make([]pagination.Entity, len(resp.Executions))
 		for i, e := range resp.Executions {
 			currentExec := &entity.CurrentExecution{
 				CurrentRunID: e.CurrentRunID,

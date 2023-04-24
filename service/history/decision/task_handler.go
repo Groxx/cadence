@@ -71,6 +71,8 @@ type (
 		domainCache   cache.DomainCache
 		metricsClient metrics.Client
 		config        *config.Config
+
+		activityCountToDispatch int
 	}
 
 	decisionResult struct {
@@ -117,6 +119,8 @@ func newDecisionTaskHandler(
 		domainCache:   domainCache,
 		metricsClient: metricsClient,
 		config:        config,
+
+		activityCountToDispatch: config.MaxActivityCountDispatchByDomain(domainEntry.GetInfo().Name),
 	}
 }
 
@@ -134,7 +138,6 @@ func (handler *taskHandlerImpl) handleDecisions(
 
 	var results []*decisionResult
 	for _, decision := range decisions {
-
 		result, err := handler.handleDecisionWithResult(ctx, decision)
 		if err != nil || handler.stopProcessing {
 			return nil, err
@@ -210,12 +213,10 @@ func (handler *taskHandlerImpl) handleDecisionScheduleActivity(
 	ctx context.Context,
 	attr *types.ScheduleActivityTaskDecisionAttributes,
 ) (*decisionResult, error) {
-
 	handler.metricsClient.IncCounter(
 		metrics.HistoryRespondDecisionTaskCompletedScope,
 		metrics.DecisionTypeScheduleActivityCounter,
 	)
-
 	executionInfo := handler.mutableState.GetExecutionInfo()
 	domainID := executionInfo.DomainID
 	targetDomainID := domainID
@@ -236,6 +237,7 @@ func (handler *taskHandlerImpl) handleDecisionScheduleActivity(
 				targetDomainID,
 				attr,
 				executionInfo.WorkflowTimeout,
+				metrics.HistoryRespondDecisionTaskCompletedScope,
 			)
 		},
 		types.DecisionTaskFailedCauseBadScheduleActivityAttributes,
@@ -253,12 +255,19 @@ func (handler *taskHandlerImpl) handleDecisionScheduleActivity(
 		return nil, err
 	}
 
-	event, ai, activityDispatchInfo, err := handler.mutableState.AddActivityTaskScheduledEvent(handler.decisionTaskCompletedID, attr)
+	event, ai, activityDispatchInfo, dispatched, started, err := handler.mutableState.AddActivityTaskScheduledEvent(
+		ctx, handler.decisionTaskCompletedID, attr, handler.activityCountToDispatch > 0)
+	if dispatched {
+		handler.activityCountToDispatch--
+	}
 	switch err.(type) {
 	case nil:
-		if activityDispatchInfo != nil {
-			if _, err1 := handler.mutableState.AddActivityTaskStartedEvent(ai, event.GetEventID(), uuid.New(), handler.identity); err1 != nil {
+		if activityDispatchInfo != nil || started {
+			if _, err1 := handler.mutableState.AddActivityTaskStartedEvent(ai, event.ID, uuid.New(), handler.identity); err1 != nil {
 				return nil, err1
+			}
+			if started {
+				return nil, nil
 			}
 			token := &common.TaskToken{
 				DomainID:        executionInfo.DomainID,
@@ -301,7 +310,10 @@ func (handler *taskHandlerImpl) handleDecisionRequestCancelActivity(
 
 	if err := handler.validateDecisionAttr(
 		func() error {
-			return handler.attrValidator.validateActivityCancelAttributes(attr)
+			return handler.attrValidator.validateActivityCancelAttributes(
+				attr,
+				metrics.HistoryRespondDecisionTaskCompletedScope,
+				handler.domainEntry.GetInfo().Name)
 		},
 		types.DecisionTaskFailedCauseBadRequestCancelActivityAttributes,
 	); err != nil || handler.stopProcessing {
@@ -322,7 +334,7 @@ func (handler *taskHandlerImpl) handleDecisionRequestCancelActivity(
 			_, err = handler.mutableState.AddActivityTaskCanceledEvent(
 				ai.ScheduleID,
 				ai.StartedID,
-				actCancelReqEvent.GetEventID(),
+				actCancelReqEvent.ID,
 				[]byte(activityCancellationMsgActivityNotStarted),
 				handler.identity,
 			)
@@ -356,7 +368,10 @@ func (handler *taskHandlerImpl) handleDecisionStartTimer(
 
 	if err := handler.validateDecisionAttr(
 		func() error {
-			return handler.attrValidator.validateTimerScheduleAttributes(attr)
+			return handler.attrValidator.validateTimerScheduleAttributes(
+				attr,
+				metrics.HistoryRespondDecisionTaskCompletedScope,
+				handler.domainEntry.GetInfo().Name)
 		},
 		types.DecisionTaskFailedCauseBadStartTimerAttributes,
 	); err != nil || handler.stopProcessing {
@@ -387,7 +402,10 @@ func (handler *taskHandlerImpl) handleDecisionCompleteWorkflow(
 	)
 
 	if handler.hasUnhandledEventsBeforeDecisions {
-		return handler.handlerFailDecision(types.DecisionTaskFailedCauseUnhandledDecision, "")
+		return handler.handlerFailDecision(
+			types.DecisionTaskFailedCauseUnhandledDecision,
+			"cannot complete workflow, new pending decisions were scheduled while this decision was processing",
+		)
 	}
 
 	if err := handler.validateDecisionAttr(
@@ -423,14 +441,17 @@ func (handler *taskHandlerImpl) handleDecisionCompleteWorkflow(
 		return nil
 	}
 
+	// event ID is not relevant
+	isCanceled, _ := handler.mutableState.IsCancelRequested()
+
 	// check if this is a cron workflow
 	cronBackoff, err := handler.mutableState.GetCronBackoffDuration(ctx)
 	if err != nil {
 		handler.stopProcessing = true
 		return err
 	}
-	if cronBackoff == backoff.NoBackoff {
-		// not cron, so complete this workflow execution
+	if isCanceled || cronBackoff == backoff.NoBackoff {
+		// canceled or not cron, so complete this workflow execution
 		if _, err := handler.mutableState.AddCompletedWorkflowEvent(handler.decisionTaskCompletedID, attr); err != nil {
 			return &types.InternalServiceError{Message: "Unable to add complete workflow event."}
 		}
@@ -465,7 +486,10 @@ func (handler *taskHandlerImpl) handleDecisionFailWorkflow(
 	)
 
 	if handler.hasUnhandledEventsBeforeDecisions {
-		return handler.handlerFailDecision(types.DecisionTaskFailedCauseUnhandledDecision, "")
+		return handler.handlerFailDecision(
+			types.DecisionTaskFailedCauseUnhandledDecision,
+			"cannot complete workflow, new pending decisions were scheduled while this decision was processing",
+		)
 	}
 
 	if err := handler.validateDecisionAttr(
@@ -498,6 +522,20 @@ func (handler *taskHandlerImpl) handleDecisionFailWorkflow(
 			tag.WorkflowDecisionType(int64(types.DecisionTypeFailWorkflowExecution)),
 			tag.ErrorTypeMultipleCompletionDecisions,
 		)
+		return nil
+	}
+
+	if is, _ := handler.mutableState.IsCancelRequested(); is {
+		// cancellation must be sticky, as it's telling things to stop.
+		// this is particularly important for child workflows, as if they restart themselves after the parent
+		// cancels its context, there is no way for the parent to cancel the new run.
+		cancelAttrs := types.CancelWorkflowExecutionDecisionAttributes{
+			// TODO: serialize reason somehow, may deserve a new field / wrapped errors
+			Details: attr.Details,
+		}
+		if _, err := handler.mutableState.AddWorkflowExecutionCanceledEvent(handler.decisionTaskCompletedID, &cancelAttrs); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -552,7 +590,10 @@ func (handler *taskHandlerImpl) handleDecisionCancelTimer(
 
 	if err := handler.validateDecisionAttr(
 		func() error {
-			return handler.attrValidator.validateTimerCancelAttributes(attr)
+			return handler.attrValidator.validateTimerCancelAttributes(
+				attr,
+				metrics.HistoryRespondDecisionTaskCompletedScope,
+				handler.domainEntry.GetInfo().Name)
 		},
 		types.DecisionTaskFailedCauseBadCancelTimerAttributes,
 	); err != nil || handler.stopProcessing {
@@ -592,7 +633,10 @@ func (handler *taskHandlerImpl) handleDecisionCancelWorkflow(
 		metrics.DecisionTypeCancelWorkflowCounter)
 
 	if handler.hasUnhandledEventsBeforeDecisions {
-		return handler.handlerFailDecision(types.DecisionTaskFailedCauseUnhandledDecision, "")
+		return handler.handlerFailDecision(
+			types.DecisionTaskFailedCauseUnhandledDecision,
+			"cannot process cancellation, new pending decisions were scheduled while this decision was processing",
+		)
 	}
 
 	if err := handler.validateDecisionAttr(
@@ -651,6 +695,7 @@ func (handler *taskHandlerImpl) handleDecisionRequestCancelExternalWorkflow(
 				domainID,
 				targetDomainID,
 				attr,
+				metrics.HistoryRespondDecisionTaskCompletedScope,
 			)
 		},
 		types.DecisionTaskFailedCauseBadRequestCancelExternalWorkflowExecutionAttributes,
@@ -677,7 +722,10 @@ func (handler *taskHandlerImpl) handleDecisionRecordMarker(
 
 	if err := handler.validateDecisionAttr(
 		func() error {
-			return handler.attrValidator.validateRecordMarkerAttributes(attr)
+			return handler.attrValidator.validateRecordMarkerAttributes(
+				attr,
+				metrics.HistoryRespondDecisionTaskCompletedScope,
+				handler.domainEntry.GetInfo().Name)
 		},
 		types.DecisionTaskFailedCauseBadRecordMarkerAttributes,
 	); err != nil || handler.stopProcessing {
@@ -709,7 +757,10 @@ func (handler *taskHandlerImpl) handleDecisionContinueAsNewWorkflow(
 	)
 
 	if handler.hasUnhandledEventsBeforeDecisions {
-		return handler.handlerFailDecision(types.DecisionTaskFailedCauseUnhandledDecision, "")
+		return handler.handlerFailDecision(
+			types.DecisionTaskFailedCauseUnhandledDecision,
+			"cannot complete workflow, new pending decisions were scheduled while this decision was processing",
+		)
 	}
 
 	executionInfo := handler.mutableState.GetExecutionInfo()
@@ -719,6 +770,8 @@ func (handler *taskHandlerImpl) handleDecisionContinueAsNewWorkflow(
 			return handler.attrValidator.validateContinueAsNewWorkflowExecutionAttributes(
 				attr,
 				executionInfo,
+				metrics.HistoryRespondDecisionTaskCompletedScope,
+				handler.domainEntry.GetInfo().Name,
 			)
 		},
 		types.DecisionTaskFailedCauseBadContinueAsNewAttributes,
@@ -747,6 +800,19 @@ func (handler *taskHandlerImpl) handleDecisionContinueAsNewWorkflow(
 			tag.WorkflowDecisionType(int64(types.DecisionTypeContinueAsNewWorkflowExecution)),
 			tag.ErrorTypeMultipleCompletionDecisions,
 		)
+		return nil
+	}
+
+	if is, _ := handler.mutableState.IsCancelRequested(); is {
+		// cancellation must be sticky, as it's telling things to stop.
+		// this is particularly important for child workflows, as if they restart themselves after the parent
+		// cancels its context, there is no way for the parent to cancel the new run.
+		cancelAttrs := types.CancelWorkflowExecutionDecisionAttributes{
+			Details: nil, // TODO: serialize continue-as-new data somehow, may deserve a new field
+		}
+		if _, err := handler.mutableState.AddWorkflowExecutionCanceledEvent(handler.decisionTaskCompletedID, &cancelAttrs); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -805,6 +871,7 @@ func (handler *taskHandlerImpl) handleDecisionStartChildWorkflow(
 				targetDomainID,
 				attr,
 				executionInfo,
+				metrics.HistoryRespondDecisionTaskCompletedScope,
 			)
 		},
 		types.DecisionTaskFailedCauseBadStartChildExecutionAttributes,
@@ -873,6 +940,7 @@ func (handler *taskHandlerImpl) handleDecisionSignalExternalWorkflow(
 				domainID,
 				targetDomainID,
 				attr,
+				metrics.HistoryRespondDecisionTaskCompletedScope,
 			)
 		},
 		types.DecisionTaskFailedCauseBadSignalWorkflowExecutionAttributes,
@@ -982,6 +1050,7 @@ func (handler *taskHandlerImpl) retryCronContinueAsNew(
 		Header:                              attr.Header,
 		Memo:                                attr.Memo,
 		SearchAttributes:                    attr.SearchAttributes,
+		JitterStartSeconds:                  attr.JitterStartSeconds,
 	}
 
 	_, newStateBuilder, err := handler.mutableState.AddContinueAsNewEvent(

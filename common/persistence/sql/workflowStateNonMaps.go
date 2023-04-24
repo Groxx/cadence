@@ -24,13 +24,11 @@ package sql
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	"github.com/uber/cadence/common"
 	p "github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/persistence/serialization"
 	"github.com/uber/cadence/common/persistence/sql/sqlplugin"
-	"github.com/uber/cadence/common/types"
 )
 
 func updateSignalsRequested(
@@ -56,23 +54,19 @@ func updateSignalsRequested(
 			}
 		}
 		if _, err := tx.InsertIntoSignalsRequestedSets(ctx, rows); err != nil {
-			return &types.InternalServiceError{
-				Message: fmt.Sprintf("Failed to update signals requested. Failed to execute update query. Error: %v", err),
-			}
+			return convertCommonErrors(tx, "updateSignalsRequested", "Failed to execute update query.", err)
 		}
 	}
 
-	for _, deldeleteSignalRequestID := range deleteSignalRequestIDs {
+	if len(deleteSignalRequestIDs) > 0 {
 		if _, err := tx.DeleteFromSignalsRequestedSets(ctx, &sqlplugin.SignalsRequestedSetsFilter{
 			ShardID:    int64(shardID),
 			DomainID:   domainID,
 			WorkflowID: workflowID,
 			RunID:      runID,
-			SignalID:   common.StringPtr(deldeleteSignalRequestID),
+			SignalIDs:  deleteSignalRequestIDs,
 		}); err != nil {
-			return &types.InternalServiceError{
-				Message: fmt.Sprintf("Failed to update signals requested. Failed to execute delete query. Error: %v", err),
-			}
+			return convertCommonErrors(tx, "updateSignalsRequested", "Failed to execute delete query.", err)
 		}
 	}
 
@@ -95,9 +89,7 @@ func getSignalsRequested(
 		RunID:      runID,
 	})
 	if err != nil && err != sql.ErrNoRows {
-		return nil, &types.InternalServiceError{
-			Message: fmt.Sprintf("Failed to get signals requested. Error: %v", err),
-		}
+		return nil, convertCommonErrors(db, "getSignalsRequested", "", err)
 	}
 	var ret = make(map[string]struct{})
 	for _, s := range rows {
@@ -121,9 +113,7 @@ func deleteSignalsRequestedSet(
 		WorkflowID: workflowID,
 		RunID:      runID,
 	}); err != nil {
-		return &types.InternalServiceError{
-			Message: fmt.Sprintf("Failed to delete signals requested set. Error: %v", err),
-		}
+		return convertCommonErrors(tx, "deleteSignalsRequestedSet", "", err)
 	}
 	return nil
 }
@@ -151,9 +141,7 @@ func updateBufferedEvents(
 	}
 
 	if _, err := tx.InsertIntoBufferedEvents(ctx, []sqlplugin.BufferedEventsRow{row}); err != nil {
-		return &types.InternalServiceError{
-			Message: fmt.Sprintf("updateBufferedEvents operation failed. Error: %v", err),
-		}
+		return convertCommonErrors(tx, "updateBufferedEvents", "", err)
 	}
 	return nil
 }
@@ -174,9 +162,7 @@ func getBufferedEvents(
 		RunID:      runID,
 	})
 	if err != nil && err != sql.ErrNoRows {
-		return nil, &types.InternalServiceError{
-			Message: fmt.Sprintf("getBufferedEvents operation failed. Select failed: %v", err),
-		}
+		return nil, convertCommonErrors(db, "getBufferedEvents", "", err)
 	}
 	var result []*p.DataBlob
 	for _, row := range rows {
@@ -200,9 +186,7 @@ func deleteBufferedEvents(
 		WorkflowID: workflowID,
 		RunID:      runID,
 	}); err != nil {
-		return &types.InternalServiceError{
-			Message: fmt.Sprintf("updateBufferedEvents delete operation failed. Error: %v", err),
-		}
+		return convertCommonErrors(tx, "deleteBufferedEvents", "", err)
 	}
 	return nil
 }

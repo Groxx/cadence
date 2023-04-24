@@ -20,7 +20,11 @@
 
 package config
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/uber/cadence/common"
+)
 
 const (
 	// StoreTypeSQL refers to sql based storage as persistence store
@@ -37,24 +41,154 @@ func (c *Persistence) DefaultStoreType() string {
 	return StoreTypeCassandra
 }
 
+// FillDefaults populates default values for unspecified fields in persistence config
+func (c *Persistence) FillDefaults() {
+	for k, store := range c.DataStores {
+		if store.Cassandra != nil && store.NoSQL == nil {
+			// for backward-compatibility
+			store.NoSQL = store.Cassandra
+			store.NoSQL.PluginName = "cassandra"
+		}
+
+		if store.SQL != nil {
+			// filling default encodingType/decodingTypes for SQL persistence
+			if store.SQL.EncodingType == "" {
+				store.SQL.EncodingType = string(common.EncodingTypeThriftRW)
+			}
+			if len(store.SQL.DecodingTypes) == 0 {
+				store.SQL.DecodingTypes = []string{
+					string(common.EncodingTypeThriftRW),
+				}
+			}
+
+			if store.SQL.NumShards == 0 {
+				store.SQL.NumShards = 1
+			}
+		}
+
+		// write changes back to DataStores, as ds is a value object
+		c.DataStores[k] = store
+	}
+}
+
 // Validate validates the persistence config
 func (c *Persistence) Validate() error {
-	stores := []string{c.DefaultStore, c.VisibilityStore}
-	for _, st := range stores {
+	dbStoreKeys := []string{c.DefaultStore}
+
+	useAdvancedVisibilityOnly := false
+	if _, ok := c.DataStores[c.VisibilityStore]; ok {
+		dbStoreKeys = append(dbStoreKeys, c.VisibilityStore)
+	} else {
+		if _, ok := c.DataStores[c.AdvancedVisibilityStore]; !ok {
+			return fmt.Errorf("must provide one of VisibilityStore and AdvancedVisibilityStore")
+		}
+		useAdvancedVisibilityOnly = true
+	}
+
+	for _, st := range dbStoreKeys {
 		ds, ok := c.DataStores[st]
 		if !ok {
 			return fmt.Errorf("persistence config: missing config for datastore %v", st)
 		}
-		if ds.SQL == nil && ds.Cassandra == nil {
-			return fmt.Errorf("persistence config: datastore %v: must provide config for one of cassandra or sql stores", st)
+		if ds.Cassandra != nil && ds.NoSQL != nil && ds.Cassandra != ds.NoSQL {
+			return fmt.Errorf("persistence config: datastore %v: only one of Cassandra or NoSQL can be specified", st)
 		}
-		if ds.SQL != nil && ds.Cassandra != nil {
-			return fmt.Errorf("persistence config: datastore %v: only one of SQL or cassandra can be specified", st)
+		configCount := 0
+		if ds.NoSQL != nil {
+			configCount++
 		}
-		if ds.SQL != nil && ds.SQL.NumShards == 0 {
-			ds.SQL.NumShards = 1
+		if ds.ShardedNoSQL != nil {
+			configCount++
+		}
+		if ds.SQL != nil {
+			configCount++
+		}
+		if configCount != 1 {
+			return fmt.Errorf("persistence config: datastore %v: must provide exactly one type of config, but provided %d", st, configCount)
+		}
+		if ds.SQL != nil {
+			if ds.SQL.UseMultipleDatabases {
+				if !useAdvancedVisibilityOnly {
+					return fmt.Errorf("sql persistence config: multipleSQLDatabases can only be used with advanced visibility only")
+				}
+				if ds.SQL.DatabaseName != "" {
+					return fmt.Errorf("sql persistence config: databaseName can only be configured in multipleDatabasesConfig when UseMultipleDatabases is true")
+				}
+				if ds.SQL.ConnectAddr != "" {
+					return fmt.Errorf("sql persistence config: connectAddr can only be configured in multipleDatabasesConfig when UseMultipleDatabases is true")
+				}
+				if ds.SQL.User != "" {
+					return fmt.Errorf("sql persistence config: user can only be configured in multipleDatabasesConfig when UseMultipleDatabases is true")
+				}
+				if ds.SQL.Password != "" {
+					return fmt.Errorf("sql persistence config: password can only be configured in multipleDatabasesConfig when UseMultipleDatabases is true")
+				}
+				if ds.SQL.NumShards <= 1 || len(ds.SQL.MultipleDatabasesConfig) != ds.SQL.NumShards {
+					return fmt.Errorf("sql persistence config: nShards must be greater than one and equal to the length of multipleDatabasesConfig")
+				}
+				for _, entry := range ds.SQL.MultipleDatabasesConfig {
+					if entry.DatabaseName == "" {
+						return fmt.Errorf("sql multipleDatabasesConfig persistence config: databaseName can not be empty")
+					}
+					if entry.ConnectAddr == "" {
+						return fmt.Errorf("sql multipleDatabasesConfig persistence config: connectAddr can not be empty")
+					}
+				}
+			} else {
+				if ds.SQL.DatabaseName == "" {
+					return fmt.Errorf("sql persistence config: databaseName can not be empty")
+				}
+				if ds.SQL.ConnectAddr == "" {
+					return fmt.Errorf("sql persistence config: connectAddr can not be empty")
+				}
+			}
+		}
+		if ds.ShardedNoSQL != nil {
+			cfg := ds.ShardedNoSQL
+			connections := cfg.Connections
+
+			// validate default shard
+			if cfg.DefaultShard == "" {
+				return fmt.Errorf("ShardedNosql config: defaultShard can not be empty")
+			}
+			if _, found := connections[cfg.DefaultShard]; !found {
+				return fmt.Errorf(
+					"ShardedNosql config: defaultShard (%v) is not defined in connections list", cfg.DefaultShard)
+			}
+
+			// validate history sharding
+			historyShardMapping := cfg.ShardingPolicy.HistoryShardMapping
+			currentShardID := 0
+			for _, shardRange := range historyShardMapping {
+				if _, found := connections[shardRange.Shard]; !found {
+					return fmt.Errorf("ShardedNosql config: Unknown history shard name: %v", shardRange.Shard)
+				}
+				if shardRange.Start != currentShardID {
+					return fmt.Errorf("ShardedNosql config: Non-continuous history shard range %v (%v) found while expecting %v",
+						shardRange.Start,
+						shardRange.Shard,
+						currentShardID,
+					)
+				}
+				currentShardID = shardRange.End
+			}
+			if currentShardID != c.NumHistoryShards {
+				return fmt.Errorf("ShardedNosql config: Last history shard found in the config is %v while the max is %v",
+					currentShardID-1,
+					c.NumHistoryShards-1,
+				)
+			}
+
+			// validate tasklist sharding
+			tasklistShards := cfg.ShardingPolicy.TaskListHashing.ShardOrder
+			for _, shardName := range tasklistShards {
+				if _, found := connections[shardName]; !found {
+					return fmt.Errorf("ShardedNosql config: Unknown tasklist shard name: %v", shardName)
+				}
+			}
 		}
 	}
+
 	return nil
 }
 

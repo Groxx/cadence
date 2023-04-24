@@ -26,7 +26,9 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/uber-go/tally"
 	"go.uber.org/cadence/.gen/go/cadence/workflowserviceclient"
+	"go.uber.org/cadence/activity"
 	"go.uber.org/cadence/worker"
+	"go.uber.org/cadence/workflow"
 
 	"github.com/uber/cadence/client"
 	"github.com/uber/cadence/common"
@@ -95,6 +97,11 @@ func (s *FailoverManager) Start() error {
 		Tracer:                    opentracing.GlobalTracer(),
 	}
 	failoverWorker := worker.New(s.svcClient, common.SystemLocalDomainName, TaskListName, workerOpts)
+	failoverWorker.RegisterWorkflowWithOptions(FailoverWorkflow, workflow.RegisterOptions{Name: FailoverWorkflowTypeName})
+	failoverWorker.RegisterWorkflowWithOptions(RebalanceWorkflow, workflow.RegisterOptions{Name: RebalanceWorkflowTypeName})
+	failoverWorker.RegisterActivityWithOptions(FailoverActivity, activity.RegisterOptions{Name: failoverActivityName})
+	failoverWorker.RegisterActivityWithOptions(GetDomainsActivity, activity.RegisterOptions{Name: getDomainsActivityName})
+	failoverWorker.RegisterActivityWithOptions(GetDomainsForRebalanceActivity, activity.RegisterOptions{Name: getRebalanceDomainsActivityName})
 	s.worker = failoverWorker
 	return failoverWorker.Start()
 }

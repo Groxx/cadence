@@ -33,7 +33,7 @@ import (
 
 	proto "github.com/gogo/protobuf/proto"
 
-	v1 "github.com/uber/cadence/.gen/proto/api/v1"
+	v1 "github.com/uber/cadence-idl/go/proto/api/v1"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -856,7 +856,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 					if err != nil {
 						return err
 					}
-					if skippy < 0 {
+					if (skippy < 0) || (iNdEx+skippy) < 0 {
 						return ErrInvalidLengthMessages
 					}
 					if (iNdEx + skippy) > postIndex {
@@ -873,10 +873,7 @@ func (m *Message) Unmarshal(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
-			if skippy < 0 {
-				return ErrInvalidLengthMessages
-			}
-			if (iNdEx + skippy) < 0 {
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
 				return ErrInvalidLengthMessages
 			}
 			if (iNdEx + skippy) > l {
@@ -1033,10 +1030,7 @@ func (m *Field) Unmarshal(dAtA []byte) error {
 			if err != nil {
 				return err
 			}
-			if skippy < 0 {
-				return ErrInvalidLengthMessages
-			}
-			if (iNdEx + skippy) < 0 {
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
 				return ErrInvalidLengthMessages
 			}
 			if (iNdEx + skippy) > l {

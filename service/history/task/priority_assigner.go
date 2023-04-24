@@ -23,14 +23,20 @@ package task
 import (
 	"sync"
 
+	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/cache"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/log/tag"
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/quotas"
-	"github.com/uber/cadence/common/task"
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/service/history/config"
+)
+
+var (
+	highTaskPriority    = common.GetTaskPriority(common.HighPriorityClass, common.DefaultPrioritySubclass)
+	defaultTaskPriority = common.GetTaskPriority(common.DefaultPriorityClass, common.DefaultPrioritySubclass)
+	lowTaskPriority     = common.GetTaskPriority(common.LowPriorityClass, common.DefaultPrioritySubclass)
 )
 
 type (
@@ -42,7 +48,7 @@ type (
 		config             *config.Config
 		logger             log.Logger
 		scope              metrics.Scope
-		rateLimiters       map[string]quotas.Limiter
+		rateLimiters       *quotas.Collection
 	}
 )
 
@@ -62,26 +68,32 @@ func NewPriorityAssigner(
 		config:             config,
 		logger:             logger,
 		scope:              metricClient.Scope(metrics.TaskPriorityAssignerScope),
-		rateLimiters:       make(map[string]quotas.Limiter),
+		rateLimiters: quotas.NewCollection(func(domain string) quotas.Limiter {
+			return quotas.NewDynamicRateLimiter(config.TaskProcessRPS.AsFloat64(domain))
+		}),
 	}
 }
 
 func (a *priorityAssignerImpl) Assign(
 	queueTask Task,
 ) error {
-	if queueTask.Priority() != task.NoPriority {
+	if priority := queueTask.Priority(); priority != common.NoPriority {
+		if priority != lowTaskPriority && queueTask.GetAttempt() > a.config.TaskCriticalRetryCount() {
+			// automatically lower the priority if task attempt exceeds certain threshold
+			queueTask.SetPriority(lowTaskPriority)
+		}
 		return nil
 	}
 
 	queueType := queueTask.GetQueueType()
 
 	if queueType == QueueTypeReplication {
-		queueTask.SetPriority(task.GetTaskPriority(task.LowPriorityClass, task.DefaultPrioritySubclass))
+		queueTask.SetPriority(lowTaskPriority)
 		return nil
 	}
 
-	// timer or transfer task, first check if task is active or not and if domain is active or not
-	isActiveTask := queueType == QueueTypeActiveTimer || queueType == QueueTypeActiveTransfer
+	// timer, transfer or cross cluster task, first check if task is active or not and if domain is active or not
+	isActiveTask := queueType == QueueTypeActiveTimer || queueType == QueueTypeActiveTransfer || queueType == QueueTypeCrossCluster
 	domainName, isActiveDomain, err := a.getDomainInfo(queueTask.GetDomainID())
 	if err != nil {
 		return err
@@ -95,7 +107,7 @@ func (a *priorityAssignerImpl) Assign(
 
 	if !isActiveTask && !isActiveDomain {
 		// only assign low priority to tasks in the fourth case
-		queueTask.SetPriority(task.GetTaskPriority(task.LowPriorityClass, task.DefaultPrioritySubclass))
+		queueTask.SetPriority(lowTaskPriority)
 		return nil
 	}
 
@@ -103,18 +115,21 @@ func (a *priorityAssignerImpl) Assign(
 	// for case 2 and 3 the task will be a no-op in most cases, also give it a high priority so that
 	// it can be quickly verified/acked and won't prevent the ack level in the processor from advancing
 	// (especially for active processor)
-	if !a.getRateLimiter(domainName).Allow() {
-		queueTask.SetPriority(task.GetTaskPriority(task.DefaultPriorityClass, task.DefaultPrioritySubclass))
+	if !a.rateLimiters.For(domainName).Allow() {
+		queueTask.SetPriority(defaultTaskPriority)
 		taggedScope := a.scope.Tagged(metrics.DomainTag(domainName))
-		if queueType == QueueTypeActiveTransfer || queueType == QueueTypeStandbyTransfer {
+		switch queueType {
+		case QueueTypeActiveTransfer, QueueTypeStandbyTransfer:
 			taggedScope.IncCounter(metrics.TransferTaskThrottledCounter)
-		} else {
+		case QueueTypeActiveTimer, QueueTypeStandbyTimer:
 			taggedScope.IncCounter(metrics.TimerTaskThrottledCounter)
+		case QueueTypeCrossCluster:
+			taggedScope.IncCounter(metrics.CrossClusterTaskThrottledCounter)
 		}
 		return nil
 	}
 
-	queueTask.SetPriority(task.GetTaskPriority(task.HighPriorityClass, task.DefaultPrioritySubclass))
+	queueTask.SetPriority(highTaskPriority)
 	return nil
 }
 
@@ -141,30 +156,4 @@ func (a *priorityAssignerImpl) getDomainInfo(
 		return domainEntry.GetInfo().Name, false, nil
 	}
 	return domainEntry.GetInfo().Name, true, nil
-}
-
-func (a *priorityAssignerImpl) getRateLimiter(
-	domainName string,
-) quotas.Limiter {
-	a.RLock()
-	if limiter, ok := a.rateLimiters[domainName]; ok {
-		a.RUnlock()
-		return limiter
-	}
-	a.RUnlock()
-
-	limiter := quotas.NewDynamicRateLimiter(
-		func() float64 {
-			return float64(a.config.TaskProcessRPS(domainName))
-		},
-	)
-
-	a.Lock()
-	defer a.Unlock()
-	if existingLimiter, ok := a.rateLimiters[domainName]; ok {
-		return existingLimiter
-	}
-
-	a.rateLimiters[domainName] = limiter
-	return limiter
 }

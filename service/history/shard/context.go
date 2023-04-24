@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -84,10 +83,8 @@ type (
 		GetTransferProcessingQueueStates(cluster string) []*types.ProcessingQueueState
 		UpdateTransferProcessingQueueStates(cluster string, states []*types.ProcessingQueueState) error
 
-		GetReplicatorAckLevel() int64
-		UpdateReplicatorAckLevel(ackLevel int64) error
-		GetReplicatorDLQAckLevel(sourceCluster string) int64
-		UpdateReplicatorDLQAckLevel(sourCluster string, ackLevel int64) error
+		GetCrossClusterProcessingQueueStates(cluster string) []*types.ProcessingQueueState
+		UpdateCrossClusterProcessingQueueStates(cluster string, states []*types.ProcessingQueueState) error
 
 		GetClusterReplicationLevel(cluster string) int64
 		UpdateClusterReplicationLevel(cluster string, lastTaskID int64) error
@@ -99,13 +96,13 @@ type (
 		GetTimerProcessingQueueStates(cluster string) []*types.ProcessingQueueState
 		UpdateTimerProcessingQueueStates(cluster string, states []*types.ProcessingQueueState) error
 
-		UpdateTransferFailoverLevel(failoverID string, level persistence.TransferFailoverLevel) error
+		UpdateTransferFailoverLevel(failoverID string, level TransferFailoverLevel) error
 		DeleteTransferFailoverLevel(failoverID string) error
-		GetAllTransferFailoverLevels() map[string]persistence.TransferFailoverLevel
+		GetAllTransferFailoverLevels() map[string]TransferFailoverLevel
 
-		UpdateTimerFailoverLevel(failoverID string, level persistence.TimerFailoverLevel) error
+		UpdateTimerFailoverLevel(failoverID string, level TimerFailoverLevel) error
 		DeleteTimerFailoverLevel(failoverID string) error
-		GetAllTimerFailoverLevels() map[string]persistence.TimerFailoverLevel
+		GetAllTimerFailoverLevels() map[string]TimerFailoverLevel
 
 		GetDomainNotificationVersion() int64
 		UpdateDomainNotificationVersion(domainNotificationVersion int64) error
@@ -113,11 +110,29 @@ type (
 		CreateWorkflowExecution(ctx context.Context, request *persistence.CreateWorkflowExecutionRequest) (*persistence.CreateWorkflowExecutionResponse, error)
 		UpdateWorkflowExecution(ctx context.Context, request *persistence.UpdateWorkflowExecutionRequest) (*persistence.UpdateWorkflowExecutionResponse, error)
 		ConflictResolveWorkflowExecution(ctx context.Context, request *persistence.ConflictResolveWorkflowExecutionRequest) (*persistence.ConflictResolveWorkflowExecutionResponse, error)
-		AppendHistoryV2Events(ctx context.Context, request *persistence.AppendHistoryNodesRequest, domainID string, execution types.WorkflowExecution) (int, error)
+		AppendHistoryV2Events(ctx context.Context, request *persistence.AppendHistoryNodesRequest, domainID string, execution types.WorkflowExecution) (*persistence.AppendHistoryNodesResponse, error)
 
-		ReplicateFailoverMarkers(ctx context.Context, makers []*persistence.FailoverMarkerTask) error
+		ReplicateFailoverMarkers(ctx context.Context, markers []*persistence.FailoverMarkerTask) error
 		AddingPendingFailoverMarker(*types.FailoverMarkerAttributes) error
 		ValidateAndUpdateFailoverMarkers() ([]*types.FailoverMarkerAttributes, error)
+	}
+
+	// TransferFailoverLevel contains corresponding start / end level
+	TransferFailoverLevel struct {
+		StartTime    time.Time
+		MinLevel     int64
+		CurrentLevel int64
+		MaxLevel     int64
+		DomainIDs    map[string]struct{}
+	}
+
+	// TimerFailoverLevel contains domain IDs and corresponding start / end level
+	TimerFailoverLevel struct {
+		StartTime    time.Time
+		MinLevel     time.Time
+		CurrentLevel time.Time
+		MaxLevel     time.Time
+		DomainIDs    map[string]struct{}
 	}
 
 	contextImpl struct {
@@ -136,15 +151,14 @@ type (
 		engine           engine.Engine
 
 		sync.RWMutex
-		lastUpdated                   time.Time
-		shardInfo                     *persistence.ShardInfo
-		transferSequenceNumber        int64
-		maxTransferSequenceNumber     int64
-		transferMaxReadLevel          int64
-		timerMaxReadLevelMap          map[string]time.Time         // cluster -> timerMaxReadLevel
-		transferProcessingQueueStates *types.ProcessingQueueStates // deserialized shardInfo.TransferProcessingQueueStates
-		timerProcessingQueueStates    *types.ProcessingQueueStates // deserialized shardInfo.TimerProcessingQueueStates
-		pendingFailoverMarkers        []*types.FailoverMarkerAttributes
+		lastUpdated               time.Time
+		shardInfo                 *persistence.ShardInfo
+		transferSequenceNumber    int64
+		maxTransferSequenceNumber int64
+		transferMaxReadLevel      int64
+		timerMaxReadLevelMap      map[string]time.Time             // cluster -> timerMaxReadLevel
+		transferFailoverLevels    map[string]TransferFailoverLevel // uuid -> TransferFailoverLevel
+		timerFailoverLevels       map[string]TimerFailoverLevel    // uuid -> TimerFailoverLevel
 
 		// exist only in memory
 		remoteClusterCurrentTime map[string]time.Time
@@ -161,16 +175,14 @@ var (
 	ErrShardClosed = errors.New("shard closed")
 )
 
-var (
-	errMaxAttemptsExceeded = errors.New("maximum attempts exceeded to update history")
-)
-
 const (
-	conditionalRetryCount    = 5
-	logWarnTransferLevelDiff = 3000000 // 3 million
-	logWarnTimerLevelDiff    = time.Duration(30 * time.Minute)
-	historySizeLogThreshold  = 10 * 1024 * 1024
-	minContextTimeout        = 1 * time.Second
+	// transfer/cross cluster diff/lag is in terms of taskID, which is calculated based on shard rangeID
+	// on shard movement, taskID will increase by around 1 million
+	logWarnTransferLevelDiff    = 3000000 // 3 million
+	logWarnCrossClusterLevelLag = 3000000 // 3 million
+	logWarnTimerLevelDiff       = time.Duration(30 * time.Minute)
+	historySizeLogThreshold     = 10 * 1024 * 1024
+	minContextTimeout           = 1 * time.Second
 )
 
 func (s *contextImpl) GetShardID() int {
@@ -264,7 +276,7 @@ func (s *contextImpl) GetTransferProcessingQueueStates(cluster string) []*types.
 	defer s.RUnlock()
 
 	// if we can find corresponding processing queue states
-	if states, ok := s.transferProcessingQueueStates.StatesByCluster[cluster]; ok {
+	if states, ok := s.shardInfo.TransferProcessingQueueStates.StatesByCluster[cluster]; ok {
 		return states
 	}
 
@@ -296,14 +308,13 @@ func (s *contextImpl) UpdateTransferProcessingQueueStates(cluster string, states
 	defer s.Unlock()
 
 	if len(states) == 0 {
-		return errors.New("Empty transfer processing queue states")
+		return errors.New("empty transfer processing queue states")
 	}
 
-	if s.transferProcessingQueueStates.StatesByCluster == nil {
-		s.transferProcessingQueueStates.StatesByCluster = make(map[string][]*types.ProcessingQueueState)
+	if s.shardInfo.TransferProcessingQueueStates.StatesByCluster == nil {
+		s.shardInfo.TransferProcessingQueueStates.StatesByCluster = make(map[string][]*types.ProcessingQueueState)
 	}
-	s.transferProcessingQueueStates.StatesByCluster[cluster] = states
-	s.shardInfo.TransferProcessingQueueStates = s.transferProcessingQueueStates
+	s.shardInfo.TransferProcessingQueueStates.StatesByCluster[cluster] = states
 
 	// for backward compatibility
 	ackLevel := states[0].GetAckLevel()
@@ -316,54 +327,44 @@ func (s *contextImpl) UpdateTransferProcessingQueueStates(cluster string, states
 	return s.updateShardInfoLocked()
 }
 
-func (s *contextImpl) GetReplicatorAckLevel() int64 {
+func (s *contextImpl) GetCrossClusterProcessingQueueStates(cluster string) []*types.ProcessingQueueState {
 	s.RLock()
 	defer s.RUnlock()
 
-	return s.shardInfo.ReplicationAckLevel
+	// if we can find corresponding processing queue states
+	if states, ok := s.shardInfo.CrossClusterProcessingQueueStates.StatesByCluster[cluster]; ok {
+		return states
+	}
+
+	// otherwise, create default processing queue state
+	// this can happen if you add more cluster
+	return []*types.ProcessingQueueState{
+		{
+			Level:    common.Int32Ptr(0),
+			AckLevel: common.Int64Ptr(0),
+			MaxLevel: common.Int64Ptr(math.MaxInt64),
+			DomainFilter: &types.DomainFilter{
+				ReverseMatch: true,
+			},
+		},
+	}
 }
 
-func (s *contextImpl) UpdateReplicatorAckLevel(ackLevel int64) error {
+func (s *contextImpl) UpdateCrossClusterProcessingQueueStates(cluster string, states []*types.ProcessingQueueState) error {
 	s.Lock()
 	defer s.Unlock()
-	s.shardInfo.ReplicationAckLevel = ackLevel
+
+	if len(states) == 0 {
+		return errors.New("empty cross-cluster processing queue states")
+	}
+
+	if s.shardInfo.CrossClusterProcessingQueueStates.StatesByCluster == nil {
+		s.shardInfo.CrossClusterProcessingQueueStates.StatesByCluster = make(map[string][]*types.ProcessingQueueState)
+	}
+	s.shardInfo.CrossClusterProcessingQueueStates.StatesByCluster[cluster] = states
+
 	s.shardInfo.StolenSinceRenew = 0
 	return s.updateShardInfoLocked()
-}
-
-func (s *contextImpl) GetReplicatorDLQAckLevel(sourceCluster string) int64 {
-	s.RLock()
-	defer s.RUnlock()
-
-	if ackLevel, ok := s.shardInfo.ReplicationDLQAckLevel[sourceCluster]; ok {
-		return ackLevel
-	}
-	return -1
-}
-
-func (s *contextImpl) UpdateReplicatorDLQAckLevel(
-	sourceCluster string,
-	ackLevel int64,
-) error {
-
-	s.Lock()
-	defer s.Unlock()
-
-	s.shardInfo.ReplicationDLQAckLevel[sourceCluster] = ackLevel
-	s.shardInfo.StolenSinceRenew = 0
-	if err := s.updateShardInfoLocked(); err != nil {
-		return err
-	}
-
-	s.GetMetricsClient().Scope(
-		metrics.ReplicationDLQStatsScope,
-		metrics.TargetClusterTag(sourceCluster),
-		metrics.InstanceTag(strconv.Itoa(s.shardID)),
-	).UpdateGauge(
-		metrics.ReplicationDLQAckLevelGauge,
-		float64(ackLevel),
-	)
-	return nil
 }
 
 func (s *contextImpl) GetClusterReplicationLevel(cluster string) int64 {
@@ -431,7 +432,7 @@ func (s *contextImpl) GetTimerProcessingQueueStates(cluster string) []*types.Pro
 	defer s.RUnlock()
 
 	// if we can find corresponding processing queue states
-	if states, ok := s.timerProcessingQueueStates.StatesByCluster[cluster]; ok {
+	if states, ok := s.shardInfo.TimerProcessingQueueStates.StatesByCluster[cluster]; ok {
 		return states
 	}
 
@@ -463,14 +464,13 @@ func (s *contextImpl) UpdateTimerProcessingQueueStates(cluster string, states []
 	defer s.Unlock()
 
 	if len(states) == 0 {
-		return errors.New("Empty transfer processing queue states")
+		return errors.New("empty transfer processing queue states")
 	}
 
-	if s.timerProcessingQueueStates.StatesByCluster == nil {
-		s.timerProcessingQueueStates.StatesByCluster = make(map[string][]*types.ProcessingQueueState)
+	if s.shardInfo.TimerProcessingQueueStates.StatesByCluster == nil {
+		s.shardInfo.TimerProcessingQueueStates.StatesByCluster = make(map[string][]*types.ProcessingQueueState)
 	}
-	s.timerProcessingQueueStates.StatesByCluster[cluster] = states
-	s.shardInfo.TimerProcessingQueueStates = s.timerProcessingQueueStates
+	s.shardInfo.TimerProcessingQueueStates.StatesByCluster[cluster] = states
 
 	// for backward compatibility
 	ackLevel := states[0].GetAckLevel()
@@ -483,61 +483,61 @@ func (s *contextImpl) UpdateTimerProcessingQueueStates(cluster string, states []
 	return s.updateShardInfoLocked()
 }
 
-func (s *contextImpl) UpdateTransferFailoverLevel(failoverID string, level persistence.TransferFailoverLevel) error {
+func (s *contextImpl) UpdateTransferFailoverLevel(failoverID string, level TransferFailoverLevel) error {
 	s.Lock()
 	defer s.Unlock()
 
-	s.shardInfo.TransferFailoverLevels[failoverID] = level
-	return s.updateShardInfoLocked()
+	s.transferFailoverLevels[failoverID] = level
+	return nil
 }
 
 func (s *contextImpl) DeleteTransferFailoverLevel(failoverID string) error {
 	s.Lock()
 	defer s.Unlock()
 
-	if level, ok := s.shardInfo.TransferFailoverLevels[failoverID]; ok {
+	if level, ok := s.transferFailoverLevels[failoverID]; ok {
 		s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTransferFailoverLatencyTimer, time.Since(level.StartTime))
-		delete(s.shardInfo.TransferFailoverLevels, failoverID)
+		delete(s.transferFailoverLevels, failoverID)
 	}
-	return s.updateShardInfoLocked()
+	return nil
 }
 
-func (s *contextImpl) GetAllTransferFailoverLevels() map[string]persistence.TransferFailoverLevel {
+func (s *contextImpl) GetAllTransferFailoverLevels() map[string]TransferFailoverLevel {
 	s.RLock()
 	defer s.RUnlock()
 
-	ret := map[string]persistence.TransferFailoverLevel{}
-	for k, v := range s.shardInfo.TransferFailoverLevels {
+	ret := map[string]TransferFailoverLevel{}
+	for k, v := range s.transferFailoverLevels {
 		ret[k] = v
 	}
 	return ret
 }
 
-func (s *contextImpl) UpdateTimerFailoverLevel(failoverID string, level persistence.TimerFailoverLevel) error {
+func (s *contextImpl) UpdateTimerFailoverLevel(failoverID string, level TimerFailoverLevel) error {
 	s.Lock()
 	defer s.Unlock()
 
-	s.shardInfo.TimerFailoverLevels[failoverID] = level
-	return s.updateShardInfoLocked()
+	s.timerFailoverLevels[failoverID] = level
+	return nil
 }
 
 func (s *contextImpl) DeleteTimerFailoverLevel(failoverID string) error {
 	s.Lock()
 	defer s.Unlock()
 
-	if level, ok := s.shardInfo.TimerFailoverLevels[failoverID]; ok {
+	if level, ok := s.timerFailoverLevels[failoverID]; ok {
 		s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTimerFailoverLatencyTimer, time.Since(level.StartTime))
-		delete(s.shardInfo.TimerFailoverLevels, failoverID)
+		delete(s.timerFailoverLevels, failoverID)
 	}
-	return s.updateShardInfoLocked()
+	return nil
 }
 
-func (s *contextImpl) GetAllTimerFailoverLevels() map[string]persistence.TimerFailoverLevel {
+func (s *contextImpl) GetAllTimerFailoverLevels() map[string]TimerFailoverLevel {
 	s.RLock()
 	defer s.RUnlock()
 
-	ret := map[string]persistence.TimerFailoverLevel{}
-	for k, v := range s.shardInfo.TimerFailoverLevels {
+	ret := map[string]TimerFailoverLevel{}
+	for k, v := range s.timerFailoverLevels {
 		ret[k] = v
 	}
 	return ret
@@ -582,6 +582,10 @@ func (s *contextImpl) CreateWorkflowExecution(
 	ctx context.Context,
 	request *persistence.CreateWorkflowExecutionRequest,
 ) (*persistence.CreateWorkflowExecutionResponse, error) {
+	if s.isClosed() {
+		return nil, ErrShardClosed
+	}
+
 	ctx, cancel, err := s.ensureMinContextTimeout(ctx)
 	if err != nil {
 		return nil, err
@@ -607,73 +611,63 @@ func (s *contextImpl) CreateWorkflowExecution(
 		domainEntry,
 		workflowID,
 		request.NewWorkflowSnapshot.TransferTasks,
+		request.NewWorkflowSnapshot.CrossClusterTasks,
 		request.NewWorkflowSnapshot.ReplicationTasks,
 		request.NewWorkflowSnapshot.TimerTasks,
 		&transferMaxReadLevel,
 	); err != nil {
 		return nil, err
 	}
-	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
-Create_Loop:
-	for attempt := 0; attempt < conditionalRetryCount && ctx.Err() == nil; attempt++ {
-		currentRangeID := s.getRangeID()
-		request.RangeID = currentRangeID
-
-		response, err := s.executionManager.CreateWorkflowExecution(ctx, request)
-		if err != nil {
-			switch err.(type) {
-			case *types.WorkflowExecutionAlreadyStartedError,
-				*persistence.WorkflowExecutionAlreadyStartedError,
-				*persistence.CurrentWorkflowConditionFailedError,
-				*types.ServiceBusyError,
-				*persistence.TimeoutError,
-				*types.LimitExceededError:
-				// No special handling required for these errors
-			case *persistence.ShardOwnershipLostError:
-				{
-					// RangeID might have been renewed by the same host while this update was in flight
-					// Retry the operation if we still have the shard ownership
-					if currentRangeID != s.getRangeID() {
-						continue Create_Loop
-					} else {
-						// Shard is stolen, trigger shutdown of history engine
-						s.logger.Warn(
-							"Closing shard: CreateWorkflowExecution failed due to stolen shard.",
-							tag.ShardID(s.GetShardID()),
-							tag.Error(err),
-						)
-						s.closeShard()
-						return nil, err
-					}
-				}
-			default:
-				{
-					// We have no idea if the write failed or will eventually make it to
-					// persistence. Increment RangeID to guarantee that subsequent reads
-					// will either see that write, or know for certain that it failed.
-					// This allows the callers to reliably check the outcome by performing
-					// a read.
-					err1 := s.renewRangeLocked(false)
-					if err1 != nil {
-						// At this point we have no choice but to unload the shard, so that it
-						// gets a new RangeID when it's reloaded.
-						s.logger.Warn(
-							"Closing shard: CreateWorkflowExecution failed due to unknown error.",
-							tag.ShardID(s.GetShardID()),
-							tag.Error(err),
-						)
-						s.closeShard()
-						break Create_Loop
-					}
-				}
-			}
-		}
-
-		return response, err
+	if s.isClosed() {
+		return nil, ErrShardClosed
 	}
+	currentRangeID := s.getRangeID()
+	request.RangeID = currentRangeID
 
-	return nil, errMaxAttemptsExceeded
+	response, err := s.executionManager.CreateWorkflowExecution(ctx, request)
+	switch err.(type) {
+	case nil:
+		// Update MaxReadLevel if write to DB succeeds
+		s.updateMaxReadLevelLocked(transferMaxReadLevel)
+		return response, nil
+	case *types.WorkflowExecutionAlreadyStartedError,
+		*persistence.WorkflowExecutionAlreadyStartedError,
+		*persistence.CurrentWorkflowConditionFailedError,
+		*types.ServiceBusyError:
+		// No special handling required for these errors
+		// We know write to DB fails if these errors are returned
+		return nil, err
+	case *persistence.ShardOwnershipLostError:
+		{
+			// Shard is stolen, trigger shutdown of history engine
+			s.logger.Warn(
+				"Closing shard: CreateWorkflowExecution failed due to stolen shard.",
+				tag.Error(err),
+			)
+			s.closeShard()
+			return nil, err
+		}
+	default:
+		{
+			// We have no idea if the write failed or will eventually make it to
+			// persistence. Increment RangeID to guarantee that subsequent reads
+			// will either see that write, or know for certain that it failed.
+			// This allows the callers to reliably check the outcome by performing
+			// a read.
+			err1 := s.renewRangeLocked(false)
+			if err1 != nil {
+				// At this point we have no choice but to unload the shard, so that it
+				// gets a new RangeID when it's reloaded.
+				s.logger.Warn(
+					"Closing shard: CreateWorkflowExecution failed due to unknown error.",
+					tag.Error(err),
+				)
+				s.closeShard()
+			}
+			return nil, err
+		}
+	}
 }
 
 func (s *contextImpl) getDefaultEncoding(domainName string) common.EncodingType {
@@ -684,6 +678,9 @@ func (s *contextImpl) UpdateWorkflowExecution(
 	ctx context.Context,
 	request *persistence.UpdateWorkflowExecutionRequest,
 ) (*persistence.UpdateWorkflowExecutionResponse, error) {
+	if s.isClosed() {
+		return nil, ErrShardClosed
+	}
 	ctx, cancel, err := s.ensureMinContextTimeout(ctx)
 	if err != nil {
 		return nil, err
@@ -710,6 +707,7 @@ func (s *contextImpl) UpdateWorkflowExecution(
 		domainEntry,
 		workflowID,
 		request.UpdateWorkflowMutation.TransferTasks,
+		request.UpdateWorkflowMutation.CrossClusterTasks,
 		request.UpdateWorkflowMutation.ReplicationTasks,
 		request.UpdateWorkflowMutation.TimerTasks,
 		&transferMaxReadLevel,
@@ -721,6 +719,7 @@ func (s *contextImpl) UpdateWorkflowExecution(
 			domainEntry,
 			workflowID,
 			request.NewWorkflowSnapshot.TransferTasks,
+			request.NewWorkflowSnapshot.CrossClusterTasks,
 			request.NewWorkflowSnapshot.ReplicationTasks,
 			request.NewWorkflowSnapshot.TimerTasks,
 			&transferMaxReadLevel,
@@ -728,70 +727,64 @@ func (s *contextImpl) UpdateWorkflowExecution(
 			return nil, err
 		}
 	}
-	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
-Update_Loop:
-	for attempt := 0; attempt < conditionalRetryCount && ctx.Err() == nil; attempt++ {
-		currentRangeID := s.getRangeID()
-		request.RangeID = currentRangeID
-
-		resp, err := s.executionManager.UpdateWorkflowExecution(ctx, request)
-		if err != nil {
-			switch err.(type) {
-			case *persistence.ConditionFailedError,
-				*types.ServiceBusyError,
-				*types.LimitExceededError:
-				// No special handling required for these errors
-			case *persistence.ShardOwnershipLostError:
-				{
-					// RangeID might have been renewed by the same host while this update was in flight
-					// Retry the operation if we still have the shard ownership
-					if currentRangeID != s.getRangeID() {
-						continue Update_Loop
-					} else {
-						// Shard is stolen, trigger shutdown of history engine
-						s.logger.Warn(
-							"Closing shard: UpdateWorkflowExecution failed due to stolen shard.",
-							tag.ShardID(s.GetShardID()),
-							tag.Error(err),
-						)
-						s.closeShard()
-						break Update_Loop
-					}
-				}
-			default:
-				{
-					// We have no idea if the write failed or will eventually make it to
-					// persistence. Increment RangeID to guarantee that subsequent reads
-					// will either see that write, or know for certain that it failed.
-					// This allows the callers to reliably check the outcome by performing
-					// a read.
-					err1 := s.renewRangeLocked(false)
-					if err1 != nil {
-						// At this point we have no choice but to unload the shard, so that it
-						// gets a new RangeID when it's reloaded.
-						s.logger.Warn(
-							"Closing shard: UpdateWorkflowExecution failed due to unknown error.",
-							tag.ShardID(s.GetShardID()),
-							tag.Error(err),
-						)
-						s.closeShard()
-						break Update_Loop
-					}
-				}
-			}
-		}
-
-		return resp, err
+	if s.isClosed() {
+		return nil, ErrShardClosed
 	}
+	currentRangeID := s.getRangeID()
+	request.RangeID = currentRangeID
 
-	return nil, errMaxAttemptsExceeded
+	resp, err := s.executionManager.UpdateWorkflowExecution(ctx, request)
+	switch err.(type) {
+	case nil:
+		// Update MaxReadLevel if write to DB succeeds
+		s.updateMaxReadLevelLocked(transferMaxReadLevel)
+		return resp, nil
+	case *persistence.ConditionFailedError,
+		*types.ServiceBusyError:
+		// No special handling required for these errors
+		// We know write to DB fails if these errors are returned
+		return nil, err
+	case *persistence.ShardOwnershipLostError:
+		{
+			// Shard is stolen, trigger shutdown of history engine
+			s.logger.Warn(
+				"Closing shard: UpdateWorkflowExecution failed due to stolen shard.",
+				tag.Error(err),
+			)
+			s.closeShard()
+			return nil, err
+		}
+	default:
+		{
+			// We have no idea if the write failed or will eventually make it to
+			// persistence. Increment RangeID to guarantee that subsequent reads
+			// will either see that write, or know for certain that it failed.
+			// This allows the callers to reliably check the outcome by performing
+			// a read.
+			err1 := s.renewRangeLocked(false)
+			if err1 != nil {
+				// At this point we have no choice but to unload the shard, so that it
+				// gets a new RangeID when it's reloaded.
+				s.logger.Warn(
+					"Closing shard: UpdateWorkflowExecution failed due to unknown error.",
+					tag.Error(err),
+				)
+				s.closeShard()
+			}
+			return nil, err
+		}
+	}
 }
 
 func (s *contextImpl) ConflictResolveWorkflowExecution(
 	ctx context.Context,
 	request *persistence.ConflictResolveWorkflowExecutionRequest,
 ) (*persistence.ConflictResolveWorkflowExecutionResponse, error) {
+	if s.isClosed() {
+		return nil, ErrShardClosed
+	}
+
 	ctx, cancel, err := s.ensureMinContextTimeout(ctx)
 	if err != nil {
 		return nil, err
@@ -819,6 +812,7 @@ func (s *contextImpl) ConflictResolveWorkflowExecution(
 			domainEntry,
 			workflowID,
 			request.CurrentWorkflowMutation.TransferTasks,
+			request.CurrentWorkflowMutation.CrossClusterTasks,
 			request.CurrentWorkflowMutation.ReplicationTasks,
 			request.CurrentWorkflowMutation.TimerTasks,
 			&transferMaxReadLevel,
@@ -830,6 +824,7 @@ func (s *contextImpl) ConflictResolveWorkflowExecution(
 		domainEntry,
 		workflowID,
 		request.ResetWorkflowSnapshot.TransferTasks,
+		request.ResetWorkflowSnapshot.CrossClusterTasks,
 		request.ResetWorkflowSnapshot.ReplicationTasks,
 		request.ResetWorkflowSnapshot.TimerTasks,
 		&transferMaxReadLevel,
@@ -841,6 +836,7 @@ func (s *contextImpl) ConflictResolveWorkflowExecution(
 			domainEntry,
 			workflowID,
 			request.NewWorkflowSnapshot.TransferTasks,
+			request.NewWorkflowSnapshot.CrossClusterTasks,
 			request.NewWorkflowSnapshot.ReplicationTasks,
 			request.NewWorkflowSnapshot.TimerTasks,
 			&transferMaxReadLevel,
@@ -848,63 +844,55 @@ func (s *contextImpl) ConflictResolveWorkflowExecution(
 			return nil, err
 		}
 	}
-	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
-Conflict_Resolve_Loop:
-	for attempt := 0; attempt < conditionalRetryCount && ctx.Err() == nil; attempt++ {
-		currentRangeID := s.getRangeID()
-		request.RangeID = currentRangeID
-		resp, err := s.executionManager.ConflictResolveWorkflowExecution(ctx, request)
-		if err != nil {
-			switch err.(type) {
-			case *persistence.ConditionFailedError,
-				*types.ServiceBusyError,
-				*types.LimitExceededError:
-				// No special handling required for these errors
-			case *persistence.ShardOwnershipLostError:
-				{
-					// RangeID might have been renewed by the same host while this update was in flight
-					// Retry the operation if we still have the shard ownership
-					if currentRangeID != s.getRangeID() {
-						continue Conflict_Resolve_Loop
-					} else {
-						// Shard is stolen, trigger shutdown of history engine
-						s.logger.Warn(
-							"Closing shard: ConflictResolveWorkflowExecution failed due to stolen shard.",
-							tag.ShardID(s.GetShardID()),
-							tag.Error(err),
-						)
-						s.closeShard()
-						break Conflict_Resolve_Loop
-					}
-				}
-			default:
-				{
-					// We have no idea if the write failed or will eventually make it to
-					// persistence. Increment RangeID to guarantee that subsequent reads
-					// will either see that write, or know for certain that it failed.
-					// This allows the callers to reliably check the outcome by performing
-					// a read.
-					err1 := s.renewRangeLocked(false)
-					if err1 != nil {
-						// At this point we have no choice but to unload the shard, so that it
-						// gets a new RangeID when it's reloaded.
-						s.logger.Warn(
-							"Closing shard: ConflictResolveWorkflowExecution failed due to unknown error.",
-							tag.ShardID(s.GetShardID()),
-							tag.Error(err),
-						)
-						s.closeShard()
-						break Conflict_Resolve_Loop
-					}
-				}
-			}
-		}
-
-		return resp, err
+	if s.isClosed() {
+		return nil, ErrShardClosed
 	}
-
-	return nil, errMaxAttemptsExceeded
+	currentRangeID := s.getRangeID()
+	request.RangeID = currentRangeID
+	resp, err := s.executionManager.ConflictResolveWorkflowExecution(ctx, request)
+	switch err.(type) {
+	case nil:
+		// Update MaxReadLevel if write to DB succeeds
+		s.updateMaxReadLevelLocked(transferMaxReadLevel)
+		return resp, nil
+	case *persistence.ConditionFailedError,
+		*types.ServiceBusyError:
+		// No special handling required for these errors
+		// We know write to DB fails if these errors are returned
+		return nil, err
+	case *persistence.ShardOwnershipLostError:
+		{
+			// RangeID might have been renewed by the same host while this update was in flight
+			// Retry the operation if we still have the shard ownership
+			// Shard is stolen, trigger shutdown of history engine
+			s.logger.Warn(
+				"Closing shard: ConflictResolveWorkflowExecution failed due to stolen shard.",
+				tag.Error(err),
+			)
+			s.closeShard()
+			return nil, err
+		}
+	default:
+		{
+			// We have no idea if the write failed or will eventually make it to
+			// persistence. Increment RangeID to guarantee that subsequent reads
+			// will either see that write, or know for certain that it failed.
+			// This allows the callers to reliably check the outcome by performing
+			// a read.
+			err1 := s.renewRangeLocked(false)
+			if err1 != nil {
+				// At this point we have no choice but to unload the shard, so that it
+				// gets a new RangeID when it's reloaded.
+				s.logger.Warn(
+					"Closing shard: ConflictResolveWorkflowExecution failed due to unknown error.",
+					tag.Error(err),
+				)
+				s.closeShard()
+			}
+			return nil, err
+		}
+	}
 }
 
 func (s *contextImpl) ensureMinContextTimeout(
@@ -928,18 +916,21 @@ func (s *contextImpl) AppendHistoryV2Events(
 	request *persistence.AppendHistoryNodesRequest,
 	domainID string,
 	execution types.WorkflowExecution,
-) (int, error) {
+) (*persistence.AppendHistoryNodesResponse, error) {
+	if s.isClosed() {
+		return nil, ErrShardClosed
+	}
 
 	domainName, err := s.GetDomainCache().GetDomainName(domainID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	// NOTE: do not use generateNextTransferTaskIDLocked since
 	// generateNextTransferTaskIDLocked is not guarded by lock
 	transactionID, err := s.GenerateTransferTaskID()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	request.Encoding = s.getDefaultEncoding(domainName)
@@ -960,9 +951,9 @@ func (s *contextImpl) AppendHistoryV2Events(
 	}()
 	resp, err0 := s.GetHistoryManager().AppendHistoryNodes(ctx, request)
 	if resp != nil {
-		size = resp.Size
+		size = len(resp.DataBlob.Data)
 	}
-	return size, err0
+	return resp, err0
 }
 
 func (s *contextImpl) GetConfig() *config.Config {
@@ -1031,39 +1022,33 @@ func (s *contextImpl) updateRangeIfNeededLocked() error {
 }
 
 func (s *contextImpl) renewRangeLocked(isStealing bool) error {
-	updatedShardInfo := copyShardInfo(s.shardInfo)
+	updatedShardInfo := s.shardInfo.Copy()
 	updatedShardInfo.RangeID++
 	if isStealing {
 		updatedShardInfo.StolenSinceRenew++
 	}
 
 	var err error
-	var attempt int32
-Retry_Loop:
-	for attempt = 0; attempt < conditionalRetryCount; attempt++ {
-		err = s.GetShardManager().UpdateShard(context.Background(), &persistence.UpdateShardRequest{
-			ShardInfo:       updatedShardInfo,
-			PreviousRangeID: s.shardInfo.RangeID})
-		switch err.(type) {
-		case nil:
-			break Retry_Loop
-		case *persistence.ShardOwnershipLostError:
-			// Shard is stolen, trigger history engine shutdown
-			s.logger.Warn(
-				"Closing shard: renewRangeLocked failed due to stolen shard.",
-				tag.ShardID(s.GetShardID()),
-				tag.Error(err),
-				tag.Attempt(attempt),
-			)
-			s.closeShard()
-			break Retry_Loop
-		default:
-			s.logger.Warn("UpdateShard failed with an unknown error.",
-				tag.Error(err),
-				tag.ShardRangeID(updatedShardInfo.RangeID),
-				tag.PreviousShardRangeID(s.shardInfo.RangeID),
-				tag.Attempt(attempt))
-		}
+	if s.isClosed() {
+		return ErrShardClosed
+	}
+	err = s.GetShardManager().UpdateShard(context.Background(), &persistence.UpdateShardRequest{
+		ShardInfo:       updatedShardInfo,
+		PreviousRangeID: s.shardInfo.RangeID})
+	switch err.(type) {
+	case nil:
+	case *persistence.ShardOwnershipLostError:
+		// Shard is stolen, trigger history engine shutdown
+		s.logger.Warn(
+			"Closing shard: renewRangeLocked failed due to stolen shard.",
+			tag.Error(err),
+		)
+		s.closeShard()
+	default:
+		s.logger.Warn("UpdateShard failed with an unknown error.",
+			tag.Error(err),
+			tag.ShardRangeID(updatedShardInfo.RangeID),
+			tag.PreviousShardRangeID(s.shardInfo.RangeID))
 	}
 	if err != nil {
 		// Failure in updating shard to grab new RangeID
@@ -1071,8 +1056,7 @@ Retry_Loop:
 			tag.StoreOperationUpdateShard,
 			tag.Error(err),
 			tag.ShardRangeID(updatedShardInfo.RangeID),
-			tag.PreviousShardRangeID(s.shardInfo.RangeID),
-			tag.Attempt(attempt))
+			tag.PreviousShardRangeID(s.shardInfo.RangeID))
 		return err
 	}
 
@@ -1084,7 +1068,6 @@ Retry_Loop:
 	s.shardInfo = updatedShardInfo
 
 	s.logger.Info("Range updated for shardID",
-		tag.ShardID(s.shardInfo.ShardID),
 		tag.ShardRangeID(s.shardInfo.RangeID),
 		tag.Number(s.transferSequenceNumber),
 		tag.NextNumber(s.maxTransferSequenceNumber))
@@ -1119,7 +1102,7 @@ func (s *contextImpl) persistShardInfoLocked(
 	if !isForced && s.lastUpdated.Add(s.config.ShardUpdateMinInterval()).After(now) {
 		return nil
 	}
-	updatedShardInfo := copyShardInfo(s.shardInfo)
+	updatedShardInfo := s.shardInfo.Copy()
 	s.emitShardInfoMetricsLogsLocked()
 
 	err = s.GetShardManager().UpdateShard(context.Background(), &persistence.UpdateShardRequest{
@@ -1132,7 +1115,6 @@ func (s *contextImpl) persistShardInfoLocked(
 		if _, ok := err.(*persistence.ShardOwnershipLostError); ok {
 			s.logger.Warn(
 				"Closing shard: updateShardInfoLocked failed due to stolen shard.",
-				tag.ShardID(s.GetShardID()),
 				tag.Error(err),
 			)
 			s.closeShard()
@@ -1146,10 +1128,15 @@ func (s *contextImpl) persistShardInfoLocked(
 
 func (s *contextImpl) emitShardInfoMetricsLogsLocked() {
 	currentCluster := s.GetClusterMetadata().GetCurrentClusterName()
+	clusterInfo := s.GetClusterMetadata().GetAllClusterInfo()
 
 	minTransferLevel := s.shardInfo.ClusterTransferAckLevel[currentCluster]
 	maxTransferLevel := s.shardInfo.ClusterTransferAckLevel[currentCluster]
-	for _, v := range s.shardInfo.ClusterTransferAckLevel {
+	for clusterName, v := range s.shardInfo.ClusterTransferAckLevel {
+		if !clusterInfo[clusterName].Enabled {
+			continue
+		}
+
 		if v < minTransferLevel {
 			minTransferLevel = v
 		}
@@ -1161,7 +1148,11 @@ func (s *contextImpl) emitShardInfoMetricsLogsLocked() {
 
 	minTimerLevel := s.shardInfo.ClusterTimerAckLevel[currentCluster]
 	maxTimerLevel := s.shardInfo.ClusterTimerAckLevel[currentCluster]
-	for _, v := range s.shardInfo.ClusterTimerAckLevel {
+	for clusterName, v := range s.shardInfo.ClusterTimerAckLevel {
+		if !clusterInfo[clusterName].Enabled {
+			continue
+		}
+
 		if v.Before(minTimerLevel) {
 			minTimerLevel = v
 		}
@@ -1175,39 +1166,62 @@ func (s *contextImpl) emitShardInfoMetricsLogsLocked() {
 	transferLag := s.transferMaxReadLevel - s.shardInfo.TransferAckLevel
 	timerLag := time.Since(s.shardInfo.TimerAckLevel)
 
-	transferFailoverInProgress := len(s.shardInfo.TransferFailoverLevels)
-	timerFailoverInProgress := len(s.shardInfo.TimerFailoverLevels)
+	minCrossClusterLevel := int64(math.MaxInt64)
+	crossClusterLevelByCluster := make(map[string]int64)
+	for cluster, pqs := range s.shardInfo.CrossClusterProcessingQueueStates.StatesByCluster {
+		crossClusterLevel := int64(math.MaxInt64)
+		for _, queueState := range pqs {
+			crossClusterLevel = common.MinInt64(crossClusterLevel, queueState.GetAckLevel())
+		}
+		crossClusterLevelByCluster[cluster] = crossClusterLevel
+		minCrossClusterLevel = common.MinInt64(minCrossClusterLevel, crossClusterLevel)
+	}
+	crossClusterLag := s.transferMaxReadLevel - minCrossClusterLevel
+	if minCrossClusterLevel == 0 {
+		crossClusterLag = 0
+	}
+
+	transferFailoverInProgress := len(s.transferFailoverLevels)
+	timerFailoverInProgress := len(s.timerFailoverLevels)
 
 	if s.config.EmitShardDiffLog() &&
 		(logWarnTransferLevelDiff < diffTransferLevel ||
 			logWarnTimerLevelDiff < diffTimerLevel ||
 			logWarnTransferLevelDiff < transferLag ||
-			logWarnTimerLevelDiff < timerLag) {
+			logWarnTimerLevelDiff < timerLag ||
+			logWarnCrossClusterLevelLag < crossClusterLag) {
 
 		logger := s.logger.WithTags(
 			tag.ShardTime(s.remoteClusterCurrentTime),
 			tag.ShardReplicationAck(s.shardInfo.ReplicationAckLevel),
 			tag.ShardTimerAcks(s.shardInfo.ClusterTimerAckLevel),
-			tag.ShardTransferAcks(s.shardInfo.ClusterTransferAckLevel))
+			tag.ShardTransferAcks(s.shardInfo.ClusterTransferAckLevel),
+			tag.ShardCrossClusterAcks(crossClusterLevelByCluster),
+		)
 
 		logger.Warn("Shard ack levels diff exceeds warn threshold.")
 	}
 
-	s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTransferDiffTimer, time.Duration(diffTransferLevel))
-	s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTimerDiffTimer, diffTimerLevel)
+	metricsScope := s.GetMetricsClient().Scope(metrics.ShardInfoScope)
+	metricsScope.RecordTimer(metrics.ShardInfoTransferDiffTimer, time.Duration(diffTransferLevel))
+	metricsScope.RecordTimer(metrics.ShardInfoTimerDiffTimer, diffTimerLevel)
 
-	s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoReplicationLagTimer, time.Duration(replicationLag))
-	s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTransferLagTimer, time.Duration(transferLag))
-	s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTimerLagTimer, timerLag)
+	metricsScope.RecordTimer(metrics.ShardInfoReplicationLagTimer, time.Duration(replicationLag))
+	metricsScope.RecordTimer(metrics.ShardInfoTransferLagTimer, time.Duration(transferLag))
+	metricsScope.RecordTimer(metrics.ShardInfoTimerLagTimer, timerLag)
+	for cluster, crossClusterLag := range crossClusterLevelByCluster {
+		metricsScope.Tagged(metrics.TargetClusterTag(cluster)).RecordTimer(metrics.ShardInfoCrossClusterLagTimer, time.Duration(crossClusterLag))
+	}
 
-	s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTransferFailoverInProgressTimer, time.Duration(transferFailoverInProgress))
-	s.GetMetricsClient().RecordTimer(metrics.ShardInfoScope, metrics.ShardInfoTimerFailoverInProgressTimer, time.Duration(timerFailoverInProgress))
+	metricsScope.RecordTimer(metrics.ShardInfoTransferFailoverInProgressTimer, time.Duration(transferFailoverInProgress))
+	metricsScope.RecordTimer(metrics.ShardInfoTimerFailoverInProgressTimer, time.Duration(timerFailoverInProgress))
 }
 
 func (s *contextImpl) allocateTaskIDsLocked(
 	domainEntry *cache.DomainCacheEntry,
 	workflowID string,
 	transferTasks []persistence.Task,
+	crossClusterTasks []persistence.Task,
 	replicationTasks []persistence.Task,
 	timerTasks []persistence.Task,
 	transferMaxReadLevel *int64,
@@ -1220,15 +1234,24 @@ func (s *contextImpl) allocateTaskIDsLocked(
 		return err
 	}
 	if err := s.allocateTransferIDsLocked(
-		replicationTasks,
+		crossClusterTasks,
 		transferMaxReadLevel,
 	); err != nil {
 		return err
 	}
-	return s.allocateTimerIDsLocked(
+	if err := s.allocateTimerIDsLocked(
 		domainEntry,
 		workflowID,
 		timerTasks,
+	); err != nil {
+		return err
+	}
+
+	// Ensure that task IDs for replication tasks are generated last.
+	// This allows optimizing replication by checking whether there no potential tasks to read.
+	return s.allocateTransferIDsLocked(
+		replicationTasks,
+		transferMaxReadLevel,
 	)
 }
 
@@ -1245,7 +1268,10 @@ func (s *contextImpl) allocateTransferIDsLocked(
 		}
 		s.logger.Debug(fmt.Sprintf("Assigning task ID: %v", id))
 		task.SetTaskID(id)
-		task.SetVisibilityTimestamp(now)
+		// only set task visibility timestamp if it's not set
+		if task.GetVisibilityTimestamp().IsZero() {
+			task.SetVisibilityTimestamp(now)
+		}
 		*transferMaxReadLevel = id
 	}
 	return nil
@@ -1327,6 +1353,9 @@ func (s *contextImpl) ReplicateFailoverMarkers(
 	ctx context.Context,
 	markers []*persistence.FailoverMarkerTask,
 ) error {
+	if s.isClosed() {
+		return ErrShardClosed
+	}
 
 	tasks := make([]persistence.Task, 0, len(markers))
 	for _, marker := range markers {
@@ -1343,37 +1372,34 @@ func (s *contextImpl) ReplicateFailoverMarkers(
 	); err != nil {
 		return err
 	}
-	defer s.updateMaxReadLevelLocked(transferMaxReadLevel)
 
 	var err error
-Retry_Loop:
-	for attempt := int32(0); attempt < conditionalRetryCount && ctx.Err() == nil; attempt++ {
-		err = s.executionManager.CreateFailoverMarkerTasks(
-			ctx,
-			&persistence.CreateFailoverMarkersRequest{
-				RangeID: s.getRangeID(),
-				Markers: markers,
-			},
+	if s.isClosed() {
+		return ErrShardClosed
+	}
+	err = s.executionManager.CreateFailoverMarkerTasks(
+		ctx,
+		&persistence.CreateFailoverMarkersRequest{
+			RangeID: s.getRangeID(),
+			Markers: markers,
+		},
+	)
+	switch err.(type) {
+	case nil:
+		// Update MaxReadLevel if write to DB succeeds
+		s.updateMaxReadLevelLocked(transferMaxReadLevel)
+	case *persistence.ShardOwnershipLostError:
+		// do not retry on ShardOwnershipLostError
+		s.logger.Warn(
+			"Closing shard: ReplicateFailoverMarkers failed due to stolen shard.",
+			tag.Error(err),
 		)
-		switch err.(type) {
-		case nil:
-			break Retry_Loop
-		case *persistence.ShardOwnershipLostError:
-			// do not retry on ShardOwnershipLostError
-			s.logger.Warn(
-				"Closing shard: ReplicateFailoverMarkers failed due to stolen shard.",
-				tag.ShardID(s.GetShardID()),
-				tag.Error(err),
-			)
-			s.closeShard()
-			break Retry_Loop
-		default:
-			s.logger.Error(
-				"Failed to insert the failover marker into replication queue.",
-				tag.Error(err),
-				tag.Attempt(attempt),
-			)
-		}
+		s.closeShard()
+	default:
+		s.logger.Error(
+			"Failed to insert the failover marker into replication queue.",
+			tag.Error(err),
+		)
 	}
 	return err
 }
@@ -1387,7 +1413,8 @@ func (s *contextImpl) AddingPendingFailoverMarker(
 		return err
 	}
 	// domain is active, the marker is expired
-	if domainEntry.IsDomainActive() || domainEntry.GetFailoverVersion() > marker.GetFailoverVersion() {
+	isActive, _ := domainEntry.IsActiveIn(s.GetClusterMetadata().GetCurrentClusterName())
+	if isActive || domainEntry.GetFailoverVersion() > marker.GetFailoverVersion() {
 		s.logger.Info("Skipped out-of-date failover marker", tag.WorkflowDomainName(domainEntry.GetInfo().Name))
 		return nil
 	}
@@ -1395,11 +1422,7 @@ func (s *contextImpl) AddingPendingFailoverMarker(
 	s.Lock()
 	defer s.Unlock()
 
-	s.pendingFailoverMarkers = append(s.pendingFailoverMarkers, marker)
-	if err := s.updateFailoverMarkersInShardInfoLocked(); err != nil {
-		s.logger.Error("Failed to add failover marker.", tag.Error(err), tag.WorkflowDomainName(domainEntry.GetInfo().Name))
-		return err
-	}
+	s.shardInfo.PendingFailoverMarkers = append(s.shardInfo.PendingFailoverMarkers, marker)
 	return s.forceUpdateShardInfoLocked()
 }
 
@@ -1407,20 +1430,21 @@ func (s *contextImpl) ValidateAndUpdateFailoverMarkers() ([]*types.FailoverMarke
 
 	completedFailoverMarkers := make(map[*types.FailoverMarkerAttributes]struct{})
 	s.RLock()
-	for _, marker := range s.pendingFailoverMarkers {
+	for _, marker := range s.shardInfo.PendingFailoverMarkers {
 		domainEntry, err := s.GetDomainCache().GetDomainByID(marker.GetDomainID())
 		if err != nil {
 			s.RUnlock()
 			return nil, err
 		}
-		if domainEntry.IsDomainActive() || domainEntry.GetFailoverVersion() > marker.GetFailoverVersion() {
+		isActive, _ := domainEntry.IsActiveIn(s.GetClusterMetadata().GetCurrentClusterName())
+		if isActive || domainEntry.GetFailoverVersion() > marker.GetFailoverVersion() {
 			completedFailoverMarkers[marker] = struct{}{}
 		}
 	}
 
 	if len(completedFailoverMarkers) == 0 {
 		s.RUnlock()
-		return s.pendingFailoverMarkers, nil
+		return s.shardInfo.PendingFailoverMarkers, nil
 	}
 	s.RUnlock()
 
@@ -1428,27 +1452,18 @@ func (s *contextImpl) ValidateAndUpdateFailoverMarkers() ([]*types.FailoverMarke
 	s.Lock()
 	defer s.Unlock()
 
-	for idx, marker := range s.pendingFailoverMarkers {
+	for idx, marker := range s.shardInfo.PendingFailoverMarkers {
 		if _, ok := completedFailoverMarkers[marker]; ok {
-			s.pendingFailoverMarkers[idx] = s.pendingFailoverMarkers[len(s.pendingFailoverMarkers)-1]
-			s.pendingFailoverMarkers[len(s.pendingFailoverMarkers)-1] = nil
-			s.pendingFailoverMarkers = s.pendingFailoverMarkers[:len(s.pendingFailoverMarkers)-1]
+			s.shardInfo.PendingFailoverMarkers[idx] = s.shardInfo.PendingFailoverMarkers[len(s.shardInfo.PendingFailoverMarkers)-1]
+			s.shardInfo.PendingFailoverMarkers[len(s.shardInfo.PendingFailoverMarkers)-1] = nil
+			s.shardInfo.PendingFailoverMarkers = s.shardInfo.PendingFailoverMarkers[:len(s.shardInfo.PendingFailoverMarkers)-1]
 		}
-	}
-	if err := s.updateFailoverMarkersInShardInfoLocked(); err != nil {
-		s.logger.Error("Failed to update failover marker in shard.", tag.Error(err))
-		return nil, err
 	}
 	if err := s.updateShardInfoLocked(); err != nil {
 		return nil, err
 	}
 
-	return s.pendingFailoverMarkers, nil
-}
-
-func (s *contextImpl) updateFailoverMarkersInShardInfoLocked() error {
-	s.shardInfo.PendingFailoverMarkers = s.pendingFailoverMarkers
-	return nil
+	return s.shardInfo.PendingFailoverMarkers, nil
 }
 
 func acquireShard(
@@ -1491,24 +1506,24 @@ func acquireShard(
 		return shardItem.GetShardManager().CreateShard(context.Background(), &persistence.CreateShardRequest{ShardInfo: shardInfo})
 	}
 
-	err := backoff.Retry(getShard, retryPolicy, retryPredicate)
+	throttleRetry := backoff.NewThrottleRetry(
+		backoff.WithRetryPolicy(retryPolicy),
+		backoff.WithRetryableError(retryPredicate),
+	)
+	err := throttleRetry.Do(context.Background(), getShard)
 	if err != nil {
-		shardItem.logger.Error("Fail to acquire shard.", tag.ShardID(shardItem.shardID), tag.Error(err))
+		shardItem.logger.Error("Fail to acquire shard.", tag.Error(err))
 		return nil, err
 	}
 
-	updatedShardInfo := copyShardInfo(shardInfo)
+	updatedShardInfo := shardInfo.Copy()
 	ownershipChanged := shardInfo.Owner != shardItem.GetHostInfo().Identity()
 	updatedShardInfo.Owner = shardItem.GetHostInfo().Identity()
 
 	// initialize the cluster current time to be the same as ack level
 	remoteClusterCurrentTime := make(map[string]time.Time)
 	timerMaxReadLevelMap := make(map[string]time.Time)
-	for clusterName, info := range shardItem.GetClusterMetadata().GetAllClusterInfo() {
-		if !info.Enabled {
-			continue
-		}
-
+	for clusterName := range shardItem.GetClusterMetadata().GetEnabledClusterInfo() {
 		if clusterName != shardItem.GetClusterMetadata().GetCurrentClusterName() {
 			if currentTime, ok := shardInfo.ClusterTimerAckLevel[clusterName]; ok {
 				remoteClusterCurrentTime[clusterName] = currentTime
@@ -1524,21 +1539,18 @@ func acquireShard(
 		timerMaxReadLevelMap[clusterName] = timerMaxReadLevelMap[clusterName].Truncate(time.Millisecond)
 	}
 
-	transferProcessingQueueStates := shardInfo.TransferProcessingQueueStates
-	if err != nil {
-		return nil, err
-	}
-	if transferProcessingQueueStates == nil {
-		transferProcessingQueueStates = &types.ProcessingQueueStates{
+	if updatedShardInfo.TransferProcessingQueueStates == nil {
+		updatedShardInfo.TransferProcessingQueueStates = &types.ProcessingQueueStates{
 			StatesByCluster: make(map[string][]*types.ProcessingQueueState),
 		}
 	}
-	timerProcessingQueueStates := shardInfo.TimerProcessingQueueStates
-	if err != nil {
-		return nil, err
+	if updatedShardInfo.CrossClusterProcessingQueueStates == nil {
+		updatedShardInfo.CrossClusterProcessingQueueStates = &types.ProcessingQueueStates{
+			StatesByCluster: make(map[string][]*types.ProcessingQueueState),
+		}
 	}
-	if timerProcessingQueueStates == nil {
-		timerProcessingQueueStates = &types.ProcessingQueueStates{
+	if updatedShardInfo.TimerProcessingQueueStates == nil {
+		updatedShardInfo.TimerProcessingQueueStates = &types.ProcessingQueueStates{
 			StatesByCluster: make(map[string][]*types.ProcessingQueueState),
 		}
 	}
@@ -1558,9 +1570,8 @@ func acquireShard(
 		config:                         shardItem.config,
 		remoteClusterCurrentTime:       remoteClusterCurrentTime,
 		timerMaxReadLevelMap:           timerMaxReadLevelMap, // use ack to init read level
-		transferProcessingQueueStates:  transferProcessingQueueStates,
-		timerProcessingQueueStates:     timerProcessingQueueStates,
-		pendingFailoverMarkers:         []*types.FailoverMarkerAttributes{},
+		transferFailoverLevels:         make(map[string]TransferFailoverLevel),
+		timerFailoverLevels:            make(map[string]TimerFailoverLevel),
 		logger:                         shardItem.logger,
 		throttledLogger:                shardItem.throttledLogger,
 		previousShardOwnerWasDifferent: ownershipChanged,
@@ -1573,6 +1584,7 @@ func acquireShard(
 		context.config,
 		context.logger,
 		context.Resource.GetMetricsClient(),
+		shardItem.GetDomainCache(),
 	)
 
 	context.logger.Debug(fmt.Sprintf("Global event cache mode: %v", context.config.EventsCacheGlobalEnable()))
@@ -1583,53 +1595,4 @@ func acquireShard(
 	}
 
 	return context, nil
-}
-
-func copyShardInfo(shardInfo *persistence.ShardInfo) *persistence.ShardInfo {
-	transferFailoverLevels := map[string]persistence.TransferFailoverLevel{}
-	for k, v := range shardInfo.TransferFailoverLevels {
-		transferFailoverLevels[k] = v
-	}
-	timerFailoverLevels := map[string]persistence.TimerFailoverLevel{}
-	for k, v := range shardInfo.TimerFailoverLevels {
-		timerFailoverLevels[k] = v
-	}
-	clusterTransferAckLevel := make(map[string]int64)
-	for k, v := range shardInfo.ClusterTransferAckLevel {
-		clusterTransferAckLevel[k] = v
-	}
-	clusterTimerAckLevel := make(map[string]time.Time)
-	for k, v := range shardInfo.ClusterTimerAckLevel {
-		clusterTimerAckLevel[k] = v
-	}
-	clusterReplicationLevel := make(map[string]int64)
-	for k, v := range shardInfo.ClusterReplicationLevel {
-		clusterReplicationLevel[k] = v
-	}
-	replicationDLQAckLevel := make(map[string]int64)
-	for k, v := range shardInfo.ReplicationDLQAckLevel {
-		replicationDLQAckLevel[k] = v
-	}
-	shardInfoCopy := &persistence.ShardInfo{
-		ShardID:                       shardInfo.ShardID,
-		Owner:                         shardInfo.Owner,
-		RangeID:                       shardInfo.RangeID,
-		StolenSinceRenew:              shardInfo.StolenSinceRenew,
-		ReplicationAckLevel:           shardInfo.ReplicationAckLevel,
-		TransferAckLevel:              shardInfo.TransferAckLevel,
-		TimerAckLevel:                 shardInfo.TimerAckLevel,
-		TransferFailoverLevels:        transferFailoverLevels,
-		TimerFailoverLevels:           timerFailoverLevels,
-		ClusterTransferAckLevel:       clusterTransferAckLevel,
-		ClusterTimerAckLevel:          clusterTimerAckLevel,
-		TransferProcessingQueueStates: shardInfo.TransferProcessingQueueStates,
-		TimerProcessingQueueStates:    shardInfo.TimerProcessingQueueStates,
-		DomainNotificationVersion:     shardInfo.DomainNotificationVersion,
-		ClusterReplicationLevel:       clusterReplicationLevel,
-		ReplicationDLQAckLevel:        replicationDLQAckLevel,
-		PendingFailoverMarkers:        shardInfo.PendingFailoverMarkers,
-		UpdatedAt:                     shardInfo.UpdatedAt,
-	}
-
-	return shardInfoCopy
 }

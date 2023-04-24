@@ -21,16 +21,12 @@
 package cassandra
 
 import (
-	"errors"
-
 	"github.com/uber/cadence/common/config"
 	"github.com/uber/cadence/common/log"
+	"github.com/uber/cadence/common/log/tag"
+	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/persistence/nosql/nosqlplugin"
 	"github.com/uber/cadence/common/persistence/nosql/nosqlplugin/cassandra/gocql"
-)
-
-var (
-	errConditionFailed = errors.New("internal condition fail error")
 )
 
 // cdb represents a logical connection to Cassandra database
@@ -38,30 +34,21 @@ type cdb struct {
 	logger  log.Logger
 	client  gocql.Client
 	session gocql.Session
+	cfg     *config.NoSQL
+	dc      *persistence.DynamicConfiguration
 }
 
 var _ nosqlplugin.DB = (*cdb)(nil)
 
-// NewCassandraDBFromSession returns a DB from a session
-func NewCassandraDBFromSession(client gocql.Client, session gocql.Session, logger log.Logger) nosqlplugin.DB {
+// newCassandraDBFromSession returns a DB from a session
+func newCassandraDBFromSession(cfg *config.NoSQL, session gocql.Session, logger log.Logger, dc *persistence.DynamicConfiguration) *cdb {
 	return &cdb{
-		client:  client,
+		client:  gocql.GetRegisteredClient(),
 		session: session,
 		logger:  logger,
+		cfg:     cfg,
+		dc:      dc,
 	}
-}
-
-// NewCassandraDB return a new DB
-func NewCassandraDB(cfg config.Cassandra, logger log.Logger) (nosqlplugin.DB, error) {
-	session, err := CreateSession(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return &cdb{
-		client:  gocql.NewClient(),
-		session: session,
-		logger:  logger,
-	}, nil
 }
 
 func (db *cdb) Close() {
@@ -86,9 +73,38 @@ func (db *cdb) IsThrottlingError(err error) bool {
 	return db.client.IsThrottlingError(err)
 }
 
-func (db *cdb) IsConditionFailedError(err error) bool {
-	if err == errConditionFailed {
-		return true
+func (db *cdb) IsDBUnavailableError(err error) bool {
+	return db.client.IsDBUnavailableError(err)
+}
+
+func (db *cdb) isCassandraConsistencyError(err error) bool {
+	return db.client.IsCassandraConsistencyError(err)
+}
+
+func (db *cdb) executeWithConsistencyAll(q gocql.Query) error {
+	if db.dc != nil && db.dc.EnableCassandraAllConsistencyLevelDelete() {
+		if err := q.Consistency(cassandraAllConslevel).Exec(); err != nil {
+			if db.isCassandraConsistencyError(err) {
+				db.logger.Warn("unable to complete the delete operation due to consistency issue", tag.Error(err))
+				return q.Consistency(cassandraDefaultConsLevel).Exec()
+			}
+			return err
+		}
+		return nil
 	}
-	return false
+	return q.Exec()
+}
+
+func (db *cdb) executeBatchWithConsistencyAll(b gocql.Batch) error {
+	if db.dc != nil && db.dc.EnableCassandraAllConsistencyLevelDelete() {
+		if err := db.session.ExecuteBatch(b.Consistency(cassandraAllConslevel)); err != nil {
+			if db.isCassandraConsistencyError(err) {
+				db.logger.Warn("unable to complete the delete operation due to consistency issue", tag.Error(err))
+				return db.session.ExecuteBatch(b.Consistency(cassandraDefaultConsLevel))
+			}
+			return err
+		}
+		return nil
+	}
+	return db.session.ExecuteBatch(b)
 }

@@ -35,14 +35,14 @@ var (
 	// Revision is the VCS revision associated with this build. Overridden using ldflags
 	// at compile time. Example:
 	// $ go build -ldflags "-X github.com/uber/cadence/common/metrics.Revision=abcdef" ...
-	// Adapted from: https://www.atatus.com/blog/golang-auto-build-versioning/
+	// see go-build-ldflags.sh for GIT_REVISION
 	Revision = "unknown"
 
 	// Branch is the VCS branch associated with this build.
 	Branch = "unknown"
 
-	// Version is the version associated with this build.
-	Version = "unknown"
+	// ReleaseVersion is the version associated with this build.
+	ReleaseVersion = "unknown"
 
 	// BuildDate is the date this build was created.
 	BuildDate = "unknown"
@@ -52,6 +52,8 @@ var (
 
 	// goVersion is the current runtime version.
 	goVersion = runtime.Version()
+	// cadenceVersion is the current version of cadence
+	cadenceVersion = VersionString
 )
 
 const (
@@ -99,11 +101,12 @@ func NewRuntimeMetricsReporter(
 	}
 	rReporter.buildInfoScope = scope.Tagged(
 		map[string]string{
-			revisionTag:     Revision,
-			branchTag:       Branch,
-			buildDateTag:    BuildDate,
-			buildVersionTag: Version,
-			goVersionTag:    goVersion,
+			revisionTag:       Revision,
+			branchTag:         Branch,
+			buildDateTag:      BuildDate,
+			buildVersionTag:   ReleaseVersion,
+			goVersionTag:      goVersion,
+			cadenceVersionTag: cadenceVersion,
 		},
 	)
 	sec, err := strconv.ParseInt(BuildTimeUnix, base, bitSize)

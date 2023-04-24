@@ -24,13 +24,13 @@ package dynamicconfig
 type Filter int
 
 func (f Filter) String() string {
-	if f <= unknownFilter || f > ClusterName {
-		return filters[unknownFilter]
+	if f <= UnknownFilter || f > WorkflowID {
+		return filters[UnknownFilter]
 	}
 	return filters[f]
 }
 
-func parseFilter(filterName string) Filter {
+func ParseFilter(filterName string) Filter {
 	switch filterName {
 	case "domainName":
 		return DomainName
@@ -44,8 +44,12 @@ func parseFilter(filterName string) Filter {
 		return ShardID
 	case "clusterName":
 		return ClusterName
+	case "workflowID":
+		return WorkflowID
+	case "workflowType":
+		return WorkflowType
 	default:
-		return unknownFilter
+		return UnknownFilter
 	}
 }
 
@@ -57,10 +61,12 @@ var filters = []string{
 	"taskType",
 	"shardID",
 	"clusterName",
+	"workflowID",
+	"workflowType",
 }
 
 const (
-	unknownFilter Filter = iota
+	UnknownFilter Filter = iota
 	// DomainName is the domain name
 	DomainName
 	// DomainID is the domain id
@@ -73,9 +79,13 @@ const (
 	ShardID
 	// ClusterName is the cluster name in a multi-region setup
 	ClusterName
+	// WorkflowID is the workflow id
+	WorkflowID
+	// WorkflowType is the workflow type name
+	WorkflowType
 
-	// lastFilterTypeForTest must be the last one in this const group for testing purpose
-	lastFilterTypeForTest
+	// LastFilterTypeForTest must be the last one in this const group for testing purpose
+	LastFilterTypeForTest
 )
 
 // FilterOption is used to provide filters for dynamic config keys
@@ -120,5 +130,19 @@ func ShardIDFilter(shardID int) FilterOption {
 func ClusterNameFilter(clusterName string) FilterOption {
 	return func(filterMap map[Filter]interface{}) {
 		filterMap[ClusterName] = clusterName
+	}
+}
+
+// WorkflowIDFilter filters by workflowID
+func WorkflowIDFilter(workflowID string) FilterOption {
+	return func(filterMap map[Filter]interface{}) {
+		filterMap[WorkflowID] = workflowID
+	}
+}
+
+// WorkflowType filters by workflow type name
+func WorkflowTypeFilter(name string) FilterOption {
+	return func(filterMap map[Filter]interface{}) {
+		filterMap[WorkflowType] = name
 	}
 }

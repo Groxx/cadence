@@ -24,11 +24,13 @@ import (
 	"context"
 	"io/ioutil"
 	"os"
+	"testing"
 	"time"
+
+	"github.com/uber/cadence/common/log/loggerimpl"
 
 	"github.com/uber-go/tally"
 
-	"github.com/uber/cadence/client"
 	adminClient "github.com/uber/cadence/client/admin"
 	"github.com/uber/cadence/common/archiver"
 	"github.com/uber/cadence/common/archiver/filestore"
@@ -46,7 +48,11 @@ import (
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/mocks"
 	"github.com/uber/cadence/common/persistence"
-	"github.com/uber/cadence/common/persistence/cassandra"
+	"github.com/uber/cadence/common/persistence/nosql"
+	"github.com/uber/cadence/common/persistence/persistence-tests/testcluster"
+	"github.com/uber/cadence/testflags"
+
+	// the import is a test dependency
 	_ "github.com/uber/cadence/common/persistence/nosql/nosqlplugin/cassandra/gocql/public"
 	persistencetests "github.com/uber/cadence/common/persistence/persistence-tests"
 	"github.com/uber/cadence/common/persistence/sql"
@@ -76,9 +82,9 @@ type (
 	TestClusterConfig struct {
 		FrontendAddress       string
 		EnableArchival        bool
-		IsMasterCluster       bool
+		IsPrimaryCluster      bool
 		ClusterNo             int
-		ClusterMetadata       config.ClusterMetadata
+		ClusterGroupMetadata  config.ClusterGroupMetadata
 		MessagingClientConfig *MessagingClientConfig
 		Persistence           persistencetests.TestBaseOptions
 		HistoryConfig         *HistoryConfig
@@ -113,6 +119,8 @@ func NewCluster(options *TestClusterConfig, logger log.Logger, params persistenc
 	setupShards(testBase, options.HistoryConfig.NumHistoryShards, logger)
 	archiverBase := newArchiverBase(options.EnableArchival, logger)
 	messagingClient := getMessagingClient(options.MessagingClientConfig, logger)
+	pConfig := testBase.Config()
+	pConfig.NumHistoryShards = options.HistoryConfig.NumHistoryShards
 	var esClient elasticsearch.GenericClient
 	if options.WorkerConfig.EnableIndexer {
 		var err error
@@ -120,24 +128,23 @@ func NewCluster(options *TestClusterConfig, logger log.Logger, params persistenc
 		if err != nil {
 			return nil, err
 		}
+		pConfig.AdvancedVisibilityStore = "es-visibility"
 	}
 
-	pConfig := testBase.Config()
-	pConfig.NumHistoryShards = options.HistoryConfig.NumHistoryShards
 	scope := tally.NewTestScope("integration-test", nil)
 	metricsClient := metrics.NewClient(scope, metrics.ServiceIdx(0))
 	domainReplicationQueue := domain.NewReplicationQueue(
 		testBase.DomainReplicationQueueMgr,
-		options.ClusterMetadata.CurrentClusterName,
+		options.ClusterGroupMetadata.CurrentClusterName,
 		metricsClient,
 		logger,
 	)
+	aConfig := noopAuthorizationConfig()
 	cadenceParams := &CadenceParams{
 		ClusterMetadata:               params.ClusterMetadata,
 		PersistenceConfig:             pConfig,
-		DispatcherProvider:            client.NewDNSYarpcDispatcherProvider(logger, 0),
 		MessagingClient:               messagingClient,
-		MetadataMgr:                   testBase.MetadataManager,
+		DomainManager:                 testBase.DomainManager,
 		HistoryV2Mgr:                  testBase.HistoryV2Mgr,
 		ExecutionMgrFactory:           testBase.ExecutionMgrFactory,
 		DomainReplicationQueue:        domainReplicationQueue,
@@ -150,7 +157,8 @@ func NewCluster(options *TestClusterConfig, logger log.Logger, params persistenc
 		HistoryConfig:                 options.HistoryConfig,
 		WorkerConfig:                  options.WorkerConfig,
 		MockAdminClient:               options.MockAdminClient,
-		DomainReplicationTaskExecutor: domain.NewReplicationTaskExecutor(testBase.MetadataManager, clock.NewRealTimeSource(), logger),
+		DomainReplicationTaskExecutor: domain.NewReplicationTaskExecutor(testBase.DomainManager, clock.NewRealTimeSource(), logger),
+		AuthorizationConfig:           aConfig,
 	}
 	cluster := NewCadence(cadenceParams)
 	if err := cluster.Start(); err != nil {
@@ -160,38 +168,53 @@ func NewCluster(options *TestClusterConfig, logger log.Logger, params persistenc
 	return &TestCluster{testBase: testBase, archiverBase: archiverBase, host: cluster}, nil
 }
 
+func noopAuthorizationConfig() config.Authorization {
+	return config.Authorization{
+		OAuthAuthorizer: config.OAuthAuthorizer{
+			Enable: false,
+		},
+		NoopAuthorizer: config.NoopAuthorizer{
+			Enable: true,
+		},
+	}
+}
+
 // NewClusterMetadata returns cluster metdata from config
-func NewClusterMetadata(options *TestClusterConfig, logger log.Logger) cluster.Metadata {
-	clusterMetadata := cluster.GetTestClusterMetadata(
-		options.ClusterMetadata.EnableGlobalDomain,
-		options.IsMasterCluster,
-	)
-	if !options.IsMasterCluster && options.ClusterMetadata.MasterClusterName != "" { // xdc cluster metadata setup
+func NewClusterMetadata(options *TestClusterConfig) cluster.Metadata {
+	clusterMetadata := cluster.GetTestClusterMetadata(options.IsPrimaryCluster)
+	if !options.IsPrimaryCluster && options.ClusterGroupMetadata.PrimaryClusterName != "" { // xdc cluster metadata setup
 		clusterMetadata = cluster.NewMetadata(
-			logger,
-			dynamicconfig.GetBoolPropertyFn(options.ClusterMetadata.EnableGlobalDomain),
-			options.ClusterMetadata.FailoverVersionIncrement,
-			options.ClusterMetadata.MasterClusterName,
-			options.ClusterMetadata.CurrentClusterName,
-			options.ClusterMetadata.ClusterInformation,
+			options.ClusterGroupMetadata.FailoverVersionIncrement,
+			options.ClusterGroupMetadata.PrimaryClusterName,
+			options.ClusterGroupMetadata.CurrentClusterName,
+			options.ClusterGroupMetadata.ClusterGroup,
+			func(domain string) bool { return false },
+			metrics.NewNoopMetricsClient(),
+			loggerimpl.NewNopLogger(),
 		)
 	}
 	return clusterMetadata
 }
 
-func NewPersistenceTestCluster(clusterConfig *TestClusterConfig) persistencetests.PersistenceTestCluster {
+func NewPersistenceTestCluster(t *testing.T, clusterConfig *TestClusterConfig) testcluster.PersistenceTestCluster {
 	// NOTE: Override here to keep consistent. clusterConfig will be used in the test for some purposes.
 	clusterConfig.Persistence.StoreType = TestFlags.PersistenceType
-	clusterConfig.Persistence.SQLDBPluginName = TestFlags.SQLPluginName
+	clusterConfig.Persistence.DBPluginName = TestFlags.SQLPluginName
 
-	var testCluster persistencetests.PersistenceTestCluster
+	var testCluster testcluster.PersistenceTestCluster
 	if TestFlags.PersistenceType == config.StoreTypeCassandra {
-		testCluster = cassandra.NewTestCluster(clusterConfig.Persistence.DBName, clusterConfig.Persistence.DBUsername, clusterConfig.Persistence.DBPassword, clusterConfig.Persistence.DBHost, clusterConfig.Persistence.DBPort, clusterConfig.Persistence.SchemaDir)
+		// TODO refactor to support other NoSQL
+		ops := clusterConfig.Persistence
+		ops.DBPluginName = "cassandra"
+		testflags.RequireCassandra(t)
+		testCluster = nosql.NewTestCluster(ops.DBPluginName, ops.DBName, ops.DBUsername, ops.DBPassword, ops.DBHost, ops.DBPort, ops.ProtoVersion, "")
 	} else if TestFlags.PersistenceType == config.StoreTypeSQL {
 		var ops *persistencetests.TestBaseOptions
 		if TestFlags.SQLPluginName == mysql.PluginName {
+			testflags.RequireMySQL(t)
 			ops = mysql.GetTestClusterOption()
 		} else if TestFlags.SQLPluginName == postgres.PluginName {
+			testflags.RequirePostgres(t)
 			ops = postgres.GetTestClusterOption()
 		} else {
 			panic("not supported plugin " + TestFlags.SQLPluginName)

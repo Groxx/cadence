@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/uber/cadence/common/clock"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/log/tag"
 	"github.com/uber/cadence/common/metrics"
@@ -79,19 +78,16 @@ func NewTimerStandbyTaskExecutor(
 }
 
 func (t *timerStandbyTaskExecutor) Execute(
-	taskInfo Info,
+	task Task,
 	shouldProcessTask bool,
 ) error {
 
-	timerTask, ok := taskInfo.(*persistence.TimerTaskInfo)
+	timerTask, ok := task.GetInfo().(*persistence.TimerTaskInfo)
 	if !ok {
 		return errUnexpectedTask
 	}
 
-	if !shouldProcessTask &&
-		timerTask.TaskType != persistence.TaskTypeWorkflowTimeout &&
-		timerTask.TaskType != persistence.TaskTypeDeleteHistoryEvent {
-		// guarantee the processing of workflow execution history deletion
+	if !shouldProcessTask {
 		return nil
 	}
 
@@ -127,7 +123,7 @@ func (t *timerStandbyTaskExecutor) executeUserTimerTimeoutTask(
 
 	actionFn := func(ctx context.Context, wfContext execution.Context, mutableState execution.MutableState) (interface{}, error) {
 
-		timerSequence := t.getTimerSequence(mutableState)
+		timerSequence := execution.NewTimerSequence(mutableState)
 
 	Loop:
 		for _, timerSequenceID := range timerSequence.LoadAndSortUserTimers() {
@@ -138,7 +134,7 @@ func (t *timerStandbyTaskExecutor) executeUserTimerTimeoutTask(
 				return nil, &types.InternalServiceError{Message: errString}
 			}
 
-			if isExpired := timerSequence.IsExpired(
+			if _, isExpired := timerSequence.IsExpired(
 				timerTask.VisibilityTimestamp,
 				timerSequenceID,
 			); isExpired {
@@ -186,7 +182,7 @@ func (t *timerStandbyTaskExecutor) executeActivityTimeoutTask(
 
 	actionFn := func(ctx context.Context, wfContext execution.Context, mutableState execution.MutableState) (interface{}, error) {
 
-		timerSequence := t.getTimerSequence(mutableState)
+		timerSequence := execution.NewTimerSequence(mutableState)
 		updateMutableState := false
 
 	Loop:
@@ -198,7 +194,7 @@ func (t *timerStandbyTaskExecutor) executeActivityTimeoutTask(
 				return nil, &types.InternalServiceError{Message: errString}
 			}
 
-			if isExpired := timerSequence.IsExpired(
+			if _, isExpired := timerSequence.IsExpired(
 				timerTask.VisibilityTimestamp,
 				timerSequenceID,
 			); isExpired {
@@ -276,9 +272,15 @@ func (t *timerStandbyTaskExecutor) executeDecisionTimeoutTask(
 	timerTask *persistence.TimerTaskInfo,
 ) error {
 
-	// decision schedule to start timer task is a special snowflake.
-	// the schedule to start timer is for sticky decision, which is
-	// not applicable on the passive cluster
+	// decision schedule to start timer won't be generated for sticky decision,
+	// since sticky is cleared when applying events on passive.
+	// for normal decision, we don't know if a schedule to start timeout timer
+	// is generated or not since it's based on a dynamicconfig. On passive cluster,
+	// a timer task will be generated based on passive cluster's config, however, it
+	// may not match the active cluster.
+	// so we simply ignore the schedule to start timer here as the decision task will be
+	// pushed to matching without any timeout if's not started, and the workflow
+	// can continue execution after failover.
 	if timerTask.TimeoutType == int(types.TimeoutTypeScheduleToStart) {
 		return nil
 	}
@@ -397,16 +399,6 @@ func (t *timerStandbyTaskExecutor) getStandbyClusterTime() time.Time {
 	return t.shard.GetCurrentTime(t.clusterName).Add(t.shard.GetConfig().StandbyClusterDelay())
 }
 
-func (t *timerStandbyTaskExecutor) getTimerSequence(
-	mutableState execution.MutableState,
-) execution.TimerSequence {
-
-	timeSource := clock.NewEventTimeSource()
-	now := t.getStandbyClusterTime()
-	timeSource.Update(now)
-	return execution.NewTimerSequence(timeSource, mutableState)
-}
-
 func (t *timerStandbyTaskExecutor) processTimer(
 	ctx context.Context,
 	timerTask *persistence.TimerTaskInfo,
@@ -426,7 +418,7 @@ func (t *timerStandbyTaskExecutor) processTimer(
 		return err
 	}
 	defer func() {
-		if retError == ErrTaskRedispatch {
+		if isRedispatchErr(retError) {
 			release(nil)
 		} else {
 			release(retError)
@@ -459,14 +451,14 @@ func (t *timerStandbyTaskExecutor) fetchHistoryFromRemote(
 	_ context.Context,
 	taskInfo Info,
 	postActionInfo interface{},
-	log log.Logger,
+	_ log.Logger,
 ) error {
 
 	if postActionInfo == nil {
 		return nil
 	}
 
-	timerTask := taskInfo.(*persistence.TimerTaskInfo)
+	task := taskInfo.(*persistence.TimerTaskInfo)
 	resendInfo := postActionInfo.(*historyResendInfo)
 
 	t.metricsClient.IncCounter(metrics.HistoryRereplicationByTimerTaskScope, metrics.CadenceClientRequests)
@@ -478,9 +470,9 @@ func (t *timerStandbyTaskExecutor) fetchHistoryFromRemote(
 		// note history resender doesn't take in a context parameter, there's a separate dynamicconfig for
 		// controlling the timeout for resending history.
 		err = t.historyResender.SendSingleWorkflowHistory(
-			timerTask.DomainID,
-			timerTask.WorkflowID,
-			timerTask.RunID,
+			task.DomainID,
+			task.WorkflowID,
+			task.RunID,
 			resendInfo.lastEventID,
 			resendInfo.lastEventVersion,
 			nil,
@@ -488,21 +480,23 @@ func (t *timerStandbyTaskExecutor) fetchHistoryFromRemote(
 		)
 	} else {
 		err = &types.InternalServiceError{
-			Message: "timerQueueStandbyProcessor encounter empty historyResendInfo",
+			Message: fmt.Sprintf("incomplete historyResendInfo: %v", resendInfo),
 		}
 	}
 
 	if err != nil {
 		t.logger.Error("Error re-replicating history from remote.",
 			tag.ShardID(t.shard.GetShardID()),
-			tag.WorkflowDomainID(timerTask.DomainID),
-			tag.WorkflowID(timerTask.WorkflowID),
-			tag.WorkflowRunID(timerTask.RunID),
-			tag.ClusterName(t.clusterName))
+			tag.WorkflowDomainID(task.DomainID),
+			tag.WorkflowID(task.WorkflowID),
+			tag.WorkflowRunID(task.RunID),
+			tag.SourceCluster(t.clusterName),
+			tag.Error(err),
+		)
 	}
 
 	// return error so task processing logic will retry
-	return ErrTaskRedispatch
+	return &redispatchError{Reason: "fetchHistoryFromRemote"}
 }
 
 func (t *timerStandbyTaskExecutor) getCurrentTime() time.Time {

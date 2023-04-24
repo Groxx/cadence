@@ -21,6 +21,8 @@
 package testdata
 
 import (
+	"github.com/pborman/uuid"
+
 	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/types"
 )
@@ -567,11 +569,18 @@ var (
 		DecisionTaskCompletedEventID: EventID1,
 		SearchAttributes:             &SearchAttributes,
 	}
+	GetFailoverInfoRequest = types.GetFailoverInfoRequest{
+		DomainID: uuid.NewUUID().String(),
+	}
+	GetFailoverInfoResponse = types.GetFailoverInfoResponse{
+		CompletedShardCount: 0,
+		PendingShards:       []int32{1, 2, 3},
+	}
 )
 
 func generateEvent(modifier func(e *types.HistoryEvent)) types.HistoryEvent {
 	e := types.HistoryEvent{
-		EventID:   EventID1,
+		ID:        EventID1,
 		Timestamp: &Timestamp1,
 		Version:   Version1,
 		TaskID:    TaskID,

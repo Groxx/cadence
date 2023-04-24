@@ -55,6 +55,7 @@ func ConcreteExecution(
 			WorkflowID: request.WorkflowID,
 			RunID:      request.RunID,
 		},
+		DomainName: request.DomainName,
 	}
 	e, err := retryer.GetWorkflowExecution(ctx, &req)
 	if err != nil {
@@ -62,6 +63,9 @@ func ConcreteExecution(
 	}
 
 	branchToken, branch, err := getBranchToken(e.State.ExecutionInfo.BranchToken, e.State.VersionHistories, codec.NewThriftRWEncoder())
+	if err != nil {
+		return nil, err
+	}
 
 	return &entity.ConcreteExecution{
 		BranchToken: branchToken,
@@ -93,7 +97,7 @@ func getConcreteExecutions(
 		if err != nil {
 			return pagination.Page{}, err
 		}
-		executions := make([]pagination.Entity, len(resp.Executions), len(resp.Executions))
+		executions := make([]pagination.Entity, len(resp.Executions))
 		for i, e := range resp.Executions {
 			branchToken, branch, err := getBranchToken(e.ExecutionInfo.BranchToken, e.VersionHistories, encoder)
 			if err != nil {

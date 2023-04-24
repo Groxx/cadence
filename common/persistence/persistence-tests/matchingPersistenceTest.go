@@ -108,7 +108,7 @@ func (s *MatchingPersistenceSuite) TestCreateTask() {
 		s.Equal(workflowExecution.RunID, resp.Tasks[0].RunID)
 		s.Equal(sid, resp.Tasks[0].ScheduleID)
 		s.True(resp.Tasks[0].CreatedTime.UnixNano() > 0)
-		if s.TaskMgr.GetName() != "cassandra" {
+		if s.TaskMgr.GetName() != "cassandra" && s.TaskMgr.GetName() != "shardedNosql" {
 			// cassandra uses TTL and expiry isn't stored as part of task state
 			s.True(time.Now().Before(resp.Tasks[0].Expiry))
 			s.True(resp.Tasks[0].Expiry.Before(time.Now().Add((defaultScheduleToStartTimeout + 1) * time.Second)))
@@ -141,10 +141,6 @@ func (s *MatchingPersistenceSuite) TestGetTasksWithNoMaxReadLevel() {
 	ctx, cancel := context.WithTimeout(context.Background(), testContextTimeout)
 	defer cancel()
 
-	if s.TaskMgr.GetName() == "cassandra" {
-		//this test is not applicable for cassandra persistence
-		return
-	}
 	domainID := "f1116985-d1f1-40e0-aba9-83344db915bc"
 	workflowExecution := types.WorkflowExecution{WorkflowID: "complete-decision-task-test",
 		RunID: "2aa0a74e-16ee-4f27-983d-48b07ec1915d"}
@@ -286,15 +282,15 @@ func (s *MatchingPersistenceSuite) TestCompleteTasksLessThan() {
 	for _, tc := range testCases {
 		req.TaskID = tc.taskID
 		req.Limit = tc.limit
-		nRows, err := s.TaskMgr.CompleteTasksLessThan(ctx, req)
+		result, err := s.TaskMgr.CompleteTasksLessThan(ctx, req)
 		s.NoError(err)
 		resp, err := s.GetTasks(ctx, domainID, taskList, p.TaskListTypeActivity, 10)
 		s.NoError(err)
-		if nRows == p.UnknownNumRowsAffected {
+		if result.TasksCompleted == p.UnknownNumRowsAffected {
 			s.Equal(0, len(resp.Tasks), "expected all tasks to be deleted")
 			break
 		}
-		s.Equal(remaining-len(tc.output), nRows, "expected only LIMIT number of rows to be deleted")
+		s.Equal(remaining-len(tc.output), result.TasksCompleted, "expected only LIMIT number of rows to be deleted")
 		s.Equal(len(tc.output), len(resp.Tasks), "rangeCompleteTask deleted wrong set of tasks")
 		for i := range tc.output {
 			s.Equal(tc.output[i], resp.Tasks[i].TaskID)
@@ -335,7 +331,7 @@ func (s *MatchingPersistenceSuite) TestLeaseAndUpdateTaskList() {
 	s.EqualValues(0, tli.AckLevel)
 	s.True(tli.LastUpdated.After(leaseTime) || tli.LastUpdated.Equal(leaseTime))
 
-	response, err = s.TaskMgr.LeaseTaskList(ctx, &p.LeaseTaskListRequest{
+	_, err = s.TaskMgr.LeaseTaskList(ctx, &p.LeaseTaskListRequest{
 		DomainID: domainID,
 		TaskList: taskList,
 		TaskType: p.TaskListTypeActivity,
@@ -425,7 +421,7 @@ func (s *MatchingPersistenceSuite) deleteAllTaskList() {
 
 // TestListWithOneTaskList test
 func (s *MatchingPersistenceSuite) TestListWithOneTaskList() {
-	if s.TaskMgr.GetName() == "cassandra" {
+	if s.TaskMgr.GetName() == "cassandra" || s.TaskMgr.GetName() == "shardedNosql" {
 		// ListTaskList API is currently not supported in cassandra
 		return
 	}
@@ -489,7 +485,7 @@ func (s *MatchingPersistenceSuite) TestListWithOneTaskList() {
 
 // TestListWithMultipleTaskList test
 func (s *MatchingPersistenceSuite) TestListWithMultipleTaskList() {
-	if s.TaskMgr.GetName() == "cassandra" {
+	if s.TaskMgr.GetName() == "cassandra" || s.TaskMgr.GetName() == "shardedNosql" {
 		// ListTaskList API is currently not supported in cassandra"
 		return
 	}
@@ -556,7 +552,10 @@ func (s *MatchingPersistenceSuite) TestListWithMultipleTaskList() {
 }
 
 func (s *MatchingPersistenceSuite) TestGetOrphanTasks() {
-	if s.TaskMgr.GetName() == "cassandra" {
+	if os.Getenv("SKIP_GET_ORPHAN_TASKS") != "" {
+		s.T().Skipf("GetOrphanTasks not supported in %v", s.TaskMgr.GetName())
+	}
+	if s.TaskMgr.GetName() == "cassandra" || s.TaskMgr.GetName() == "shardedNosql" {
 		// GetOrphanTasks API is currently not supported in cassandra"
 		return
 	}
@@ -571,7 +570,7 @@ func (s *MatchingPersistenceSuite) TestGetOrphanTasks() {
 	existingOrphans := len(oresp.Tasks)
 
 	domainID := uuid.New()
-	name := fmt.Sprintf("test-list-with-orphans")
+	name := "test-list-with-orphans"
 	resp, err := s.TaskMgr.LeaseTaskList(ctx, &p.LeaseTaskListRequest{
 		DomainID:     domainID,
 		TaskList:     name,

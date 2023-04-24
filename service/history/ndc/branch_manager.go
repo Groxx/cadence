@@ -28,7 +28,6 @@ import (
 	"github.com/pborman/uuid"
 
 	"github.com/uber/cadence/common"
-	"github.com/uber/cadence/common/cache"
 	"github.com/uber/cadence/common/cluster"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/persistence"
@@ -53,7 +52,6 @@ type (
 
 	branchManagerImpl struct {
 		shard           shard.Context
-		domainCache     cache.DomainCache
 		clusterMetadata cluster.Metadata
 		historyV2Mgr    persistence.HistoryManager
 
@@ -74,7 +72,6 @@ func newBranchManager(
 
 	return &branchManagerImpl{
 		shard:           shard,
-		domainCache:     shard.GetDomainCache(),
 		clusterMetadata: shard.GetService().GetClusterMetadata(),
 		historyV2Mgr:    shard.GetHistoryManager(),
 
@@ -138,7 +135,7 @@ func (r *branchManagerImpl) prepareVersionHistory(
 	newVersionHistoryIndex, err := r.createNewBranch(
 		ctx,
 		versionHistory.GetBranchToken(),
-		lcaVersionHistoryItem.GetEventID(),
+		lcaVersionHistoryItem.EventID,
 		newVersionHistory,
 	)
 	if err != nil {
@@ -172,7 +169,6 @@ func (r *branchManagerImpl) flushBufferedEvents(
 
 	targetWorkflow := execution.NewWorkflow(
 		ctx,
-		r.domainCache,
 		r.clusterMetadata,
 		r.context,
 		r.mutableState,
@@ -207,7 +203,7 @@ func (r *branchManagerImpl) verifyEventsOrder(
 	if err != nil {
 		return false, err
 	}
-	nextEventID := lastVersionHistoryItem.GetEventID() + 1
+	nextEventID := lastVersionHistoryItem.EventID + 1
 
 	if incomingFirstEventID < nextEventID {
 		// duplicate replication task
@@ -220,8 +216,8 @@ func (r *branchManagerImpl) verifyEventsOrder(
 			executionInfo.DomainID,
 			executionInfo.WorkflowID,
 			executionInfo.RunID,
-			common.Int64Ptr(lastVersionHistoryItem.GetEventID()),
-			common.Int64Ptr(lastVersionHistoryItem.GetVersion()),
+			common.Int64Ptr(lastVersionHistoryItem.EventID),
+			common.Int64Ptr(lastVersionHistoryItem.Version),
 			common.Int64Ptr(incomingFirstEventID),
 			common.Int64Ptr(incomingFirstEventVersion))
 	}
@@ -240,12 +236,17 @@ func (r *branchManagerImpl) createNewBranch(
 	executionInfo := r.mutableState.GetExecutionInfo()
 	domainID := executionInfo.DomainID
 	workflowID := executionInfo.WorkflowID
+	domainName, err := r.shard.GetDomainCache().GetDomainName(domainID)
+	if err != nil {
+		return 0, err
+	}
 
 	resp, err := r.historyV2Mgr.ForkHistoryBranch(ctx, &persistence.ForkHistoryBranchRequest{
 		ForkBranchToken: baseBranchToken,
 		ForkNodeID:      baseBranchLastEventID + 1,
 		Info:            persistence.BuildHistoryGarbageCleanupInfo(domainID, workflowID, uuid.New()),
 		ShardID:         common.IntPtr(shardID),
+		DomainName:      domainName,
 	})
 	if err != nil {
 		return 0, err

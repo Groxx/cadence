@@ -30,6 +30,7 @@ import (
 	"github.com/uber/cadence/common/config"
 	pt "github.com/uber/cadence/common/persistence/persistence-tests"
 	"github.com/uber/cadence/common/persistence/sql"
+	"github.com/uber/cadence/common/persistence/sql/sqldriver"
 	"github.com/uber/cadence/common/persistence/sql/sqlplugin"
 	"github.com/uber/cadence/environment"
 
@@ -53,40 +54,44 @@ func init() {
 
 // CreateDB initialize the db object
 func (d *plugin) CreateDB(cfg *config.SQL) (sqlplugin.DB, error) {
-	conn, err := d.createDBConnection(cfg)
+	conns, err := sqldriver.CreateDBConnections(cfg, func(cfg *config.SQL) (*sqlx.DB, error) {
+		return d.createSingleDBConn(cfg)
+	})
 	if err != nil {
 		return nil, err
 	}
-	db := newDB(conn, nil)
-	return db, nil
+	return newDB(conns, nil, sqlplugin.DbShardUndefined, cfg.NumShards)
 }
 
 // CreateAdminDB initialize the adminDB object
 func (d *plugin) CreateAdminDB(cfg *config.SQL) (sqlplugin.AdminDB, error) {
-	conn, err := d.createDBConnection(cfg)
+	conns, err := sqldriver.CreateDBConnections(cfg, func(cfg *config.SQL) (*sqlx.DB, error) {
+		return d.createSingleDBConn(cfg)
+	})
 	if err != nil {
 		return nil, err
 	}
-	db := newDB(conn, nil)
-	return db, nil
+	return newDB(conns, nil, sqlplugin.DbShardUndefined, cfg.NumShards)
 }
 
 // CreateDBConnection creates a returns a reference to a logical connection to the
 // underlying SQL database. The returned object is to tied to a single
 // SQL database and the object can be used to perform CRUD operations on
 // the tables in the database
-func (d *plugin) createDBConnection(cfg *config.SQL) (*sqlx.DB, error) {
-	sslParams, err := registerTLSConfig(cfg)
+func (d *plugin) createSingleDBConn(cfg *config.SQL) (*sqlx.DB, error) {
+	params, err := registerTLSConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-
+	for k, v := range cfg.ConnectAttributes {
+		params.Set(k, v)
+	}
 	host, port, err := net.SplitHostPort(cfg.ConnectAddr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid connect address, it must be in host:port format, %v, err: %v", cfg.ConnectAddr, err)
 	}
 
-	db, err := sqlx.Connect(PluginName, buildDSN(cfg, host, port, sslParams))
+	db, err := sqlx.Connect(PluginName, buildDSN(cfg, host, port, params))
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +110,7 @@ func (d *plugin) createDBConnection(cfg *config.SQL) (*sqlx.DB, error) {
 	return db, nil
 }
 
-func buildDSN(cfg *config.SQL, host string, port string, sslParams url.Values) string {
+func buildDSN(cfg *config.SQL, host string, port string, params url.Values) string {
 	dbName := cfg.DatabaseName
 	//NOTE: postgres doesn't allow to connect with empty dbName, the admin dbName is "postgres"
 	if dbName == "" {
@@ -114,16 +119,16 @@ func buildDSN(cfg *config.SQL, host string, port string, sslParams url.Values) s
 
 	credentialString := generateCredentialString(cfg.User, cfg.Password)
 	dsn := fmt.Sprintf(dsnFmt, credentialString, host, port, dbName)
-	if attrs := sslParams.Encode(); attrs != "" {
+	if attrs := params.Encode(); attrs != "" {
 		dsn += "?" + attrs
 	}
 	return dsn
 }
 
 func generateCredentialString(user string, password string) string {
-	userPass := user
+	userPass := url.PathEscape(user)
 	if password != "" {
-		userPass += ":" + password
+		userPass += ":" + url.PathEscape(password)
 	}
 	return userPass
 }
@@ -169,11 +174,11 @@ func GetTestClusterOption() *pt.TestBaseOptions {
 	}
 
 	return &pt.TestBaseOptions{
-		SQLDBPluginName: PluginName,
-		DBUsername:      testUser,
-		DBPassword:      testPassword,
-		DBHost:          environment.GetPostgresAddress(),
-		DBPort:          environment.GetPostgresPort(),
-		SchemaDir:       testSchemaDir,
+		DBPluginName: PluginName,
+		DBUsername:   testUser,
+		DBPassword:   testPassword,
+		DBHost:       environment.GetPostgresAddress(),
+		DBPort:       environment.GetPostgresPort(),
+		SchemaDir:    testSchemaDir,
 	}
 }

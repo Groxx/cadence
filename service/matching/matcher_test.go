@@ -29,6 +29,7 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/pborman/uuid"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/yarpc"
 
 	"github.com/uber/cadence/client/matching"
 	"github.com/uber/cadence/common"
@@ -69,12 +70,12 @@ func (t *MatcherTestSuite) SetupTest() {
 	}
 	t.cfg = tlCfg
 	t.fwdr = newForwarder(&t.cfg.forwarderConfig, t.taskList, types.TaskListKindNormal, t.client)
-	t.matcher = newTaskMatcher(tlCfg, t.fwdr, func() metrics.Scope { return metrics.NoopScope(metrics.Matching) })
+	t.matcher = newTaskMatcher(tlCfg, t.fwdr, metrics.NoopScope(metrics.Matching))
 
 	rootTaskList := newTestTaskListID(t.taskList.domainID, t.taskList.Parent(20), persistence.TaskListTypeDecision)
 	rootTasklistCfg, err := newTaskListConfig(rootTaskList, cfg, t.newDomainCache())
 	t.NoError(err)
-	t.rootMatcher = newTaskMatcher(rootTasklistCfg, nil, func() metrics.Scope { return metrics.NoopScope(metrics.Matching) })
+	t.rootMatcher = newTaskMatcher(rootTasklistCfg, nil, metrics.NoopScope(metrics.Matching))
 }
 
 func (t *MatcherTestSuite) TearDownTest() {
@@ -93,7 +94,7 @@ func (t *MatcherTestSuite) TestLocalSyncMatch() {
 		}
 	})
 
-	task := newInternalTask(t.newTaskInfo(), nil, types.TaskSourceHistory, "", true)
+	task := newInternalTask(t.newTaskInfo(), nil, types.TaskSourceHistory, "", true, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	syncMatch, err := t.matcher.Offer(ctx, task)
 	cancel()
@@ -129,7 +130,7 @@ func (t *MatcherTestSuite) testRemoteSyncMatch(taskSource types.TaskSource) {
 	}()
 
 	t.client.EXPECT().PollForDecisionTask(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(arg0 context.Context, arg1 *types.MatchingPollForDecisionTaskRequest) (*types.MatchingPollForDecisionTaskResponse, error) {
+		func(arg0 context.Context, arg1 *types.MatchingPollForDecisionTaskRequest, option ...yarpc.CallOption) (*types.MatchingPollForDecisionTaskResponse, error) {
 			task, err := t.rootMatcher.Poll(arg0)
 			if err != nil {
 				return nil, err
@@ -142,14 +143,14 @@ func (t *MatcherTestSuite) testRemoteSyncMatch(taskSource types.TaskSource) {
 		},
 	).AnyTimes()
 
-	task := newInternalTask(t.newTaskInfo(), nil, taskSource, "", true)
+	task := newInternalTask(t.newTaskInfo(), nil, taskSource, "", true, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 
 	var err error
 	var remoteSyncMatch bool
 	var req *types.AddDecisionTaskRequest
 	t.client.EXPECT().AddDecisionTask(gomock.Any(), gomock.Any()).Do(
-		func(arg0 context.Context, arg1 *types.AddDecisionTaskRequest) {
+		func(arg0 context.Context, arg1 *types.AddDecisionTaskRequest, option ...yarpc.CallOption) {
 			req = arg1
 			task.forwardedFrom = req.GetForwardedFrom()
 			close(pollSigC)
@@ -175,12 +176,12 @@ func (t *MatcherTestSuite) testRemoteSyncMatch(taskSource types.TaskSource) {
 }
 
 func (t *MatcherTestSuite) TestSyncMatchFailure() {
-	task := newInternalTask(t.newTaskInfo(), nil, types.TaskSourceHistory, "", true)
+	task := newInternalTask(t.newTaskInfo(), nil, types.TaskSourceHistory, "", true, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 
 	var req *types.AddDecisionTaskRequest
 	t.client.EXPECT().AddDecisionTask(gomock.Any(), gomock.Any()).Do(
-		func(arg0 context.Context, arg1 *types.AddDecisionTaskRequest) {
+		func(arg0 context.Context, arg1 *types.AddDecisionTaskRequest, option ...yarpc.CallOption) {
 			req = arg1
 		},
 	).Return(errMatchingHostThrottle)
@@ -223,7 +224,7 @@ func (t *MatcherTestSuite) TestQueryRemoteSyncMatch() {
 
 	var remotePollResp *types.MatchingPollForDecisionTaskResponse
 	t.client.EXPECT().PollForDecisionTask(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(arg0 context.Context, arg1 *types.MatchingPollForDecisionTaskRequest) (*types.MatchingPollForDecisionTaskResponse, error) {
+		func(arg0 context.Context, arg1 *types.MatchingPollForDecisionTaskRequest, option ...yarpc.CallOption) (*types.MatchingPollForDecisionTaskResponse, error) {
 			task, err := t.rootMatcher.PollForQuery(arg0)
 			if err != nil {
 				return nil, err
@@ -244,7 +245,7 @@ func (t *MatcherTestSuite) TestQueryRemoteSyncMatch() {
 
 	var req *types.MatchingQueryWorkflowRequest
 	t.client.EXPECT().QueryWorkflow(gomock.Any(), gomock.Any()).Do(
-		func(arg0 context.Context, arg1 *types.MatchingQueryWorkflowRequest) {
+		func(arg0 context.Context, arg1 *types.MatchingQueryWorkflowRequest, option ...yarpc.CallOption) {
 			req = arg1
 			task.forwardedFrom = req.GetForwardedFrom()
 			ready()
@@ -281,7 +282,7 @@ func (t *MatcherTestSuite) TestQueryRemoteSyncMatchError() {
 
 	var req *types.MatchingQueryWorkflowRequest
 	t.client.EXPECT().QueryWorkflow(gomock.Any(), gomock.Any()).Do(
-		func(arg0 context.Context, arg1 *types.MatchingQueryWorkflowRequest) {
+		func(arg0 context.Context, arg1 *types.MatchingQueryWorkflowRequest, option ...yarpc.CallOption) {
 			req = arg1
 			ready()
 		},
@@ -308,7 +309,7 @@ func (t *MatcherTestSuite) TestMustOfferLocalMatch() {
 		}
 	})
 
-	task := newInternalTask(t.newTaskInfo(), nil, types.TaskSourceHistory, "", false)
+	task := newInternalTask(t.newTaskInfo(), nil, types.TaskSourceHistory, "", false, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	err := t.matcher.MustOffer(ctx, task)
 	cancel()
@@ -320,7 +321,7 @@ func (t *MatcherTestSuite) TestMustOfferRemoteMatch() {
 	pollSigC := make(chan struct{})
 
 	t.client.EXPECT().PollForDecisionTask(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(arg0 context.Context, arg1 *types.MatchingPollForDecisionTaskRequest) (*types.MatchingPollForDecisionTaskResponse, error) {
+		func(arg0 context.Context, arg1 *types.MatchingPollForDecisionTaskRequest, option ...yarpc.CallOption) (*types.MatchingPollForDecisionTaskResponse, error) {
 			<-pollSigC
 			time.Sleep(time.Millisecond * 500) // delay poll to verify that offer blocks on parent
 			task, err := t.rootMatcher.Poll(arg0)
@@ -340,7 +341,7 @@ func (t *MatcherTestSuite) TestMustOfferRemoteMatch() {
 		taskCompleted = true
 	}
 
-	task := newInternalTask(t.newTaskInfo(), completionFunc, types.TaskSourceDbBacklog, "", false)
+	task := newInternalTask(t.newTaskInfo(), completionFunc, types.TaskSourceDbBacklog, "", false, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 
 	var err error
@@ -348,16 +349,16 @@ func (t *MatcherTestSuite) TestMustOfferRemoteMatch() {
 	var req *types.AddDecisionTaskRequest
 	t.client.EXPECT().AddDecisionTask(gomock.Any(), gomock.Any()).Return(errMatchingHostThrottle).Times(1)
 	t.client.EXPECT().AddDecisionTask(gomock.Any(), gomock.Any()).Do(
-		func(arg0 context.Context, arg1 *types.AddDecisionTaskRequest) {
+		func(arg0 context.Context, arg1 *types.AddDecisionTaskRequest, option ...yarpc.CallOption) {
 			req = arg1
-			task := newInternalTask(task.event.TaskInfo, nil, types.TaskSourceDbBacklog, req.GetForwardedFrom(), true)
+			task := newInternalTask(task.event.TaskInfo, nil, types.TaskSourceDbBacklog, req.GetForwardedFrom(), true, nil)
 			close(pollSigC)
 			remoteSyncMatch, err = t.rootMatcher.Offer(ctx, task)
 		},
 	).Return(nil)
 
 	// Poll needs to happen before MustOffer, or else it goes into the non-blocking path.
-	ensureAsyncReady(time.Second, func(ctx context.Context) {
+	wait := ensureAsyncReady(time.Second, func(ctx context.Context) {
 		task, err := t.matcher.Poll(ctx)
 		t.Nil(err)
 		t.NotNil(task)
@@ -365,6 +366,7 @@ func (t *MatcherTestSuite) TestMustOfferRemoteMatch() {
 
 	t.NoError(t.matcher.MustOffer(ctx, task))
 	cancel()
+	wait()
 	t.NotNil(req)
 	t.NoError(err)
 	t.True(remoteSyncMatch)
@@ -378,7 +380,7 @@ func (t *MatcherTestSuite) TestRemotePoll() {
 
 	var req *types.MatchingPollForDecisionTaskRequest
 	t.client.EXPECT().PollForDecisionTask(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(arg0 context.Context, arg1 *types.MatchingPollForDecisionTaskRequest) (*types.MatchingPollForDecisionTaskResponse, error) {
+		func(arg0 context.Context, arg1 *types.MatchingPollForDecisionTaskRequest, option ...yarpc.CallOption) (*types.MatchingPollForDecisionTaskResponse, error) {
 			req = arg1
 			return nil, nil
 		},
@@ -404,7 +406,7 @@ func (t *MatcherTestSuite) TestRemotePollForQuery() {
 
 	var req *types.MatchingPollForDecisionTaskRequest
 	t.client.EXPECT().PollForDecisionTask(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(arg0 context.Context, arg1 *types.MatchingPollForDecisionTaskRequest) (*types.MatchingPollForDecisionTaskResponse, error) {
+		func(arg0 context.Context, arg1 *types.MatchingPollForDecisionTaskRequest, option ...yarpc.CallOption) (*types.MatchingPollForDecisionTaskResponse, error) {
 			req = arg1
 			return nil, nil
 		},

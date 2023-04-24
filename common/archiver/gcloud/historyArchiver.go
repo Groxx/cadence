@@ -83,7 +83,11 @@ func NewHistoryArchiver(
 	return nil, err
 }
 
-func newHistoryArchiver(container *archiver.HistoryBootstrapContainer, historyIterator archiver.HistoryIterator, storage connector.Client) archiver.HistoryArchiver {
+func newHistoryArchiver(
+	container *archiver.HistoryBootstrapContainer,
+	historyIterator archiver.HistoryIterator,
+	storage connector.Client,
+) archiver.HistoryArchiver {
 	return &historyArchiver{
 		container:       container,
 		gcloudStorage:   storage,
@@ -143,6 +147,15 @@ func (h *historyArchiver) Archive(ctx context.Context, URI archiver.URI, request
 		historyBlob, err := getNextHistoryBlob(ctx, historyIterator)
 
 		if err != nil {
+			if common.IsEntityNotExistsError(err) {
+				// workflow history no longer exists, may due to duplicated archival signal
+				// this may happen even in the middle of iterating history as two archival signals
+				// can be processed concurrently.
+				logger.Info(archiver.ArchiveSkippedInfoMsg)
+				scope.IncCounter(metrics.HistoryArchiverDuplicateArchivalsCount)
+				return nil
+			}
+
 			logger := logger.WithTags(tag.ArchivalArchiveFailReason(archiver.ErrReasonReadHistory), tag.Error(err))
 			if !persistence.IsTransientError(err) {
 				logger.Error(archiver.ArchiveNonRetriableErrorMsg)
@@ -152,9 +165,11 @@ func (h *historyArchiver) Archive(ctx context.Context, URI archiver.URI, request
 			return err
 		}
 
-		if historyMutated(request, historyBlob.Body, *historyBlob.Header.IsLast) {
-			logger.Error(archiver.ArchiveNonRetriableErrorMsg, tag.ArchivalArchiveFailReason(archiver.ErrReasonHistoryMutated))
-			return archiver.ErrHistoryMutated
+		if archiver.IsHistoryMutated(request, historyBlob.Body, *historyBlob.Header.IsLast, logger) {
+			if !featureCatalog.ArchiveIncompleteHistory() {
+				return archiver.ErrHistoryMutated
+			}
+
 		}
 
 		encodedHistoryPart, err := encode(historyBlob.Body)
@@ -301,6 +316,10 @@ func getNextHistoryBlob(ctx context.Context, historyIterator archiver.HistoryIte
 		historyBlob, err = historyIterator.Next()
 		return err
 	}
+	throttleRetry := backoff.NewThrottleRetry(
+		backoff.WithRetryPolicy(common.CreatePersistenceRetryPolicy()),
+		backoff.WithRetryableError(persistence.IsTransientError),
+	)
 	for err != nil {
 		if contextExpired(ctx) {
 			return nil, archiver.ErrContextTimeout
@@ -308,26 +327,15 @@ func getNextHistoryBlob(ctx context.Context, historyIterator archiver.HistoryIte
 		if !persistence.IsTransientError(err) {
 			return nil, err
 		}
-		err = backoff.Retry(op, common.CreatePersistenceRetryPolicy(), persistence.IsTransientError)
+		err = throttleRetry.Do(ctx, op)
 	}
 	return historyBlob, nil
 }
 
-func historyMutated(request *archiver.ArchiveHistoryRequest, historyBatches []*types.History, isLast bool) bool {
-	lastBatch := historyBatches[len(historyBatches)-1].Events
-	lastEvent := lastBatch[len(lastBatch)-1]
-	lastFailoverVersion := lastEvent.GetVersion()
-	if lastFailoverVersion > request.CloseFailoverVersion {
-		return true
-	}
-
-	if !isLast {
-		return false
-	}
-	lastEventID := lastEvent.GetEventID()
-	return lastFailoverVersion != request.CloseFailoverVersion || lastEventID+1 != request.NextEventID
-}
-
+// with XDC(global domain) concept, archival may write different history with the same RunID, with different failoverVersion.
+// In that case, the history/runID with the highest failoverVersion wins.
+// getHighestVersion look up all archived files to find the highest failoverVersion.
+// Since a history is written into different parts in this archival implementation, it also returns the highest and lowest partVersionID.
 func (h *historyArchiver) getHighestVersion(ctx context.Context, URI archiver.URI, request *archiver.GetHistoryRequest) (*int64, *int, *int, error) {
 
 	filenames, err := h.gcloudStorage.Query(ctx, URI, constructHistoryFilenamePrefix(request.DomainID, request.WorkflowID, request.RunID))
@@ -364,6 +372,9 @@ func (h *historyArchiver) getHighestVersion(ctx context.Context, URI archiver.UR
 
 	}
 
+	if highestVersion == nil {
+		return nil, nil, nil, archiver.ErrHistoryNotExist
+	}
 	return highestVersion, highestVersionPart, lowestVersionPart, nil
 }
 

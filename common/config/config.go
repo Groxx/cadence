@@ -22,44 +22,94 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
+	"regexp"
 	"time"
 
 	"github.com/uber-go/tally/m3"
 	"github.com/uber-go/tally/prometheus"
-	"github.com/uber/ringpop-go/discovery"
 
-	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/dynamicconfig"
+	c "github.com/uber/cadence/common/dynamicconfig/configstore/config"
+	"github.com/uber/cadence/common/peerprovider/ringpopprovider"
+	"github.com/uber/cadence/common/service"
 )
 
 type (
 	// Config contains the configuration for a set of cadence services
 	Config struct {
 		// Ringpop is the ringpop related configuration
-		Ringpop Ringpop `yaml:"ringpop"`
+		Ringpop ringpopprovider.Config `yaml:"ringpop"`
 		// Persistence contains the configuration for cadence datastores
 		Persistence Persistence `yaml:"persistence"`
 		// Log is the logging config
 		Log Logger `yaml:"log"`
-		// ClusterMetadata is the config containing all valid clusters and active cluster
-		ClusterMetadata *ClusterMetadata `yaml:"clusterMetadata"`
-		// DCRedirectionPolicy contains the frontend datacenter redirection policy
-		DCRedirectionPolicy DCRedirectionPolicy `yaml:"dcRedirectionPolicy"`
+		// ClusterGroupMetadata is the config containing all valid clusters and active cluster
+		ClusterGroupMetadata *ClusterGroupMetadata `yaml:"clusterGroupMetadata"`
+		// Deprecated: please use ClusterGroupMetadata
+		ClusterMetadata *ClusterGroupMetadata `yaml:"clusterMetadata"`
+		// Deprecated: please use ClusterRedirectionPolicy under ClusterGroupMetadata
+		DCRedirectionPolicy *ClusterRedirectionPolicy `yaml:"dcRedirectionPolicy"`
 		// Services is a map of service name to service config items
 		Services map[string]Service `yaml:"services"`
 		// Kafka is the config for connecting to kafka
 		Kafka KafkaConfig `yaml:"kafka"`
 		// Archival is the config for archival
 		Archival Archival `yaml:"archival"`
-		// PublicClient is config for connecting to cadence frontend
+		// PublicClient is config for sys worker service connecting to cadence frontend
 		PublicClient PublicClient `yaml:"publicClient"`
 		// DynamicConfigClient is the config for setting up the file based dynamic config client
 		// Filepath would be relative to the root directory when the path wasn't absolute.
+		// Included for backwards compatibility, please transition to DynamicConfig
+		// If both are specified, DynamicConig will be used.
 		DynamicConfigClient dynamicconfig.FileBasedClientConfig `yaml:"dynamicConfigClient"`
+		// DynamicConfig is the config for setting up all dynamic config clients
+		// Allows for changes in client without needing code change
+		DynamicConfig DynamicConfig `yaml:"dynamicconfig"`
 		// DomainDefaults is the default config for every domain
 		DomainDefaults DomainDefaults `yaml:"domainDefaults"`
 		// Blobstore is the config for setting up blobstore
 		Blobstore Blobstore `yaml:"blobstore"`
+		// Authorization is the config for setting up authorization
+		Authorization Authorization `yaml:"authorization"`
+		// HeaderForwardingRules defines which inbound headers to include or exclude on outbound calls
+		HeaderForwardingRules []HeaderRule `yaml:"headerForwardingRules"`
+	}
+
+	HeaderRule struct {
+		Add   bool // if false, matching headers are removed if previously matched.
+		Match *regexp.Regexp
+	}
+
+	Authorization struct {
+		OAuthAuthorizer OAuthAuthorizer `yaml:"oauthAuthorizer"`
+		NoopAuthorizer  NoopAuthorizer  `yaml:"noopAuthorizer"`
+	}
+
+	DynamicConfig struct {
+		Client      string                              `yaml:"client"`
+		ConfigStore c.ClientConfig                      `yaml:"configstore"`
+		FileBased   dynamicconfig.FileBasedClientConfig `yaml:"filebased"`
+	}
+
+	NoopAuthorizer struct {
+		Enable bool `yaml:"enable"`
+	}
+
+	OAuthAuthorizer struct {
+		Enable bool `yaml:"enable"`
+		// Credentials to verify/create the JWT
+		JwtCredentials JwtCredentials `yaml:"jwtCredentials"`
+		// Max of TTL in the claim
+		MaxJwtTTL int64 `yaml:"maxJwtTTL"`
+	}
+
+	JwtCredentials struct {
+		// support: RS256 (RSA using SHA256)
+		Algorithm string `yaml:"algorithm"`
+		// Public Key Path for verifying JWT token passed in from external clients
+		PublicKey string `yaml:"publicKey"`
 	}
 
 	// Service contains the service specific config items
@@ -80,10 +130,10 @@ type (
 
 	// RPC contains the rpc config items
 	RPC struct {
-		// Port is the port  on which the channel will bind to
-		Port int `yaml:"port"`
+		// Port is the port  on which the Thrift TChannel will bind to
+		Port uint16 `yaml:"port"`
 		// GRPCPort is the port on which the grpc listener will bind to
-		GRPCPort int `yaml:"grpcPort"`
+		GRPCPort uint16 `yaml:"grpcPort"`
 		// BindOnLocalHost is true if localhost is the bind address
 		BindOnLocalHost bool `yaml:"bindOnLocalHost"`
 		// BindOnIP can be used to bind service on specific ip (eg. `0.0.0.0`) -
@@ -94,6 +144,10 @@ type (
 		DisableLogging bool `yaml:"disableLogging"`
 		// LogLevel is the desired log level
 		LogLevel string `yaml:"logLevel"`
+		// GRPCMaxMsgSize allows overriding default (4MB) message size for gRPC
+		GRPCMaxMsgSize int `yaml:"grpcMaxMsgSize"`
+		// TLS allows configuring optional TLS/SSL authentication on the server (only on gRPC port)
+		TLS TLS `yaml:"tls"`
 	}
 
 	// Blobstore contains the config for blobstore
@@ -106,42 +160,31 @@ type (
 		OutputDirectory string `yaml:"outputDirectory"`
 	}
 
-	// Ringpop contains the ringpop config items
-	Ringpop struct {
-		// Name to be used in ringpop advertisement
-		Name string `yaml:"name" validate:"nonzero"`
-		// BootstrapMode is a enum that defines the ringpop bootstrap method
-		BootstrapMode BootstrapMode `yaml:"bootstrapMode"`
-		// BootstrapHosts is a list of seed hosts to be used for ringpop bootstrap
-		BootstrapHosts []string `yaml:"bootstrapHosts"`
-		// BootstrapFile is the file path to be used for ringpop bootstrap
-		BootstrapFile string `yaml:"bootstrapFile"`
-		// MaxJoinDuration is the max wait time to join the ring
-		MaxJoinDuration time.Duration `yaml:"maxJoinDuration"`
-		// Custom discovery provider, cannot be specified through yaml
-		DiscoveryProvider discovery.DiscoverProvider `yaml:"-"`
-	}
-
 	// Persistence contains the configuration for data store / persistence layer
 	Persistence struct {
 		// DefaultStore is the name of the default data store to use
 		DefaultStore string `yaml:"defaultStore" validate:"nonzero"`
 		// VisibilityStore is the name of the datastore to be used for visibility records
-		VisibilityStore string `yaml:"visibilityStore" validate:"nonzero"`
+		// Must provide one of VisibilityStore and AdvancedVisibilityStore
+		VisibilityStore string `yaml:"visibilityStore"`
 		// AdvancedVisibilityStore is the name of the datastore to be used for visibility records
+		// Must provide one of VisibilityStore and AdvancedVisibilityStore
 		AdvancedVisibilityStore string `yaml:"advancedVisibilityStore"`
 		// HistoryMaxConns is the desired number of conns to history store. Value specified
 		// here overrides the MaxConns config specified as part of datastore
 		HistoryMaxConns int `yaml:"historyMaxConns"`
-		// NumHistoryShards is the desired number of history shards. This config doesn't
-		// belong here, needs refactoring
+		// EnablePersistenceLatencyHistogramMetrics is to enable latency histogram metrics for persistence layer
+		EnablePersistenceLatencyHistogramMetrics bool `yaml:"enablePersistenceLatencyHistogramMetrics"`
+		// NumHistoryShards is the desired number of history shards. It's for computing the historyShardID from workflowID into [0, NumHistoryShards)
+		// Therefore, the value cannot be changed once set.
+		// TODO This config doesn't belong here, needs refactoring
 		NumHistoryShards int `yaml:"numHistoryShards" validate:"nonzero"`
 		// DataStores contains the configuration for all datastores
 		DataStores map[string]DataStore `yaml:"datastores"`
-		// VisibilityConfig is config for visibility sampling
-		VisibilityConfig *VisibilityConfig `yaml:"-" json:"-"`
+		// TODO: move dynamic config out of static config
 		// TransactionSizeLimit is the largest allowed transaction size
 		TransactionSizeLimit dynamicconfig.IntPropertyFn `yaml:"-" json:"-"`
+		// TODO: move dynamic config out of static config
 		// ErrorInjectionRate is the the rate for injecting random error
 		ErrorInjectionRate dynamicconfig.FloatPropertyFn `yaml:"-" json:"-"`
 	}
@@ -149,35 +192,26 @@ type (
 	// DataStore is the configuration for a single datastore
 	DataStore struct {
 		// Cassandra contains the config for a cassandra datastore
+		// Deprecated: please use NoSQL instead, the structure is backward-compatible
 		Cassandra *Cassandra `yaml:"cassandra"`
 		// SQL contains the config for a SQL based datastore
 		SQL *SQL `yaml:"sql"`
+		// NoSQL contains the config for a NoSQL based datastore
+		NoSQL *NoSQL `yaml:"nosql"`
+		// ShardedNoSQL contains the config for a collection of NoSQL datastores that are used as a single datastore
+		ShardedNoSQL *ShardedNoSQL `yaml:"shardedNosql"`
 		// ElasticSearch contains the config for a ElasticSearch datastore
 		ElasticSearch *ElasticSearchConfig `yaml:"elasticsearch"`
 	}
 
-	// VisibilityConfig is config for visibility
-	VisibilityConfig struct {
-		// EnableSampling for visibility
-		EnableSampling dynamicconfig.BoolPropertyFn `yaml:"-" json:"-"`
-		// EnableReadFromClosedExecutionV2 read closed from v2 table
-		EnableReadFromClosedExecutionV2 dynamicconfig.BoolPropertyFn `yaml:"-" json:"-"`
-		// VisibilityOpenMaxQPS max QPS for record open workflows
-		VisibilityOpenMaxQPS dynamicconfig.IntPropertyFnWithDomainFilter `yaml:"-" json:"-"`
-		// VisibilityClosedMaxQPS max QPS for record closed workflows
-		VisibilityClosedMaxQPS dynamicconfig.IntPropertyFnWithDomainFilter `yaml:"-" json:"-"`
-		// VisibilityListMaxQPS max QPS for list workflow
-		VisibilityListMaxQPS dynamicconfig.IntPropertyFnWithDomainFilter `yaml:"-" json:"-"`
-		// ESIndexMaxResultWindow ElasticSearch index setting max_result_window
-		ESIndexMaxResultWindow dynamicconfig.IntPropertyFn `yaml:"-" json:"-"`
-		// MaxQPS is overall max QPS
-		MaxQPS dynamicconfig.IntPropertyFn `yaml:"-" json:"-"`
-		// ValidSearchAttributes is legal indexed keys that can be used in list APIs
-		ValidSearchAttributes dynamicconfig.MapPropertyFn `yaml:"-" json:"-"`
-	}
-
 	// Cassandra contains configuration to connect to Cassandra cluster
-	Cassandra struct {
+	// Deprecated: please use NoSQL instead, the structure is backward-compatible
+	Cassandra = NoSQL
+
+	// NoSQL contains configuration to connect to NoSQL Database cluster
+	NoSQL struct {
+		// PluginName is the name of NoSQL plugin, default is "cassandra". Supported values: cassandra
+		PluginName string `yaml:"pluginName"`
 		// Hosts is a csv of cassandra endpoints
 		Hosts string `yaml:"hosts" validate:"nonzero"`
 		// Port is the cassandra port used for connection by gocql client
@@ -186,8 +220,10 @@ type (
 		User string `yaml:"user"`
 		// Password is the cassandra password used for authentication by gocql client
 		Password string `yaml:"password"`
+		// AllowedAuthenticators informs the cassandra client to expect a custom authenticator
+		AllowedAuthenticators []string `yaml:"allowedAuthenticators"`
 		// Keyspace is the cassandra keyspace
-		Keyspace string `yaml:"keyspace" validate:"nonzero"`
+		Keyspace string `yaml:"keyspace"`
 		// Region is the region filter arg for cassandra
 		Region string `yaml:"region"`
 		// Datacenter is the data center filter arg for cassandra
@@ -196,20 +232,74 @@ type (
 		MaxConns int `yaml:"maxConns"`
 		// TLS configuration
 		TLS *TLS `yaml:"tls"`
+		// ProtoVersion
+		ProtoVersion int `yaml:"protoVersion"`
+		// ConnectAttributes is a set of key-value attributes as a supplement/extension to the above common fields
+		// Use it ONLY when a configure is too specific to a particular NoSQL database that should not be in the common struct
+		// Otherwise please add new fields to the struct for better documentation
+		// If being used in any database, update this comment here to make it clear
+		ConnectAttributes map[string]string `yaml:"connectAttributes"`
+	}
+
+	// ShardedNoSQL contains configuration to connect to a set of NoSQL Database clusters in a sharded manner
+	ShardedNoSQL struct {
+		// DefaultShard is the DB shard where the non-sharded tables (ie. cluster metadata) are stored
+		DefaultShard string `yaml:"defaultShard"`
+		// ShardingPolicy is the configuration for the sharding strategy used
+		ShardingPolicy ShardingPolicy `yaml:"shardingPolicy"`
+		// Connections is the collection of NoSQL DB plugins that are used to connect to the shard
+		Connections map[string]DBShardConnection `yaml:"connections"`
+	}
+
+	// ShardingPolicy contains configuration for physical DB sharding
+	ShardingPolicy struct {
+		// HistoryShardMapping defines the ranges of history shards stored by each DB shard. Ranges listed here *MUST*
+		// be continuous and non-overlapping, such that the first range in the list starts from Shard 0, each following
+		// range starts with <prevRange.End> + 1, and the last range ends with <NumHistoryHosts>-1.
+		HistoryShardMapping []HistoryShardRange `yaml:"historyShardMapping"`
+		// TaskListHashing defines the parameters needed for shard ownership calculation based on hashing
+		TaskListHashing TasklistHashing `yaml:"taskListHashing"`
+	}
+
+	// HistoryShardRange contains configuration for one NoSQL DB Shard
+	HistoryShardRange struct {
+		// Start defines the inclusive lower bound for the history shard range
+		Start int `yaml:"start"`
+		// End defines the exclusive upper bound for the history shard range
+		End int `yaml:"end"`
+		// Shard defines the shard that owns this range
+		Shard string `yaml:"shard"`
+	}
+
+	TasklistHashing struct {
+		// ShardOrder defines the order of shards to be used when hashing tasklists to shards
+		ShardOrder []string `yaml:"shardOrder"`
+	}
+
+	// DBShardConnection contains configuration for one NoSQL DB Shard
+	DBShardConnection struct {
+		// NoSQLPlugin is the NoSQL plugin used for connecting to the DB shard
+		NoSQLPlugin *NoSQL `yaml:"nosqlPlugin"`
 	}
 
 	// SQL is the configuration for connecting to a SQL backed datastore
 	SQL struct {
 		// User is the username to be used for the conn
+		// If useMultipleDatabases, must be empty and provide it via multipleDatabasesConfig instead
 		User string `yaml:"user"`
 		// Password is the password corresponding to the user name
+		// If useMultipleDatabases, must be empty and provide it via multipleDatabasesConfig instead
 		Password string `yaml:"password"`
 		// PluginName is the name of SQL plugin
 		PluginName string `yaml:"pluginName" validate:"nonzero"`
 		// DatabaseName is the name of SQL database to connect to
-		DatabaseName string `yaml:"databaseName" validate:"nonzero"`
+		// If useMultipleDatabases, must be empty and provide it via multipleDatabasesConfig instead
+		// Required if not useMultipleDatabases
+		DatabaseName string `yaml:"databaseName"`
 		// ConnectAddr is the remote addr of the database
-		ConnectAddr string `yaml:"connectAddr" validate:"nonzero"`
+		// If useMultipleDatabases, must be empty and provide it via multipleDatabasesConfig instead
+		// Required if not useMultipleDatabases
+		ConnectAddr string `yaml:"connectAddr"`
 		// ConnectProtocol is the protocol that goes with the ConnectAddr ex - tcp, unix
 		ConnectProtocol string `yaml:"connectProtocol" validate:"nonzero"`
 		// ConnectAttributes is a set of key-value attributes to be sent as part of connect data_source_name url
@@ -220,8 +310,10 @@ type (
 		MaxIdleConns int `yaml:"maxIdleConns"`
 		// MaxConnLifetime is the maximum time a connection can be alive
 		MaxConnLifetime time.Duration `yaml:"maxConnLifetime"`
-		// NumShards is the number of storage shards to use for tables
-		// in a sharded sql database. The default value for this param is 1
+		// NumShards is the number of DB shards in a sharded sql database. Default is 1 for single SQL database setup.
+		// It's for computing a shardID value of [0,NumShards) to decide which shard of DB to query.
+		// Relationship with NumHistoryShards, both values cannot be changed once set in the same cluster,
+		// and the historyShardID value calculated from NumHistoryShards will be calculated using this NumShards to get a dbShardID
 		NumShards int `yaml:"nShards"`
 		// TLS is the configuration for TLS connections
 		TLS *TLS `yaml:"tls"`
@@ -230,9 +322,29 @@ type (
 		// DecodingTypes is the configuration for all the sql blob decoding types which need to be supported
 		// DecodingTypes should not be removed unless there are no blobs in database with the encoding type
 		DecodingTypes []string `yaml:"decodingTypes"`
+		// UseMultipleDatabases enables using multiple databases as a sharding SQL database, default is false
+		// When enabled, connection will be established using MultipleDatabasesConfig in favor of single values
+		// of  User, Password, DatabaseName, ConnectAddr.
+		UseMultipleDatabases bool `yaml:"useMultipleDatabases"`
+		// Required when UseMultipleDatabases is true
+		// the length of the list should be exactly the same as NumShards
+		MultipleDatabasesConfig []MultipleDatabasesConfigEntry `yaml:"multipleDatabasesConfig"`
+	}
+
+	// MultipleDatabasesConfigEntry is an entry for MultipleDatabasesConfig to connect to a single SQL database
+	MultipleDatabasesConfigEntry struct {
+		// User is the username to be used for the conn
+		User string `yaml:"user"`
+		// Password is the password corresponding to the user name
+		Password string `yaml:"password"`
+		// DatabaseName is the name of SQL database to connect to
+		DatabaseName string `yaml:"databaseName" validate:"nonzero"`
+		// ConnectAddr is the remote addr of the database
+		ConnectAddr string `yaml:"connectAddr" validate:"nonzero"`
 	}
 
 	// CustomDatastoreConfig is the configuration for connecting to a custom datastore that is not supported by cadence core
+	// TODO can we remove it?
 	CustomDatastoreConfig struct {
 		// Name of the custom datastore
 		Name string `yaml:"name"`
@@ -241,55 +353,68 @@ type (
 	}
 
 	// Replicator describes the configuration of replicator
+	// TODO can we remove it?
 	Replicator struct{}
 
 	// Logger contains the config items for logger
 	Logger struct {
-		// Stdout is true if the output needs to goto standard out
+		// Stdout is true then the output needs to goto standard out
+		// By default this is false and output will go to standard error
 		Stdout bool `yaml:"stdout"`
 		// Level is the desired log level
 		Level string `yaml:"level"`
 		// OutputFile is the path to the log output file
+		// Stdout must be false, otherwise Stdout will take precedence
 		OutputFile string `yaml:"outputFile"`
-		// levelKey is the desired log level, defaults to "level"
+		// LevelKey is the desired log level, defaults to "level"
 		LevelKey string `yaml:"levelKey"`
+		// Encoding decides the format, supports "console" and "json".
+		// "json" will print the log in JSON format(better for machine), while "console" will print in plain-text format(more human friendly)
+		// Default is "json"
+		Encoding string `yaml:"encoding"`
 	}
 
-	// ClusterMetadata contains the all cluster which participated in cross DC
-	ClusterMetadata struct {
-		EnableGlobalDomain bool `yaml:"enableGlobalDomain"`
-		// FailoverVersionIncrement is the increment of each cluster version when failover happens
-		FailoverVersionIncrement int64 `yaml:"failoverVersionIncrement"`
-		// MasterClusterName is the master cluster name, only the master cluster can register / update domain
-		// all clusters can do domain failover
-		MasterClusterName string `yaml:"masterClusterName"`
-		// CurrentClusterName is the name of the current cluster
-		CurrentClusterName string `yaml:"currentClusterName"`
-		// ClusterInformation contains all cluster names to corresponding information about that cluster
-		ClusterInformation map[string]ClusterInformation `yaml:"clusterInformation"`
-	}
-
-	// ClusterInformation contains the information about each cluster which participated in cross DC
-	ClusterInformation struct {
-		Enabled                bool  `yaml:"enabled"`
-		InitialFailoverVersion int64 `yaml:"initialFailoverVersion"`
-		// RPCName indicate the remote service name
-		RPCName string `yaml:"rpcName"`
-		// Address indicate the remote service address(Host:Port). Host can be DNS name.
-		RPCAddress string `yaml:"rpcAddress"`
-	}
-
-	// ReplicationTaskProcessorConfig is the config for replication task processor.
-	ReplicationTaskProcessorConfig struct {
-		NoTaskInitialWaitIntervalSecs int     `yaml:"noTaskInitialWaitIntervalSecs"`
-		NoTaskWaitBackoffCoefficient  float64 `yaml:"noTaskWaitBackoffCoefficient"`
-		NoTaskMaxWaitIntervalSecs     int     `yaml:"noTaskMaxWaitIntervalSecs"`
-	}
-
-	// DCRedirectionPolicy contains the frontend datacenter redirection policy
-	DCRedirectionPolicy struct {
+	// ClusterRedirectionPolicy contains the frontend datacenter redirection policy
+	// When using XDC (global domain) feature to failover a domain from one cluster to another one, client may call the passive cluster to start /signal workflows etc.
+	// To have a seamless failover experience, cluster should use this forwarding option to forward those APIs to the active cluster.
+	ClusterRedirectionPolicy struct {
+		// Support "noop", "selected-apis-forwarding" and "all-domain-apis-forwarding", default (when empty) is "noop"
+		//
+		// 1) "noop" will not do any forwarding.
+		//
+		// 2) "all-domain-apis-forwarding" will forward all domain specific APIs(worker and non worker) if the current active domain is
+		// the same as "allDomainApisForwardingTargetCluster"( or "allDomainApisForwardingTargetCluster" is empty), otherwise it fallbacks to "selected-apis-forwarding".
+		//
+		// 3) "selected-apis-forwarding" will forward all non-worker APIs including
+		// 1. StartWorkflowExecution
+		// 2. SignalWithStartWorkflowExecution
+		// 3. SignalWorkflowExecution
+		// 4. RequestCancelWorkflowExecution
+		// 5. TerminateWorkflowExecution
+		// 6. QueryWorkflow
+		// 7. ResetWorkflow
+		//
+		// 4) "selected-apis-forwarding-v2" will forward all of "selected-apis-forwarding", and also activity responses
+		// and heartbeats, but not other worker APIs.
+		//
+		// "selected-apis-forwarding(-v2)" and "all-domain-apis-forwarding" can work with EnableDomainNotActiveAutoForwarding dynamicconfig to select certain domains using the policy.
+		//
+		// Usage recommendation: when enabling XDC(global domain) feature, either "all-domain-apis-forwarding" or "selected-apis-forwarding(-v2)" should be used to ensure seamless domain failover(high availability)
+		// Depending on the cost of cross cluster calls:
+		//
+		// 1) If the network communication overhead is high(e.g., clusters are in remote datacenters of different region), then should use "selected-apis-forwarding(-v2)".
+		// But you must ensure a different set of workers with the same workflow & activity code are connected to each Cadence cluster.
+		//
+		// 2) If the network communication overhead is low (e.g. in the same datacenter, mostly for cluster migration usage), then you can use "all-domain-apis-forwarding". Then only one set of
+		// workflow & activity worker connected of one of the Cadence cluster is enough as all domain APIs are forwarded. See more details in documentation of cluster migration section.
+		// Usually "allDomainApisForwardingTargetCluster" should be empty(default value) except for very rare cases: you have more than two clusters and some are in a remote region but some are in local region.
 		Policy string `yaml:"policy"`
-		ToDC   string `yaml:"toDC"`
+		// A supplement for "all-domain-apis-forwarding" policy. It decides how the policy fallback to  "selected-apis-forwarding" policy.
+		// If this is not empty, and current domain is not active in the value of allDomainApisForwardingTargetCluster, then the policy will fallback to "selected-apis-forwarding" policy.
+		// Default is empty, meaning that all requests will not fallback.
+		AllDomainApisForwardingTargetCluster string `yaml:"allDomainApisForwardingTargetCluster"`
+		// Not being used, but we have to keep it so that config loading is not broken
+		ToDC string `yaml:"toDC"`
 	}
 
 	// Metrics contains the config items for metrics subsystem
@@ -299,12 +424,20 @@ type (
 		// Statsd is the configuration for statsd reporter
 		Statsd *Statsd `yaml:"statsd"`
 		// Prometheus is the configuration for prometheus reporter
+		// Some documentation below because the tally library is missing it:
+		// In this configuration, default timerType is "histogram", alternatively "summary" is also supported.
+		// In some cases, summary is better. Choose it wisely.
+		// For histogram, default buckets are defined in https://github.com/uber/cadence/blob/master/common/metrics/tally/prometheus/buckets.go#L34
+		// For summary, default objectives are defined in https://github.com/uber-go/tally/blob/137973e539cd3589f904c23d0b3a28c579fd0ae4/prometheus/reporter.go#L70
+		// You can customize the buckets/objectives if the default is not good enough.
 		Prometheus *prometheus.Configuration `yaml:"prometheus"`
 		// Tags is the set of key-value pairs to be reported
 		// as part of every metric
 		Tags map[string]string `yaml:"tags"`
 		// Prefix sets the prefix to all outgoing metrics
 		Prefix string `yaml:"prefix"`
+		// ReportingInterval is the interval of metrics reporter
+		ReportingInterval time.Duration `yaml:"reportingInterval"` // defaults to 1s
 	}
 
 	// Statsd contains the config items for statsd metrics reporter
@@ -385,7 +518,13 @@ type (
 	// PublicClient is config for connecting to cadence frontend
 	PublicClient struct {
 		// HostPort is the host port to connect on. Host can be DNS name
-		HostPort string `yaml:"hostPort" validate:"nonzero"`
+		// Default to currentCluster's RPCAddress in ClusterInformation
+		HostPort string `yaml:"hostPort"`
+		// Transport is the tranport to use when communicating using the SDK client.
+		// Defaults to:
+		// - currentCluster's RPCTransport in ClusterInformation (if HostPort is not provided)
+		// - grpc (if HostPort is provided)
+		Transport string `yaml:"transport"`
 		// interval to refresh DNS. Default to 10s
 		RefreshInterval time.Duration `yaml:"RefreshInterval"`
 	}
@@ -419,55 +558,85 @@ type (
 		// URI is the domain default URI for visibility archiver
 		URI string `yaml:"URI"`
 	}
-
-	// BootstrapMode is an enum type for ringpop bootstrap mode
-	BootstrapMode int
 )
+
+const (
+	// NonShardedStoreName is the shard name used for singular (non-sharded) stores
+	NonShardedStoreName = "NonShardedStore"
+)
+
+func (n *NoSQL) ConvertToShardedNoSQLConfig() *ShardedNoSQL {
+	connections := make(map[string]DBShardConnection)
+	connections[NonShardedStoreName] = DBShardConnection{
+		NoSQLPlugin: n,
+	}
+
+	return &ShardedNoSQL{
+		DefaultShard: NonShardedStoreName,
+		Connections:  connections,
+	}
+}
 
 // ValidateAndFillDefaults validates this config and fills default values if needed
 func (c *Config) ValidateAndFillDefaults() error {
-	if err := c.validate(); err != nil {
-		return err
-	}
-	return c.fillDefaults()
+	c.fillDefaults()
+	return c.validate()
 }
 
 func (c *Config) validate() error {
 	if err := c.Persistence.Validate(); err != nil {
 		return err
 	}
-	return c.Archival.Validate(&c.DomainDefaults.Archival)
+	if err := c.ClusterGroupMetadata.Validate(); err != nil {
+		return err
+	}
+	if err := c.Archival.Validate(&c.DomainDefaults.Archival); err != nil {
+		return err
+	}
+
+	return c.Authorization.Validate()
 }
 
-func (c *Config) fillDefaults() error {
-	// filling default encodingType/decodingTypes for SQL persistence
-	for k, store := range c.Persistence.DataStores {
-		if store.SQL != nil {
-			if store.SQL.EncodingType == "" {
-				store.SQL.EncodingType = string(common.EncodingTypeThriftRW)
-			}
-			if len(store.SQL.DecodingTypes) == 0 {
-				store.SQL.DecodingTypes = []string{
-					string(common.EncodingTypeThriftRW),
-				}
-			}
-			c.Persistence.DataStores[k] = store
-		}
+func (c *Config) fillDefaults() {
+	c.Persistence.FillDefaults()
+
+	// TODO: remove this at the point when we decided to make some breaking changes in config.
+	if c.ClusterGroupMetadata == nil && c.ClusterMetadata != nil {
+		c.ClusterGroupMetadata = c.ClusterMetadata
+		log.Println("[WARN] clusterMetadata config is deprecated. Please replace it with clusterGroupMetadata.")
 	}
-	// filling RPCName with a default value if empty
-	if c.ClusterMetadata != nil {
-		for k, cluster := range c.ClusterMetadata.ClusterInformation {
-			if cluster.RPCName == "" {
-				cluster.RPCName = "cadence-frontend"
-				c.ClusterMetadata.ClusterInformation[k] = cluster
-			}
-		}
+
+	c.ClusterGroupMetadata.FillDefaults()
+
+	// filling publicClient with current cluster's RPC address if empty
+	if c.PublicClient.HostPort == "" && c.ClusterGroupMetadata != nil {
+		name := c.ClusterGroupMetadata.CurrentClusterName
+		currentCluster := c.ClusterGroupMetadata.ClusterGroup[name]
+		c.PublicClient.HostPort = currentCluster.RPCAddress
+		c.PublicClient.Transport = currentCluster.RPCTransport
+
 	}
-	return nil
+	if c.PublicClient.Transport == "" {
+		c.PublicClient.Transport = "grpc"
+	}
+
+	if c.ClusterGroupMetadata.ClusterRedirectionPolicy == nil && c.DCRedirectionPolicy != nil {
+		log.Println("[WARN] dcRedirectionPolicy config is deprecated. Please replace it with clusterRedirectionPolicy.")
+		c.ClusterGroupMetadata.ClusterRedirectionPolicy = c.DCRedirectionPolicy
+	}
 }
 
 // String converts the config object into a string
 func (c *Config) String() string {
 	out, _ := json.MarshalIndent(c, "", "    ")
 	return string(out)
+}
+
+func (c *Config) GetServiceConfig(serviceName string) (Service, error) {
+	shortName := service.ShortName(serviceName)
+	serviceConfig, ok := c.Services[shortName]
+	if !ok {
+		return Service{}, fmt.Errorf("no config section for service: %s", shortName)
+	}
+	return serviceConfig, nil
 }

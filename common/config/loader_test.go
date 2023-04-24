@@ -22,7 +22,6 @@ package config
 
 import (
 	"io/ioutil"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -55,13 +54,12 @@ func (s *LoaderSuite) SetupTest() {
 
 func (s *LoaderSuite) TestBaseYaml() {
 
-	dir, err := ioutil.TempDir("", "loader.testBaseYaml")
-	s.Nil(err)
-	defer os.RemoveAll(dir)
+	dir := s.T().TempDir()
 
-	data := buildConfig("", "")
-	err = ioutil.WriteFile(path(dir, "base.yaml"), []byte(data), fileMode)
-	s.Nil(err)
+	s.createFile(dir, "base.yaml", `
+items:
+  item1: base1
+  item2: base2`)
 
 	envs := []string{"", "prod"}
 	zones := []string{"", "us-east-1a"}
@@ -69,24 +67,34 @@ func (s *LoaderSuite) TestBaseYaml() {
 	for _, env := range envs {
 		for _, zone := range zones {
 			var cfg testConfig
-			err = Load(env, dir, zone, &cfg)
+			err := Load(env, dir, zone, &cfg)
 			s.Nil(err)
-			s.Equal("hello__", cfg.Items.Item1)
-			s.Equal("world__", cfg.Items.Item2)
+			s.Equal("base1", cfg.Items.Item1)
+			s.Equal("base2", cfg.Items.Item2)
 		}
 	}
 }
 
 func (s *LoaderSuite) TestHierarchy() {
 
-	dir, err := ioutil.TempDir("", "loader.testHierarchy")
-	s.Nil(err)
-	defer os.RemoveAll(dir)
+	dir := s.T().TempDir()
 
-	s.createFile(dir, "base.yaml", "", "")
-	s.createFile(dir, "development.yaml", "development", "")
-	s.createFile(dir, "prod.yaml", "prod", "")
-	s.createFile(dir, "prod_dca.yaml", "prod", "dca")
+	s.createFile(dir, "base.yaml", `
+items:
+  item1: base1
+  item2: base2`)
+
+	s.createFile(dir, "development.yaml", `
+items:
+  item1: development1`)
+
+	s.createFile(dir, "prod.yaml", `
+items:
+  item1: prod1`)
+
+	s.createFile(dir, "prod_dca.yaml", `
+items:
+  item1: prod_dca1`)
 
 	testCases := []struct {
 		env   string
@@ -94,20 +102,20 @@ func (s *LoaderSuite) TestHierarchy() {
 		item1 string
 		item2 string
 	}{
-		{"", "", "hello_development_", "world_development_"},
-		{"", "dca", "hello_development_", "world_development_"},
-		{"", "pdx", "hello_development_", "world_development_"},
-		{"development", "", "hello_development_", "world_development_"},
-		{"development", "dca", "hello_development_", "world_development_"},
-		{"development", "pdx", "hello_development_", "world_development_"},
-		{"prod", "", "hello_prod_", "world_prod_"},
-		{"prod", "dca", "hello_prod_dca", "world_prod_dca"},
-		{"prod", "pdx", "hello_prod_", "world_prod_"},
+		{"", "", "development1", "base2"},
+		{"", "dca", "development1", "base2"},
+		{"", "pdx", "development1", "base2"},
+		{"development", "", "development1", "base2"},
+		{"development", "dca", "development1", "base2"},
+		{"development", "pdx", "development1", "base2"},
+		{"prod", "", "prod1", "base2"},
+		{"prod", "dca", "prod_dca1", "base2"},
+		{"prod", "pdx", "prod1", "base2"},
 	}
 
 	for _, tc := range testCases {
 		var cfg testConfig
-		err = Load(tc.env, dir, tc.zone, &cfg)
+		err := Load(tc.env, dir, tc.zone, &cfg)
 		s.Nil(err)
 		s.Equal(tc.item1, cfg.Items.Item1)
 		s.Equal(tc.item2, cfg.Items.Item2)
@@ -120,16 +128,7 @@ func (s *LoaderSuite) TestInvalidPath() {
 	s.NotNil(err)
 }
 
-func (s *LoaderSuite) createFile(dir string, file string, env string, zone string) {
-	err := ioutil.WriteFile(path(dir, file), []byte(buildConfig(env, zone)), fileMode)
+func (s *LoaderSuite) createFile(dir string, file string, content string) {
+	err := ioutil.WriteFile(path(dir, file), []byte(content), fileMode)
 	s.Nil(err)
-}
-
-func buildConfig(env, zone string) string {
-	item1 := concat("hello", concat(env, zone))
-	item2 := concat("world", concat(env, zone))
-	return `
-    items:
-      item1: ` + item1 + `
-      item2: ` + item2
 }

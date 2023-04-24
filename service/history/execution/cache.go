@@ -27,6 +27,7 @@ import (
 
 	"github.com/pborman/uuid"
 
+	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/backoff"
 	"github.com/uber/cadence/common/cache"
 	"github.com/uber/cadence/common/definition"
@@ -253,12 +254,16 @@ func (c *Cache) validateWorkflowExecutionInfo(
 	if execution.GetWorkflowID() == "" {
 		return &types.BadRequestError{Message: "Can't load workflow execution.  WorkflowId not set."}
 	}
-
+	domainName, err := c.shard.GetDomainCache().GetDomainName(domainID)
+	if err != nil {
+		return err
+	}
 	// RunID is not provided, lets try to retrieve the RunID for current active execution
 	if execution.GetRunID() == "" {
 		response, err := c.getCurrentExecutionWithRetry(ctx, &persistence.GetCurrentExecutionRequest{
 			DomainID:   domainID,
 			WorkflowID: execution.GetWorkflowID(),
+			DomainName: domainName,
 		})
 
 		if err != nil {
@@ -280,21 +285,23 @@ func (c *Cache) makeReleaseFunc(
 
 	status := cacheNotReleased
 	return func(err error) {
-		if atomic.CompareAndSwapInt32(&status, cacheNotReleased, cacheReleased) {
-			if rec := recover(); rec != nil {
-				context.Clear()
-				context.Unlock()
-				c.Release(key)
-				panic(rec)
-			} else {
-				if err != nil || forceClearContext {
-					// TODO see issue #668, there are certain type or errors which can bypass the clear
+		defer func() {
+			if atomic.CompareAndSwapInt32(&status, cacheNotReleased, cacheReleased) {
+				if rec := recover(); rec != nil {
 					context.Clear()
+					context.Unlock()
+					c.Release(key)
+					panic(rec)
+				} else {
+					if err != nil || forceClearContext {
+						// TODO see issue #668, there are certain type or errors which can bypass the clear
+						context.Clear()
+					}
+					context.Unlock()
+					c.Release(key)
 				}
-				context.Unlock()
-				c.Release(key)
 			}
-		}
+		}()
 	}
 }
 
@@ -315,7 +322,11 @@ func (c *Cache) getCurrentExecutionWithRetry(
 		return err
 	}
 
-	err := backoff.Retry(op, persistenceOperationRetryPolicy, persistence.IsTransientError)
+	throttleRetry := backoff.NewThrottleRetry(
+		backoff.WithRetryPolicy(common.CreatePersistenceRetryPolicy()),
+		backoff.WithRetryableError(persistence.IsTransientError),
+	)
+	err := throttleRetry.Do(ctx, op)
 	if err != nil {
 		c.metricsClient.IncCounter(metrics.HistoryCacheGetCurrentExecutionScope, metrics.CacheFailures)
 		return nil, err

@@ -75,9 +75,16 @@ func (s *sqlVisibilityStore) RecordWorkflowExecutionStarted(
 		WorkflowTypeName: request.WorkflowTypeName,
 		Memo:             request.Memo.Data,
 		Encoding:         string(request.Memo.GetEncoding()),
+		IsCron:           request.IsCron,
+		NumClusters:      request.NumClusters,
+		UpdateTime:       request.UpdateTimestamp,
+		ShardID:          request.ShardID,
 	})
 
-	return err
+	if err != nil {
+		return convertCommonErrors(s.db, "RecordWorkflowExecutionStarted", "", err)
+	}
+	return nil
 }
 
 func (s *sqlVisibilityStore) RecordWorkflowExecutionClosed(
@@ -97,28 +104,44 @@ func (s *sqlVisibilityStore) RecordWorkflowExecutionClosed(
 		HistoryLength:    &request.HistoryLength,
 		Memo:             request.Memo.Data,
 		Encoding:         string(request.Memo.GetEncoding()),
+		IsCron:           request.IsCron,
+		NumClusters:      request.NumClusters,
+		UpdateTime:       request.UpdateTimestamp,
+		ShardID:          request.ShardID,
 	})
 	if err != nil {
-		return err
+		return convertCommonErrors(s.db, "RecordWorkflowExecutionClosed", "", err)
 	}
 	noRowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("RecordWorkflowExecutionClosed rowsAffected error: %v", err)
+		return &types.InternalServiceError{
+			Message: fmt.Sprintf("RecordWorkflowExecutionClosed rowsAffected error: %v", err),
+		}
 	}
 	if noRowsAffected > 2 { // either adds a new row or deletes old row and adds new row
-		return fmt.Errorf("RecordWorkflowExecutionClosed unexpected numRows (%v) updated", noRowsAffected)
+		return &types.InternalServiceError{
+			Message: fmt.Sprintf("RecordWorkflowExecutionClosed unexpected numRows (%v) updated", noRowsAffected),
+		}
 	}
 	return nil
 }
 
-func (s *sqlVisibilityStore) UpsertWorkflowExecution(
+func (s *sqlVisibilityStore) RecordWorkflowExecutionUninitialized(
 	ctx context.Context,
+	request *p.InternalRecordWorkflowExecutionUninitializedRequest,
+) error {
+	// temporary: not implemented, only implemented for ES
+	return nil
+}
+
+func (s *sqlVisibilityStore) UpsertWorkflowExecution(
+	_ context.Context,
 	request *p.InternalUpsertWorkflowExecutionRequest,
 ) error {
 	if p.IsNopUpsertWorkflowRequest(request) {
 		return nil
 	}
-	return p.NewOperationNotSupportErrorForVis()
+	return p.ErrVisibilityOperationNotSupported
 }
 
 func (s *sqlVisibilityStore) ListOpenWorkflowExecutions(
@@ -259,9 +282,7 @@ func (s *sqlVisibilityStore) GetClosedWorkflowExecution(
 					execution.GetWorkflowID(), execution.GetRunID()),
 			}
 		}
-		return nil, &types.InternalServiceError{
-			Message: fmt.Sprintf("GetClosedWorkflowExecution operation failed. Select failed: %v", err),
-		}
+		return nil, convertCommonErrors(s.db, "GetClosedWorkflowExecution", "", err)
 	}
 	rows[0].DomainID = request.DomainUUID
 	rows[0].RunID = execution.GetRunID()
@@ -278,30 +299,38 @@ func (s *sqlVisibilityStore) DeleteWorkflowExecution(
 		RunID:    &request.RunID,
 	})
 	if err != nil {
-		return &types.InternalServiceError{Message: err.Error()}
+		return convertCommonErrors(s.db, "DeleteWorkflowExecution", "", err)
 	}
 	return nil
 }
 
-func (s *sqlVisibilityStore) ListWorkflowExecutions(
+func (s *sqlVisibilityStore) DeleteUninitializedWorkflowExecution(
 	ctx context.Context,
-	request *p.ListWorkflowExecutionsByQueryRequest,
+	request *p.VisibilityDeleteWorkflowExecutionRequest,
+) error {
+	// temporary: not implemented, only implemented for ES
+	return nil
+}
+
+func (s *sqlVisibilityStore) ListWorkflowExecutions(
+	_ context.Context,
+	_ *p.ListWorkflowExecutionsByQueryRequest,
 ) (*p.InternalListWorkflowExecutionsResponse, error) {
-	return nil, p.NewOperationNotSupportErrorForVis()
+	return nil, p.ErrVisibilityOperationNotSupported
 }
 
 func (s *sqlVisibilityStore) ScanWorkflowExecutions(
-	ctx context.Context,
-	request *p.ListWorkflowExecutionsByQueryRequest,
+	_ context.Context,
+	_ *p.ListWorkflowExecutionsByQueryRequest,
 ) (*p.InternalListWorkflowExecutionsResponse, error) {
-	return nil, p.NewOperationNotSupportErrorForVis()
+	return nil, p.ErrVisibilityOperationNotSupported
 }
 
 func (s *sqlVisibilityStore) CountWorkflowExecutions(
-	ctx context.Context,
-	request *p.CountWorkflowExecutionsRequest,
+	_ context.Context,
+	_ *p.CountWorkflowExecutionsRequest,
 ) (*p.CountWorkflowExecutionsResponse, error) {
-	return nil, p.NewOperationNotSupportErrorForVis()
+	return nil, p.ErrVisibilityOperationNotSupported
 }
 
 func (s *sqlVisibilityStore) rowToInfo(row *sqlplugin.VisibilityRow) *p.InternalVisibilityWorkflowExecutionInfo {
@@ -314,7 +343,11 @@ func (s *sqlVisibilityStore) rowToInfo(row *sqlplugin.VisibilityRow) *p.Internal
 		TypeName:      row.WorkflowTypeName,
 		StartTime:     row.StartTime,
 		ExecutionTime: row.ExecutionTime,
+		IsCron:        row.IsCron,
+		NumClusters:   row.NumClusters,
 		Memo:          p.NewDataBlob(row.Memo, common.EncodingType(row.Encoding)),
+		UpdateTime:    row.UpdateTime,
+		ShardID:       row.ShardID,
 	}
 	if row.CloseStatus != nil {
 		status := workflow.WorkflowExecutionCloseStatus(*row.CloseStatus)
@@ -338,9 +371,7 @@ func (s *sqlVisibilityStore) listWorkflowExecutions(opName string, pageToken []b
 	}
 	rows, err := selectOp(readLevel)
 	if err != nil {
-		return nil, &types.InternalServiceError{
-			Message: fmt.Sprintf("%v operation failed. Select failed: %v", opName, err),
-		}
+		return nil, convertCommonErrors(s.db, opName, "", err)
 	}
 	if len(rows) == 0 {
 		return &p.InternalListWorkflowExecutionsResponse{}, nil

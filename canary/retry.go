@@ -32,9 +32,9 @@ import (
 )
 
 var (
-	errRetryableActivityError = errors.New("Retry me")
-	errUnexpectedProgress     = errors.New("Unexpected progress")
-	errUnexpectedResult       = errors.New("Unexpected result")
+	errRetryableActivityError = errors.New("retry me")
+	errUnexpectedProgress     = errors.New("unexpected progress")
+	errUnexpectedResult       = errors.New("unexpected result")
 )
 
 func init() {
@@ -43,7 +43,7 @@ func init() {
 	registerActivity(retryOnFailureActivity, activityTypeRetryOnFailure)
 }
 
-func retryWorkflow(ctx workflow.Context, scheduledTimeNanos int64, domain string) error {
+func retryWorkflow(ctx workflow.Context, scheduledTimeNanos int64) error {
 	profile, err := beginWorkflow(ctx, wfTypeRetry, scheduledTimeNanos)
 	if err != nil {
 		return err

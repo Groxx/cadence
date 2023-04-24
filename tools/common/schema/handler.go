@@ -22,20 +22,21 @@ package schema
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/urfave/cli"
 )
 
 // VerifyCompatibleVersion ensures that the installed version is greater than or equal to the expected version.
 func VerifyCompatibleVersion(
-	db DB,
+	db SchemaClient,
 	dbName string,
 	expectedVersion string,
 ) error {
 
 	version, err := db.ReadSchemaVersion()
 	if err != nil {
-		return fmt.Errorf("unable to read cassandra schema version keyspace/database: %s error: %v", dbName, err.Error())
+		return fmt.Errorf("reading schema version keyspace/database: %q, error: %w", dbName, err)
 	}
 	// In most cases, the versions should match. However if after a schema upgrade there is a code
 	// rollback, the code version (expected version) would fall lower than the actual version in
@@ -51,7 +52,7 @@ func VerifyCompatibleVersion(
 }
 
 // SetupFromConfig sets up schema tables based on the given config
-func SetupFromConfig(config *SetupConfig, db DB) error {
+func SetupFromConfig(config *SetupConfig, db SchemaClient) error {
 	if err := validateSetupConfig(config); err != nil {
 		return err
 	}
@@ -59,7 +60,7 @@ func SetupFromConfig(config *SetupConfig, db DB) error {
 }
 
 // Setup sets up schema tables
-func Setup(cli *cli.Context, db DB) error {
+func Setup(cli *cli.Context, db SchemaClient) error {
 	cfg, err := newSetupConfig(cli)
 	if err != nil {
 		return err
@@ -67,18 +68,30 @@ func Setup(cli *cli.Context, db DB) error {
 	return newSetupSchemaTask(db, cfg).Run()
 }
 
+// UpdateFromConfig updates the schema for the specified database based on the given config
+func UpdateFromConfig(config *UpdateConfig, db SchemaClient) error {
+	if err := validateUpdateConfig(config); err != nil {
+		return err
+	}
+	return NewUpdateSchemaTask(db, config).Run()
+}
+
 // Update updates the schema for the specified database
-func Update(cli *cli.Context, db DB) error {
+func Update(cli *cli.Context, db SchemaClient) error {
 	cfg, err := newUpdateConfig(cli)
 	if err != nil {
 		return err
 	}
-	return newUpdateSchemaTask(db, cfg).Run()
+	return NewUpdateSchemaTask(db, cfg).Run()
 }
 
 func newUpdateConfig(cli *cli.Context) (*UpdateConfig, error) {
 	config := new(UpdateConfig)
-	config.SchemaDir = cli.String(CLIOptSchemaDir)
+	schemaDir := cli.String(CLIOptSchemaDir)
+	if len(schemaDir) == 0 {
+		return nil, NewConfigError("missing " + flag(CLIOptSchemaDir) + " argument ")
+	}
+	config.SchemaFS = os.DirFS(schemaDir)
 	config.IsDryRun = cli.Bool(CLIOptDryrun)
 	config.TargetVersion = cli.String(CLIOptTargetVersion)
 
@@ -121,8 +134,8 @@ func validateSetupConfig(config *SetupConfig) error {
 }
 
 func validateUpdateConfig(config *UpdateConfig) error {
-	if len(config.SchemaDir) == 0 {
-		return NewConfigError("missing " + flag(CLIOptSchemaDir) + " argument ")
+	if config.SchemaFS == nil {
+		return NewConfigError("schema file system is not set")
 	}
 	if len(config.TargetVersion) > 0 {
 		ver, err := parseValidateVersion(config.TargetVersion)

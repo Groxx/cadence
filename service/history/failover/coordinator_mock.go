@@ -34,73 +34,88 @@ import (
 	types "github.com/uber/cadence/common/types"
 )
 
-// MockCoordinator is a mock of Coordinator interface
+// MockCoordinator is a mock of Coordinator interface.
 type MockCoordinator struct {
 	ctrl     *gomock.Controller
 	recorder *MockCoordinatorMockRecorder
 }
 
-// MockCoordinatorMockRecorder is the mock recorder for MockCoordinator
+// MockCoordinatorMockRecorder is the mock recorder for MockCoordinator.
 type MockCoordinatorMockRecorder struct {
 	mock *MockCoordinator
 }
 
-// NewMockCoordinator creates a new mock instance
+// NewMockCoordinator creates a new mock instance.
 func NewMockCoordinator(ctrl *gomock.Controller) *MockCoordinator {
 	mock := &MockCoordinator{ctrl: ctrl}
 	mock.recorder = &MockCoordinatorMockRecorder{mock}
 	return mock
 }
 
-// EXPECT returns an object that allows the caller to indicate expected use
+// EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockCoordinator) EXPECT() *MockCoordinatorMockRecorder {
 	return m.recorder
 }
 
-// Start mocks base method
-func (m *MockCoordinator) Start() {
+// GetFailoverInfo mocks base method.
+func (m *MockCoordinator) GetFailoverInfo(domainID string) (*types.GetFailoverInfoResponse, error) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Start")
+	ret := m.ctrl.Call(m, "GetFailoverInfo", domainID)
+	ret0, _ := ret[0].(*types.GetFailoverInfoResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
-// Start indicates an expected call of Start
-func (mr *MockCoordinatorMockRecorder) Start() *gomock.Call {
+// GetFailoverInfo indicates an expected call of GetFailoverInfo.
+func (mr *MockCoordinatorMockRecorder) GetFailoverInfo(domainID interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockCoordinator)(nil).Start))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFailoverInfo", reflect.TypeOf((*MockCoordinator)(nil).GetFailoverInfo), domainID)
 }
 
-// Stop mocks base method
-func (m *MockCoordinator) Stop() {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Stop")
-}
-
-// Stop indicates an expected call of Stop
-func (mr *MockCoordinatorMockRecorder) Stop() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockCoordinator)(nil).Stop))
-}
-
-// NotifyFailoverMarkers mocks base method
+// NotifyFailoverMarkers mocks base method.
 func (m *MockCoordinator) NotifyFailoverMarkers(shardID int32, markers []*types.FailoverMarkerAttributes) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "NotifyFailoverMarkers", shardID, markers)
 }
 
-// NotifyFailoverMarkers indicates an expected call of NotifyFailoverMarkers
+// NotifyFailoverMarkers indicates an expected call of NotifyFailoverMarkers.
 func (mr *MockCoordinatorMockRecorder) NotifyFailoverMarkers(shardID, markers interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NotifyFailoverMarkers", reflect.TypeOf((*MockCoordinator)(nil).NotifyFailoverMarkers), shardID, markers)
 }
 
-// ReceiveFailoverMarkers mocks base method
+// ReceiveFailoverMarkers mocks base method.
 func (m *MockCoordinator) ReceiveFailoverMarkers(shardIDs []int32, marker *types.FailoverMarkerAttributes) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "ReceiveFailoverMarkers", shardIDs, marker)
 }
 
-// ReceiveFailoverMarkers indicates an expected call of ReceiveFailoverMarkers
+// ReceiveFailoverMarkers indicates an expected call of ReceiveFailoverMarkers.
 func (mr *MockCoordinatorMockRecorder) ReceiveFailoverMarkers(shardIDs, marker interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReceiveFailoverMarkers", reflect.TypeOf((*MockCoordinator)(nil).ReceiveFailoverMarkers), shardIDs, marker)
+}
+
+// Start mocks base method.
+func (m *MockCoordinator) Start() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Start")
+}
+
+// Start indicates an expected call of Start.
+func (mr *MockCoordinatorMockRecorder) Start() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockCoordinator)(nil).Start))
+}
+
+// Stop mocks base method.
+func (m *MockCoordinator) Stop() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Stop")
+}
+
+// Stop indicates an expected call of Stop.
+func (mr *MockCoordinatorMockRecorder) Stop() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockCoordinator)(nil).Stop))
 }

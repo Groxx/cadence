@@ -104,6 +104,11 @@ func (t thriftClient) ListTaskListPartitions(ctx context.Context, request *types
 	return thrift.ToListTaskListPartitionsResponse(response), thrift.ToError(err)
 }
 
+func (t thriftClient) GetTaskListsByDomain(ctx context.Context, request *types.GetTaskListsByDomainRequest, opts ...yarpc.CallOption) (*types.GetTaskListsByDomainResponse, error) {
+	response, err := t.c.GetTaskListsByDomain(ctx, thrift.FromGetTaskListsByDomainRequest(request), opts...)
+	return thrift.ToGetTaskListsByDomainResponse(response), thrift.ToError(err)
+}
+
 func (t thriftClient) ListWorkflowExecutions(ctx context.Context, request *types.ListWorkflowExecutionsRequest, opts ...yarpc.CallOption) (*types.ListWorkflowExecutionsResponse, error) {
 	response, err := t.c.ListWorkflowExecutions(ctx, thrift.FromListWorkflowExecutionsRequest(request), opts...)
 	return thrift.ToListWorkflowExecutionsResponse(response), thrift.ToError(err)
@@ -147,6 +152,11 @@ func (t thriftClient) RequestCancelWorkflowExecution(ctx context.Context, reques
 func (t thriftClient) ResetStickyTaskList(ctx context.Context, request *types.ResetStickyTaskListRequest, opts ...yarpc.CallOption) (*types.ResetStickyTaskListResponse, error) {
 	response, err := t.c.ResetStickyTaskList(ctx, thrift.FromResetStickyTaskListRequest(request), opts...)
 	return thrift.ToResetStickyTaskListResponse(response), thrift.ToError(err)
+}
+
+func (t thriftClient) RefreshWorkflowTasks(ctx context.Context, request *types.RefreshWorkflowTasksRequest, opts ...yarpc.CallOption) error {
+	err := t.c.RefreshWorkflowTasks(ctx, thrift.FromRefreshWorkflowTasksRequest(request), opts...)
+	return thrift.ToError(err)
 }
 
 func (t thriftClient) ResetWorkflowExecution(ctx context.Context, request *types.ResetWorkflowExecutionRequest, opts ...yarpc.CallOption) (*types.ResetWorkflowExecutionResponse, error) {
@@ -203,7 +213,10 @@ func (t thriftClient) ScanWorkflowExecutions(ctx context.Context, request *types
 	response, err := t.c.ScanWorkflowExecutions(ctx, thrift.FromListWorkflowExecutionsRequest(request), opts...)
 	return thrift.ToListWorkflowExecutionsResponse(response), thrift.ToError(err)
 }
-
+func (t thriftClient) RestartWorkflowExecution(ctx context.Context, request *types.RestartWorkflowExecutionRequest, opts ...yarpc.CallOption) (*types.RestartWorkflowExecutionResponse, error) {
+	response, err := t.c.RestartWorkflowExecution(ctx, thrift.FromRestartWorkflowExecutionRequest(request), opts...)
+	return thrift.ToRestartWorkflowExecutionResponse(response), thrift.ToError(err)
+}
 func (t thriftClient) SignalWithStartWorkflowExecution(ctx context.Context, request *types.SignalWithStartWorkflowExecutionRequest, opts ...yarpc.CallOption) (*types.StartWorkflowExecutionResponse, error) {
 	response, err := t.c.SignalWithStartWorkflowExecution(ctx, thrift.FromSignalWithStartWorkflowExecutionRequest(request), opts...)
 	return thrift.ToStartWorkflowExecutionResponse(response), thrift.ToError(err)

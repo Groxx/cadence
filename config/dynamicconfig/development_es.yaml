@@ -16,6 +16,9 @@ frontend.validSearchAttributes:
       CloseStatus: 2
       HistoryLength: 2
       TaskList: 1
+      IsCron: 1
+      NumClusters: 2
+      UpdateTime: 2
       CustomStringField: 0
       CustomKeywordField: 1
       CustomIntField: 2
@@ -34,8 +37,10 @@ frontend.validSearchAttributes:
       CadenceChangeVersion: 1
       BinaryChecksums: 1
       Passed: 4
+      ShardID: 2
 system.minRetentionDays:
     - value: 0
-system.enableGRPCOutbound:
-    - value: true
-      constraints: {}
+history.EnableConsistentQueryByDomain:
+- value: true
+  constraints: {}
+

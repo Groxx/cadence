@@ -22,11 +22,13 @@ package loggerimpl
 
 import (
 	"fmt"
+	"math/rand"
 	"path/filepath"
 	"runtime"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 
 	"github.com/uber/cadence/common/log"
@@ -96,6 +98,10 @@ func (lg *loggerImpl) buildFields(tags []tag.Tag) []zap.Field {
 			continue
 		}
 		fs = append(fs, f)
+
+		if obj, ok := f.Interface.(zapcore.ObjectMarshaler); ok && f.Type == zapcore.ErrorType {
+			fs = append(fs, zap.Object(f.Key+"-details", obj))
+		}
 	}
 	return fs
 }
@@ -143,5 +149,13 @@ func (lg *loggerImpl) WithTags(tags ...tag.Tag) log.Logger {
 	return &loggerImpl{
 		zapLogger: zapLogger,
 		skip:      lg.skip,
+	}
+}
+
+func (lg *loggerImpl) SampleInfo(msg string, sampleRate int, tags ...tag.Tag) {
+	if rand.Intn(sampleRate) == 0 {
+		msg = setDefaultMsg(msg)
+		fields := lg.buildFieldsWithCallat(tags)
+		lg.zapLogger.Info(msg, fields...)
 	}
 }

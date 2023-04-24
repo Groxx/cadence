@@ -326,6 +326,20 @@ func (_m *VisibilityManager) RecordWorkflowExecutionStarted(ctx context.Context,
 	return r0
 }
 
+// RecordWorkflowExecutionUninitialized provides a mock function with given fields: ctx, request
+func (_m *VisibilityManager) RecordWorkflowExecutionUninitialized(ctx context.Context, request *persistence.RecordWorkflowExecutionUninitializedRequest) error {
+	ret := _m.Called(ctx, request)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *persistence.RecordWorkflowExecutionUninitializedRequest) error); ok {
+		r0 = rf(ctx, request)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // ScanWorkflowExecutions provides a mock function with given fields: ctx, request
 func (_m *VisibilityManager) ScanWorkflowExecutions(ctx context.Context, request *persistence.ListWorkflowExecutionsByQueryRequest) (*persistence.ListWorkflowExecutionsResponse, error) {
 	ret := _m.Called(ctx, request)
@@ -355,6 +369,20 @@ func (_m *VisibilityManager) UpsertWorkflowExecution(ctx context.Context, reques
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(context.Context, *persistence.UpsertWorkflowExecutionRequest) error); ok {
+		r0 = rf(ctx, request)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DeleteUninitializedWorkflowExecution provides a mock function with given fields: ctx, request
+func (_m *VisibilityManager) DeleteUninitializedWorkflowExecution(ctx context.Context, request *persistence.VisibilityDeleteWorkflowExecutionRequest) error {
+	ret := _m.Called(ctx, request)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *persistence.VisibilityDeleteWorkflowExecutionRequest) error); ok {
 		r0 = rf(ctx, request)
 	} else {
 		r0 = ret.Error(0)

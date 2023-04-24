@@ -42,8 +42,8 @@ const (
 	templateGetQueueSizeQuery               = `SELECT COUNT(1) AS count FROM queue WHERE queue_type=?`
 )
 
-//Insert message into queue, return error if failed or already exists
-// Must return conditionFailed error if row already exists
+// Insert message into queue, return error if failed or already exists
+// Must return ConditionFailure error if row already exists
 func (db *cdb) InsertIntoQueue(
 	ctx context.Context,
 	row *nosqlplugin.QueueMessageRow,
@@ -56,7 +56,7 @@ func (db *cdb) InsertIntoQueue(
 	}
 
 	if !applied {
-		return errConditionFailed
+		return nosqlplugin.NewConditionFailure("queue")
 	}
 	return nil
 }
@@ -156,7 +156,7 @@ func (db *cdb) DeleteMessagesBefore(
 	exclusiveBeginMessageID int64,
 ) error {
 	query := db.session.Query(templateRangeDeleteMessagesBeforeQuery, queueType, exclusiveBeginMessageID).WithContext(ctx)
-	return query.Exec()
+	return db.executeWithConsistencyAll(query)
 }
 
 // Delete all messages in a range between exclusiveBeginMessageID and inclusiveEndMessageID
@@ -167,7 +167,7 @@ func (db *cdb) DeleteMessagesInRange(
 	inclusiveEndMessageID int64,
 ) error {
 	query := db.session.Query(templateRangeDeleteMessagesBetweenQuery, queueType, exclusiveBeginMessageID, inclusiveEndMessageID).WithContext(ctx)
-	return query.Exec()
+	return db.executeWithConsistencyAll(query)
 }
 
 // Delete one message
@@ -177,7 +177,7 @@ func (db *cdb) DeleteMessage(
 	messageID int64,
 ) error {
 	query := db.session.Query(templateDeleteMessageQuery, queueType, messageID).WithContext(ctx)
-	return query.Exec()
+	return db.executeWithConsistencyAll(query)
 }
 
 // Insert an empty metadata row, starting from a version
@@ -202,7 +202,7 @@ func (db *cdb) InsertQueueMetadata(
 
 // **Conditionally** update a queue metadata row, if current version is matched(meaning current == row.Version - 1),
 // then the current version will increase by one when updating the metadata row
-// it should return error if the condition is not met
+// it should return ConditionFailure if the condition is not met
 func (db *cdb) UpdateQueueMetadataCas(
 	ctx context.Context,
 	row nosqlplugin.QueueMetadataRow,
@@ -222,7 +222,7 @@ func (db *cdb) UpdateQueueMetadataCas(
 		return err
 	}
 	if !applied {
-		return errConditionFailed
+		return nosqlplugin.NewConditionFailure("queue")
 	}
 
 	return nil

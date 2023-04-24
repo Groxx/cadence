@@ -61,7 +61,7 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.5.1
+    image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.22
     expose:
       - "9200"
     networks:
@@ -71,12 +71,27 @@ services:
     environment:
       - discovery.type=single-node
 
+  mongo:
+    image: mongo:5
+    restart: always
+    networks:
+      services-network:
+        aliases:
+          - mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: cadence
+
   unit-test:
     build:
       context: ../../
       dockerfile: ./docker/buildkite/Dockerfile
     command: make cover_profile
     environment:
+      - "CASSANDRA=1"
+      - "MYSQL=1"
+      - "POSTGRES=1"
+      - "MONGODB=1"
       - "CASSANDRA_SEEDS=cassandra"
       - "MYSQL_SEEDS=mysql"
       - "POSTGRES_SEEDS=postgres"
@@ -86,6 +101,7 @@ services:
       - cassandra
       - mysql
       - postgres
+      - mongo
     volumes:
       - ../../:/cadence
     networks:
@@ -99,6 +115,7 @@ services:
       dockerfile: ./docker/buildkite/Dockerfile
     command: make cover_integration_profile
     environment:
+      - "CASSANDRA=1"
       - "CASSANDRA_SEEDS=cassandra"
       - "ES_SEEDS=elasticsearch"
       - "KAFKA_SEEDS=kafka"
@@ -120,6 +137,7 @@ services:
       dockerfile: ./docker/buildkite/Dockerfile
     command: make cover_integration_profile
     environment:
+      - "MYSQL=1"
       - "MYSQL_SEEDS=mysql"
       - "ES_SEEDS=elasticsearch"
       - "KAFKA_SEEDS=kafka"
@@ -142,6 +160,7 @@ services:
       dockerfile: ./docker/buildkite/Dockerfile
     command: make cover_integration_profile
     environment:
+      - "POSTGRES=1"
       - "POSTGRES_SEEDS=postgres"
       - "PERSISTENCE_PLUGIN=postgres"
       - "ES_SEEDS=elasticsearch"
@@ -165,6 +184,7 @@ services:
       dockerfile: ./docker/buildkite/Dockerfile
     command: make cover_integration_profile EVENTSV2=true
     environment:
+      - "CASSANDRA=1"
       - "CASSANDRA_SEEDS=cassandra"
       - "ES_SEEDS=elasticsearch"
       - "KAFKA_SEEDS=kafka"
@@ -186,6 +206,7 @@ services:
       dockerfile: ./docker/buildkite/Dockerfile
     command: make cover_ndc_profile
     environment:
+      - "CASSANDRA=1"
       - "CASSANDRA_SEEDS=cassandra"
       - "ES_SEEDS=elasticsearch"
       - "KAFKA_SEEDS=kafka"
@@ -207,6 +228,7 @@ services:
       dockerfile: ./docker/buildkite/Dockerfile
     command: make cover_ndc_profile
     environment:
+      - "MYSQL=1"
       - "MYSQL_SEEDS=mysql"
       - "ES_SEEDS=elasticsearch"
       - "KAFKA_SEEDS=kafka"

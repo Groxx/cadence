@@ -22,6 +22,8 @@ package queue
 
 import (
 	"context"
+	"math/rand"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -32,6 +34,7 @@ import (
 	"github.com/uber/cadence/common/log/tag"
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/persistence"
+	hcommon "github.com/uber/cadence/service/history/common"
 	"github.com/uber/cadence/service/history/config"
 	"github.com/uber/cadence/service/history/shard"
 	"github.com/uber/cadence/service/history/task"
@@ -52,19 +55,19 @@ type (
 		taskID int64
 	}
 
-	pollTime struct {
-		time       time.Time
-		changeable bool
-	}
-
 	transferQueueProcessorBase struct {
 		*processorBase
 
 		taskInitializer task.Initializer
 
-		notifyCh      chan struct{}
-		nextPollTime  map[int]pollTime
-		nextPollTimer TimerGate
+		notifyCh  chan struct{}
+		processCh chan struct{}
+
+		// for managing if a processing queue collection should be processed
+		startJitterTimer *time.Timer
+		processingLock   sync.Mutex
+		backoffTimer     map[int]*time.Timer
+		shouldProcess    map[int]bool
 
 		// for estimating the look ahead taskID during split
 		lastSplitTime           time.Time
@@ -121,14 +124,15 @@ func newTransferQueueProcessorBase(
 				taskExecutor,
 				taskProcessor,
 				processorBase.redispatcher.AddTask,
-				shard.GetTimeSource(),
-				shard.GetConfig().TransferTaskMaxRetryCount,
+				shard.GetConfig().TaskCriticalRetryCount,
 			)
 		},
 
-		notifyCh:      make(chan struct{}, 1),
-		nextPollTime:  make(map[int]pollTime),
-		nextPollTimer: NewLocalTimerGate(shard.GetTimeSource()),
+		notifyCh:  make(chan struct{}, 1),
+		processCh: make(chan struct{}, 1),
+
+		backoffTimer:  make(map[int]*time.Timer),
+		shouldProcess: make(map[int]bool),
 
 		lastSplitTime:    time.Time{},
 		lastMaxReadLevel: 0,
@@ -137,7 +141,6 @@ func newTransferQueueProcessorBase(
 	if shard.GetConfig().EnableDebugMode && options.EnableValidator() {
 		transferQueueProcessorBase.validator = newTransferQueueValidator(
 			transferQueueProcessorBase,
-			shard.GetTimeSource(),
 			options.ValidationInterval,
 			logger,
 			metricsClient.Scope(options.MetricScope),
@@ -157,8 +160,16 @@ func (t *transferQueueProcessorBase) Start() {
 
 	t.redispatcher.Start()
 
-	for _, queueCollections := range t.processingQueueCollections {
-		t.upsertPollTime(queueCollections.Level(), time.Time{}, true)
+	// trigger an initial (maybe delayed) load of tasks
+	if startJitter := t.options.MaxStartJitterInterval(); startJitter > 0 {
+		t.startJitterTimer = time.AfterFunc(
+			time.Duration(rand.Int63n(int64(startJitter))),
+			func() {
+				t.notifyAllQueueCollections()
+			},
+		)
+	} else {
+		t.notifyAllQueueCollections()
 	}
 
 	t.shutdownWG.Add(1)
@@ -173,8 +184,18 @@ func (t *transferQueueProcessorBase) Stop() {
 	t.logger.Info("Transfer queue processor state changed", tag.LifeCycleStopping)
 	defer t.logger.Info("Transfer queue processor state changed", tag.LifeCycleStopped)
 
-	t.nextPollTimer.Close()
 	close(t.shutdownCh)
+	if t.startJitterTimer != nil {
+		t.startJitterTimer.Stop()
+	}
+	t.processingLock.Lock()
+	for _, timer := range t.backoffTimer {
+		timer.Stop()
+	}
+	for level := range t.shouldProcess {
+		t.shouldProcess[level] = false
+	}
+	t.processingLock.Unlock()
 
 	if success := common.AwaitWaitGroup(&t.shutdownWG, time.Minute); !success {
 		t.logger.Warn("", tag.LifeCycleStopTimedout)
@@ -184,37 +205,73 @@ func (t *transferQueueProcessorBase) Stop() {
 }
 
 func (t *transferQueueProcessorBase) notifyNewTask(
-	executionInfo *persistence.WorkflowExecutionInfo,
-	transferTasks []persistence.Task,
+	info *hcommon.NotifyTaskInfo,
 ) {
 	select {
 	case t.notifyCh <- struct{}{}:
 	default:
 	}
 
-	if executionInfo != nil && t.validator != nil {
+	if info.ExecutionInfo != nil && t.validator != nil {
 		// executionInfo will be nil when notifyNewTask is called to trigger a scan, for example during domain failover or sync shard.
-		t.validator.addTasks(executionInfo, transferTasks)
+		t.validator.addTasks(info)
 	}
 }
 
-func (t *transferQueueProcessorBase) upsertPollTime(level int, newPollTime time.Time, changeable bool) {
-	if currentPollTime, ok := t.nextPollTime[level]; !ok || (newPollTime.Before(currentPollTime.time) && currentPollTime.changeable) {
-		t.nextPollTime[level] = pollTime{
-			time:       newPollTime,
-			changeable: changeable,
-		}
-		t.nextPollTimer.Update(newPollTime)
+func (t *transferQueueProcessorBase) readyForProcess(level int) {
+	t.processingLock.Lock()
+	defer t.processingLock.Unlock()
+
+	if _, ok := t.backoffTimer[level]; ok {
+		// current level is being throttled
+		return
+	}
+
+	t.shouldProcess[level] = true
+
+	// trigger the actual processing
+	select {
+	case t.processCh <- struct{}{}:
+	default:
 	}
 }
 
-func (t *transferQueueProcessorBase) backoffPollTime(level int) {
+func (t *transferQueueProcessorBase) setupBackoffTimer(level int) {
+	t.processingLock.Lock()
+	defer t.processingLock.Unlock()
+
+	if _, ok := t.backoffTimer[level]; ok {
+		// there's an existing backoff timer, no-op
+		// this case should not happen
+		return
+	}
+
 	t.metricsScope.IncCounter(metrics.ProcessingQueueThrottledCounter)
 	t.logger.Info("Throttled processing queue", tag.QueueLevel(level))
-	t.upsertPollTime(level, t.shard.GetTimeSource().Now().Add(backoff.JitDuration(
+
+	backoffDuration := backoff.JitDuration(
 		t.options.PollBackoffInterval(),
 		t.options.PollBackoffIntervalJitterCoefficient(),
-	)), false)
+	)
+	t.backoffTimer[level] = time.AfterFunc(backoffDuration, func() {
+		select {
+		case <-t.shutdownCh:
+			return
+		default:
+		}
+
+		t.processingLock.Lock()
+		defer t.processingLock.Unlock()
+
+		t.shouldProcess[level] = true
+		delete(t.backoffTimer, level)
+
+		// trigger the actual processing
+		select {
+		case t.processCh <- struct{}{}:
+		default:
+		}
+	})
 }
 
 func (t *transferQueueProcessorBase) processorPump() {
@@ -232,6 +289,12 @@ func (t *transferQueueProcessorBase) processorPump() {
 	))
 	defer splitQueueTimer.Stop()
 
+	maxPollTimer := time.NewTimer(backoff.JitDuration(
+		t.options.MaxPollInterval(),
+		t.options.MaxPollIntervalJitterCoefficient(),
+	))
+	defer maxPollTimer.Stop()
+
 processorPumpLoop:
 	for {
 		select {
@@ -239,12 +302,16 @@ processorPumpLoop:
 			break processorPumpLoop
 		case <-t.notifyCh:
 			// notify all queue collections as they are waiting for the notification when there's
-			// no more task to process. For non-default queue, we choose to do periodic polling
+			// no more task to process. For non-default queue, if we choose to do periodic polling
 			// in the future, then we don't need to notify them.
-			for _, queueCollection := range t.processingQueueCollections {
-				t.upsertPollTime(queueCollection.Level(), time.Time{}, true)
-			}
-		case <-t.nextPollTimer.FireChan():
+			t.notifyAllQueueCollections()
+		case <-maxPollTimer.C:
+			t.notifyAllQueueCollections()
+			maxPollTimer.Reset(backoff.JitDuration(
+				t.options.MaxPollInterval(),
+				t.options.MaxPollIntervalJitterCoefficient(),
+			))
+		case <-t.processCh:
 			maxRedispatchQueueSize := t.options.MaxRedispatchQueueSize()
 			if t.redispatcher.Size() > maxRedispatchQueueSize {
 				// has too many pending tasks in re-dispatch queue, block loading tasks from persistence
@@ -259,24 +326,16 @@ processorPumpLoop:
 					))
 				}
 				// re-enqueue the event to see if we need keep re-dispatching or load new tasks from persistence
-				t.nextPollTimer.Update(time.Time{})
+				select {
+				case t.processCh <- struct{}{}:
+				default:
+				}
 				continue processorPumpLoop
 			}
 
-			levels := make(map[int]struct{})
-			now := t.shard.GetTimeSource().Now()
-			for level, pollTime := range t.nextPollTime {
-				if !now.Before(pollTime.time) {
-					levels[level] = struct{}{}
-					delete(t.nextPollTime, level)
-				} else {
-					t.nextPollTimer.Update(pollTime.time)
-				}
-			}
-
-			t.processQueueCollections(levels)
+			t.processQueueCollections()
 		case <-updateAckTimer.C:
-			processFinished, err := t.updateAckLevel()
+			processFinished, _, err := t.updateAckLevel()
 			if err == shard.ErrShardClosed || (err == nil && processFinished) {
 				go t.Stop()
 				break processorPumpLoop
@@ -297,12 +356,22 @@ processorPumpLoop:
 	}
 }
 
-func (t *transferQueueProcessorBase) processQueueCollections(levels map[int]struct{}) {
+func (t *transferQueueProcessorBase) notifyAllQueueCollections() {
+	for _, queueCollection := range t.processingQueueCollections {
+		t.readyForProcess(queueCollection.Level())
+	}
+}
+
+func (t *transferQueueProcessorBase) processQueueCollections() {
 	for _, queueCollection := range t.processingQueueCollections {
 		level := queueCollection.Level()
-		if _, ok := levels[level]; !ok {
+		t.processingLock.Lock()
+		if shouldProcess, ok := t.shouldProcess[level]; !ok || !shouldProcess {
+			t.processingLock.Unlock()
 			continue
 		}
+		t.shouldProcess[level] = false
+		t.processingLock.Unlock()
 
 		activeQueue := queueCollection.ActiveQueue()
 		if activeQueue == nil {
@@ -311,11 +380,6 @@ func (t *transferQueueProcessorBase) processQueueCollections(levels map[int]stru
 			// pollTime will be updated after split/merge
 			continue
 		}
-
-		t.upsertPollTime(level, t.shard.GetTimeSource().Now().Add(backoff.JitDuration(
-			t.options.MaxPollInterval(),
-			t.options.MaxPollIntervalJitterCoefficient(),
-		)), true)
 
 		readLevel := activeQueue.State().ReadLevel()
 		maxReadLevel := minTaskKey(activeQueue.State().MaxLevel(), t.updateMaxReadLevel())
@@ -332,9 +396,9 @@ func (t *transferQueueProcessorBase) processQueueCollections(levels map[int]stru
 		if err := t.rateLimiter.Wait(ctx); err != nil {
 			cancel()
 			if level != defaultProcessingQueueLevel {
-				t.backoffPollTime(level)
+				t.setupBackoffTimer(level)
 			} else {
-				t.upsertPollTime(level, time.Time{}, true)
+				t.readyForProcess(level)
 			}
 			continue
 		}
@@ -343,14 +407,19 @@ func (t *transferQueueProcessorBase) processQueueCollections(levels map[int]stru
 		transferTaskInfos, more, err := t.readTasks(readLevel, maxReadLevel)
 		if err != nil {
 			t.logger.Error("Processor unable to retrieve tasks", tag.Error(err))
-			t.upsertPollTime(level, time.Time{}, true) // re-enqueue the event
+			t.readyForProcess(level) // re-enqueue the event
 			continue
 		}
+		t.logger.Debug("load transfer tasks from database",
+			tag.ReadLevel(readLevel.(transferTaskKey).taskID),
+			tag.MaxLevel(maxReadLevel.(transferTaskKey).taskID),
+			tag.Counter(len(transferTaskInfos)))
 
 		tasks := make(map[task.Key]task.Task)
 		taskChFull := false
 		for _, taskInfo := range transferTaskInfos {
 			if !domainFilter.Filter(taskInfo.GetDomainID()) {
+				t.logger.Debug("transfer task filtered", tag.TaskID(taskInfo.GetTaskID()))
 				continue
 			}
 
@@ -373,6 +442,10 @@ func (t *transferQueueProcessorBase) processQueueCollections(levels map[int]stru
 		}
 		queueCollection.AddTasks(tasks, newReadLevel)
 		if t.validator != nil {
+			t.logger.Debug("ack transfer tasks",
+				tag.ReadLevel(readLevel.(transferTaskKey).taskID),
+				tag.MaxLevel(newReadLevel.(transferTaskKey).taskID),
+				tag.Counter(len(tasks)))
 			t.validator.ackTasks(level, readLevel, newReadLevel, tasks)
 		}
 
@@ -380,9 +453,9 @@ func (t *transferQueueProcessorBase) processQueueCollections(levels map[int]stru
 		if more || (newActiveQueue != nil && newActiveQueue != activeQueue) {
 			// more tasks for the current active queue or the active queue has changed
 			if level != defaultProcessingQueueLevel && taskChFull {
-				t.backoffPollTime(level)
+				t.setupBackoffTimer(level)
 			} else {
-				t.upsertPollTime(level, time.Time{}, true)
+				t.readyForProcess(level)
 			}
 		}
 
@@ -428,8 +501,8 @@ func (t *transferQueueProcessorBase) splitQueue() {
 		},
 	)
 
-	t.splitProcessingQueueCollection(splitPolicy, func(level int, pollTime time.Time) {
-		t.upsertPollTime(level, pollTime, true)
+	t.splitProcessingQueueCollection(splitPolicy, func(level int, _ time.Time) {
+		t.readyForProcess(level)
 	})
 }
 
@@ -437,7 +510,7 @@ func (t *transferQueueProcessorBase) handleActionNotification(notification actio
 	t.processorBase.handleActionNotification(notification, func() {
 		switch notification.action.ActionType {
 		case ActionTypeReset:
-			t.upsertPollTime(defaultProcessingQueueLevel, time.Time{}, true)
+			t.readyForProcess(defaultProcessingQueueLevel)
 		}
 	})
 }
@@ -458,7 +531,11 @@ func (t *transferQueueProcessorBase) readTasks(
 		return err
 	}
 
-	err := backoff.Retry(op, persistenceOperationRetryPolicy, persistence.IsTransientError)
+	throttleRetry := backoff.NewThrottleRetry(
+		backoff.WithRetryPolicy(persistenceOperationRetryPolicy),
+		backoff.WithRetryableError(persistence.IsBackgroundTransientError),
+	)
+	err := throttleRetry.Do(context.Background(), op)
 	if err != nil {
 		return nil, false, err
 	}
@@ -487,6 +564,7 @@ func newTransferQueueProcessorOptions(
 ) *queueProcessorOptions {
 	options := &queueProcessorOptions{
 		BatchSize:                            config.TransferTaskBatchSize,
+		DeleteBatchSize:                      config.TransferTaskDeleteBatchSize,
 		MaxPollRPS:                           config.TransferProcessorMaxPollRPS,
 		MaxPollInterval:                      config.TransferProcessorMaxPollInterval,
 		MaxPollIntervalJitterCoefficient:     config.TransferProcessorMaxPollIntervalJitterCoefficient,
@@ -509,6 +587,8 @@ func newTransferQueueProcessorOptions(
 		// disable persist and load processing queue states for failover processor as it will never be split
 		options.EnablePersistQueueStates = dynamicconfig.GetBoolPropertyFn(false)
 		options.EnableLoadQueueStates = dynamicconfig.GetBoolPropertyFn(false)
+
+		options.MaxStartJitterInterval = config.TransferProcessorFailoverMaxStartJitterInterval
 	} else {
 		options.EnableSplit = config.QueueProcessorEnableSplit
 		options.SplitMaxLevel = config.QueueProcessorSplitMaxLevel
@@ -522,6 +602,8 @@ func newTransferQueueProcessorOptions(
 
 		options.EnablePersistQueueStates = config.QueueProcessorEnablePersistQueueStates
 		options.EnableLoadQueueStates = config.QueueProcessorEnableLoadQueueStates
+
+		options.MaxStartJitterInterval = dynamicconfig.GetDurationPropertyFn(0)
 	}
 
 	if isActive {

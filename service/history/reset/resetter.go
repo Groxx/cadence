@@ -23,9 +23,7 @@
 package reset
 
 import (
-	context "context"
-	ctx "context"
-	"fmt"
+	"context"
 
 	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/cache"
@@ -34,6 +32,7 @@ import (
 	"github.com/uber/cadence/common/definition"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/persistence"
+	persistenceutils "github.com/uber/cadence/common/persistence/persistence-utils"
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/service/history/execution"
 	"github.com/uber/cadence/service/history/shard"
@@ -43,7 +42,7 @@ type (
 	// WorkflowResetter is the new NDC compatible workflow reset component
 	WorkflowResetter interface {
 		ResetWorkflow(
-			ctx ctx.Context,
+			ctx context.Context,
 			domainID string,
 			workflowID string,
 			baseRunID string,
@@ -95,7 +94,7 @@ func NewWorkflowResetter(
 }
 
 func (r *workflowResetterImpl) ResetWorkflow(
-	ctx ctx.Context,
+	ctx context.Context,
 	domainID string,
 	workflowID string,
 	baseRunID string,
@@ -160,7 +159,7 @@ func (r *workflowResetterImpl) ResetWorkflow(
 }
 
 func (r *workflowResetterImpl) prepareResetWorkflow(
-	ctx ctx.Context,
+	ctx context.Context,
 	domainID string,
 	workflowID string,
 	baseRunID string,
@@ -284,7 +283,6 @@ func (r *workflowResetterImpl) persistToDB(
 		return err
 	}
 
-	resetHistorySize := int64(0)
 	if len(resetWorkflowEventsSeq) != 1 {
 		return &types.InternalServiceError{
 			Message: "there should be EXACTLY one batch of events for reset",
@@ -292,7 +290,7 @@ func (r *workflowResetterImpl) persistToDB(
 	}
 
 	// reset workflow with decision task failed or timed out
-	resetHistorySize, err = resetWorkflow.GetContext().PersistNonFirstWorkflowEvents(ctx, resetWorkflowEventsSeq[0])
+	resetWorkflowHistory, err := resetWorkflow.GetContext().PersistNonStartWorkflowBatchEvents(ctx, resetWorkflowEventsSeq[0])
 	if err != nil {
 		return err
 	}
@@ -300,8 +298,7 @@ func (r *workflowResetterImpl) persistToDB(
 	return resetWorkflow.GetContext().CreateWorkflowExecution(
 		ctx,
 		resetWorkflowSnapshot,
-		resetHistorySize,
-		now,
+		resetWorkflowHistory,
 		persistence.CreateWorkflowModeContinueAsNew,
 		currentRunID,
 		currentLastWriteVersion,
@@ -309,7 +306,7 @@ func (r *workflowResetterImpl) persistToDB(
 }
 
 func (r *workflowResetterImpl) replayResetWorkflow(
-	ctx ctx.Context,
+	ctx context.Context,
 	domainID string,
 	workflowID string,
 	baseRunID string,
@@ -368,7 +365,6 @@ func (r *workflowResetterImpl) replayResetWorkflow(
 	resetContext.SetHistorySize(resetHistorySize)
 	return execution.NewWorkflow(
 		ctx,
-		r.domainCache,
 		r.clusterMetadata,
 		resetContext,
 		resetMutableState,
@@ -418,11 +414,16 @@ func (r *workflowResetterImpl) forkAndGenerateBranchToken(
 ) ([]byte, error) {
 	// fork a new history branch
 	shardID := r.shard.GetShardID()
+	domainName, err := r.domainCache.GetDomainName(domainID)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := r.historyV2Mgr.ForkHistoryBranch(ctx, &persistence.ForkHistoryBranchRequest{
 		ForkBranchToken: forkBranchToken,
 		ForkNodeID:      forkNodeID,
 		Info:            persistence.BuildHistoryGarbageCleanupInfo(domainID, workflowID, resetRunID),
 		ShardID:         common.IntPtr(shardID),
+		DomainName:      domainName,
 	})
 	if err != nil {
 		return nil, err
@@ -447,7 +448,7 @@ func (r *workflowResetterImpl) terminateWorkflow(
 }
 
 func (r *workflowResetterImpl) reapplyResetAndContinueAsNewWorkflowEvents(
-	ctx ctx.Context,
+	ctx context.Context,
 	resetMutableState execution.MutableState,
 	domainID string,
 	workflowID string,
@@ -539,12 +540,13 @@ func (r *workflowResetterImpl) reapplyWorkflowEvents(
 		// and the decision task is the latest event in the workflow.
 		return "", nil
 	}
-
+	domainID := mutableState.GetExecutionInfo().DomainID
 	iter := collection.NewPagingIterator(r.getPaginationFn(
 		ctx,
 		firstEventID,
 		nextEventID,
 		branchToken,
+		domainID,
 	))
 
 	var nextRunID string
@@ -598,11 +600,12 @@ func (r *workflowResetterImpl) getPaginationFn(
 	firstEventID int64,
 	nextEventID int64,
 	branchToken []byte,
+	domainID string,
 ) collection.PaginationFn {
 
 	return func(paginationToken []byte) ([]interface{}, []byte, error) {
 
-		_, historyBatches, token, _, err := persistence.PaginateHistory(
+		_, historyBatches, token, _, err := persistenceutils.PaginateHistory(
 			ctx,
 			r.historyV2Mgr,
 			true,
@@ -612,6 +615,8 @@ func (r *workflowResetterImpl) getPaginationFn(
 			paginationToken,
 			execution.NDCDefaultPageSize,
 			common.IntPtr(r.shard.GetShardID()),
+			domainID,
+			r.domainCache,
 		)
 		if err != nil {
 			return nil, nil, err
@@ -635,7 +640,7 @@ func (r *workflowResetterImpl) closePendingDecisionTask(
 
 	if len(resetMutableState.GetPendingChildExecutionInfos()) > 0 {
 		return nil, &types.BadRequestError{
-			Message: fmt.Sprintf("Can not reset workflow with pending child workflows"),
+			Message: "Can not reset workflow with pending child workflows",
 		}
 	}
 

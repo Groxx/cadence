@@ -34,7 +34,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli"
-	"go.uber.org/thriftrw/protocol"
+	"go.uber.org/thriftrw/protocol/binary"
 	"go.uber.org/thriftrw/wire"
 
 	"github.com/uber/cadence/.gen/go/indexer"
@@ -42,10 +42,7 @@ import (
 	"github.com/uber/cadence/client/admin"
 	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/config"
-	"github.com/uber/cadence/common/log/loggerimpl"
 	"github.com/uber/cadence/common/persistence"
-	"github.com/uber/cadence/common/persistence/cassandra"
-	"github.com/uber/cadence/common/persistence/nosql/nosqlplugin/cassandra/gocql"
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/common/types/mapper/thrift"
 )
@@ -203,16 +200,15 @@ func startParser(readerCh <-chan []byte, writerCh *writerChannel, skipErrors boo
 	var buffer []byte
 Loop:
 	for {
-		select {
-		case data, ok := <-readerCh:
-			if !ok {
-				break Loop
-			}
-			buffer = append(buffer, data...)
-			data, nextBuffer := splitBuffer(buffer)
-			buffer = nextBuffer
-			parse(data, skipErrors, skippedCount, writerCh)
+		data, ok := <-readerCh
+
+		if !ok {
+			break Loop
 		}
+		buffer = append(buffer, data...)
+		data, nextBuffer := splitBuffer(buffer)
+		buffer = nextBuffer
+		parse(data, skipErrors, skippedCount, writerCh)
 	}
 	parse(buffer, skipErrors, skippedCount, writerCh)
 }
@@ -251,37 +247,36 @@ func writeReplicationTask(
 	filter := buildFilterFn(c.String(FlagWorkflowID), c.String(FlagRunID))
 Loop:
 	for {
-		select {
-		case task, ok := <-writerCh.ReplicationTaskChannel:
-			if !ok {
-				break Loop
-			}
-			if filter(task) {
-				jsonStr, err := decodeReplicationTask(task, serializer)
-				if err != nil {
-					if !skipErrMode {
-						ErrorAndExit(malformedMessage, fmt.Errorf("failed to encode into json, err: %v", err))
-					} else {
-						atomic.AddInt32(skippedCount, 1)
-						continue Loop
-					}
-				}
+		task, ok := <-writerCh.ReplicationTaskChannel
 
-				var outStr string
-				if !headerMode {
-					outStr = string(jsonStr)
+		if !ok {
+			break Loop
+		}
+		if filter(task) {
+			jsonStr, err := decodeReplicationTask(task, serializer)
+			if err != nil {
+				if !skipErrMode {
+					ErrorAndExit(malformedMessage, fmt.Errorf("failed to encode into json, err: %v", err))
 				} else {
-					outStr = fmt.Sprintf(
-						"%v, %v, %v",
-						task.GetHistoryTaskV2Attributes().DomainID,
-						task.GetHistoryTaskV2Attributes().WorkflowID,
-						task.GetHistoryTaskV2Attributes().RunID,
-					)
+					atomic.AddInt32(skippedCount, 1)
+					continue Loop
 				}
-				_, err = outputFile.WriteString(fmt.Sprintf("%v\n", outStr))
-				if err != nil {
-					ErrorAndExit("Failed to write to file", fmt.Errorf("err: %v", err))
-				}
+			}
+
+			var outStr string
+			if !headerMode {
+				outStr = string(jsonStr)
+			} else {
+				outStr = fmt.Sprintf(
+					"%v, %v, %v",
+					task.GetHistoryTaskV2Attributes().DomainID,
+					task.GetHistoryTaskV2Attributes().WorkflowID,
+					task.GetHistoryTaskV2Attributes().RunID,
+				)
+			}
+			_, err = outputFile.WriteString(fmt.Sprintf("%v\n", outStr))
+			if err != nil {
+				ErrorAndExit("Failed to write to file", fmt.Errorf("err: %v", err))
 			}
 		}
 	}
@@ -298,39 +293,38 @@ func writeVisibilityMessage(
 	filter := buildFilterFnForVisibility(c.String(FlagWorkflowID), c.String(FlagRunID))
 Loop:
 	for {
-		select {
-		case msg, ok := <-writerCh.VisibilityMsgChannel:
-			if !ok {
-				break Loop
-			}
-			if filter(msg) {
-				jsonStr, err := json.Marshal(msg)
-				if err != nil {
-					if !skipErrMode {
-						ErrorAndExit(malformedMessage, fmt.Errorf("failed to encode into json, err: %v", err))
-					} else {
-						atomic.AddInt32(skippedCount, 1)
-						continue Loop
-					}
-				}
+		msg, ok := <-writerCh.VisibilityMsgChannel
 
-				var outStr string
-				if !headerMode {
-					outStr = string(jsonStr)
+		if !ok {
+			break Loop
+		}
+		if filter(msg) {
+			jsonStr, err := json.Marshal(msg)
+			if err != nil {
+				if !skipErrMode {
+					ErrorAndExit(malformedMessage, fmt.Errorf("failed to encode into json, err: %v", err))
 				} else {
-					outStr = fmt.Sprintf(
-						"%v, %v, %v, %v, %v",
-						msg.GetDomainID(),
-						msg.GetWorkflowID(),
-						msg.GetRunID(),
-						msg.GetMessageType().String(),
-						msg.GetVersion(),
-					)
+					atomic.AddInt32(skippedCount, 1)
+					continue Loop
 				}
-				_, err = outputFile.WriteString(fmt.Sprintf("%v\n", outStr))
-				if err != nil {
-					ErrorAndExit("Failed to write to file", fmt.Errorf("err: %v", err))
-				}
+			}
+
+			var outStr string
+			if !headerMode {
+				outStr = string(jsonStr)
+			} else {
+				outStr = fmt.Sprintf(
+					"%v, %v, %v, %v, %v",
+					msg.GetDomainID(),
+					msg.GetWorkflowID(),
+					msg.GetRunID(),
+					msg.GetMessageType().String(),
+					msg.GetVersion(),
+				)
+			}
+			_, err = outputFile.WriteString(fmt.Sprintf("%v\n", outStr))
+			if err != nil {
+				ErrorAndExit("Failed to write to file", fmt.Errorf("err: %v", err))
 			}
 		}
 	}
@@ -412,7 +406,7 @@ func deserializeMessages(messages [][]byte, skipErrors bool) ([]*types.Replicati
 
 func decode(message []byte, val *replicator.ReplicationTask) error {
 	reader := bytes.NewReader(message[1:])
-	wireVal, err := protocol.Binary.Decode(reader, wire.TStruct)
+	wireVal, err := binary.Default.Decode(reader, wire.TStruct)
 	if err != nil {
 		return err
 	}
@@ -440,7 +434,7 @@ func deserializeVisibilityMessages(messages [][]byte, skipErrors bool) ([]*index
 
 func decodeVisibility(message []byte, val *indexer.Message) error {
 	reader := bytes.NewReader(message[1:])
-	wireVal, err := protocol.Binary.Decode(reader, wire.TStruct)
+	wireVal, err := binary.Default.Decode(reader, wire.TStruct)
 	if err != nil {
 		return err
 	}
@@ -455,37 +449,15 @@ type ClustersConfig struct {
 
 func doRereplicate(
 	ctx context.Context,
-	shardID int,
 	domainID string,
 	wid string,
 	rid string,
-	endEventID int64,
-	endEventVersion int64,
+	endEventID *int64,
+	endEventVersion *int64,
 	sourceCluster string,
-	cqlClient gocql.Client,
-	session gocql.Session,
 	adminClient admin.Client,
 ) {
-
-	exeM, _ := cassandra.NewWorkflowExecutionPersistence(shardID, cqlClient, session, loggerimpl.NewNopLogger())
-	exeMgr := persistence.NewExecutionManagerImpl(exeM, loggerimpl.NewNopLogger())
-
-	fmt.Printf("Start rereplicate for wid: %v, rid:%v \n", wid, rid)
-	resp, err := exeMgr.GetWorkflowExecution(ctx, &persistence.GetWorkflowExecutionRequest{
-		DomainID: domainID,
-		Execution: types.WorkflowExecution{
-			WorkflowID: wid,
-			RunID:      rid,
-		},
-	})
-	if err != nil {
-		ErrorAndExit("GetWorkflowExecution error", err)
-	}
-
-	versionHistories := resp.State.VersionHistories
-	if versionHistories == nil {
-		ErrorAndExit("The workflow is not a NDC workflow", nil)
-	}
+	fmt.Printf("Start rereplication for wid: %v, rid:%v \n", wid, rid)
 	if err := adminClient.ResendReplicationTasks(
 		ctx,
 		&types.ResendReplicationTasksRequest{
@@ -493,39 +465,32 @@ func doRereplicate(
 			WorkflowID:    wid,
 			RunID:         rid,
 			RemoteCluster: sourceCluster,
-			EndEventID:    common.Int64Ptr(endEventID + 1),
-			EndVersion:    common.Int64Ptr(endEventVersion),
+			EndEventID:    endEventID,
+			EndVersion:    endEventVersion,
 		},
 	); err != nil {
 		ErrorAndExit("Failed to resend ndc workflow", err)
 	}
-	fmt.Printf("Done rereplicate for wid: %v, rid:%v \n", wid, rid)
+	fmt.Printf("Done rereplication for wid: %v, rid:%v \n", wid, rid)
 }
 
 // AdminRereplicate parses will re-publish replication tasks to topic
 func AdminRereplicate(c *cli.Context) {
-	numberOfShards := c.Int(FlagNumberOfShards)
-	if numberOfShards <= 0 {
-		ErrorAndExit("numberOfShards is must be > 0", nil)
-		return
-	}
 	sourceCluster := getRequiredOption(c, FlagSourceCluster)
-	if !c.IsSet(FlagMaxEventID) {
-		ErrorAndExit("End event ID is not defined", nil)
-	}
-	if !c.IsSet(FlagEndEventVersion) {
-		ErrorAndExit("End event version is not defined", nil)
-	}
 
-	client, session := connectToCassandra(c)
 	adminClient := cFactory.ServerAdminClient(c)
-	endEventID := c.Int64(FlagMaxEventID)
-	endVersion := c.Int64(FlagEndEventVersion)
+	var endEventID, endVersion *int64
+	if c.IsSet(FlagMaxEventID) {
+		endEventID = common.Int64Ptr(c.Int64(FlagMaxEventID) + 1)
+	}
+	if c.IsSet(FlagEndEventVersion) {
+		endVersion = common.Int64Ptr(c.Int64(FlagEndEventVersion))
+	}
 	domainID := getRequiredOption(c, FlagDomainID)
 	wid := getRequiredOption(c, FlagWorkflowID)
 	rid := getRequiredOption(c, FlagRunID)
-	shardID := common.WorkflowIDToHistoryShard(wid, numberOfShards)
 	contextTimeout := defaultResendContextTimeout
+
 	if c.GlobalIsSet(FlagContextTimeout) {
 		contextTimeout = time.Duration(c.GlobalInt(FlagContextTimeout)) * time.Second
 	}
@@ -534,15 +499,12 @@ func AdminRereplicate(c *cli.Context) {
 
 	doRereplicate(
 		ctx,
-		shardID,
 		domainID,
 		wid,
 		rid,
 		endEventID,
 		endVersion,
 		sourceCluster,
-		client,
-		session,
 		adminClient,
 	)
 }

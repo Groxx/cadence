@@ -24,20 +24,23 @@ import "github.com/uber/cadence/.gen/go/indexer"
 
 // All legal fields allowed in elastic search index
 const (
-	DomainID      = "DomainID"
-	WorkflowID    = "WorkflowID"
-	RunID         = "RunID"
-	WorkflowType  = "WorkflowType"
-	StartTime     = "StartTime"
-	ExecutionTime = "ExecutionTime"
-	CloseTime     = "CloseTime"
-	CloseStatus   = "CloseStatus"
-	HistoryLength = "HistoryLength"
-	Memo          = "Memo"
-	Encoding      = "Encoding"
-	TaskList      = "TaskList"
-
-	KafkaKey = "KafkaKey"
+	DomainID            = "DomainID"
+	WorkflowID          = "WorkflowID"
+	RunID               = "RunID"
+	WorkflowType        = "WorkflowType"
+	StartTime           = "StartTime"
+	ExecutionTime       = "ExecutionTime"
+	CloseTime           = "CloseTime"
+	CloseStatus         = "CloseStatus"
+	HistoryLength       = "HistoryLength"
+	Memo                = "Memo"
+	Encoding            = "Encoding"
+	TaskList            = "TaskList"
+	IsCron              = "IsCron"
+	NumClusters         = "NumClusters"
+	VisibilityOperation = "VisibilityOperation"
+	UpdateTime          = "UpdateTime"
+	ShardID             = "ShardID"
 )
 
 // Supported field types

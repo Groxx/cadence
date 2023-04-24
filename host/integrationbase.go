@@ -36,11 +36,13 @@ import (
 
 	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/cache"
+	"github.com/uber/cadence/common/dynamicconfig"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/log/loggerimpl"
 	"github.com/uber/cadence/common/log/tag"
 	"github.com/uber/cadence/common/persistence"
 	pt "github.com/uber/cadence/common/persistence/persistence-tests"
+	"github.com/uber/cadence/common/persistence/persistence-tests/testcluster"
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/environment"
 )
@@ -59,13 +61,13 @@ type (
 		testRawHistoryDomainName string
 		foreignDomainName        string
 		archivalDomainName       string
-		defaultTestCluster       pt.PersistenceTestCluster
-		visibilityTestCluster    pt.PersistenceTestCluster
+		defaultTestCluster       testcluster.PersistenceTestCluster
+		visibilityTestCluster    testcluster.PersistenceTestCluster
 	}
 
 	IntegrationBaseParams struct {
-		DefaultTestCluster    pt.PersistenceTestCluster
-		VisibilityTestCluster pt.PersistenceTestCluster
+		DefaultTestCluster    testcluster.PersistenceTestCluster
+		VisibilityTestCluster testcluster.PersistenceTestCluster
 		TestClusterConfig     *TestClusterConfig
 	}
 )
@@ -102,11 +104,18 @@ func (s *IntegrationBase) setupSuite() {
 		s.adminClient = NewAdminClient(dispatcher)
 	} else {
 		s.Logger.Info("Running integration test against test cluster")
-		clusterMetadata := NewClusterMetadata(s.testClusterConfig, s.Logger)
+		clusterMetadata := NewClusterMetadata(s.testClusterConfig)
+		dc := persistence.DynamicConfiguration{
+			EnableSQLAsyncTransaction:                dynamicconfig.GetBoolPropertyFn(false),
+			EnableCassandraAllConsistencyLevelDelete: dynamicconfig.GetBoolPropertyFn(true),
+			PersistenceSampleLoggingRate:             dynamicconfig.GetIntPropertyFn(100),
+			EnableShardIDMetrics:                     dynamicconfig.GetBoolPropertyFn(true),
+		}
 		params := pt.TestBaseParams{
 			DefaultTestCluster:    s.defaultTestCluster,
 			VisibilityTestCluster: s.visibilityTestCluster,
 			ClusterMetadata:       clusterMetadata,
+			DynamicConfiguration:  dc,
 		}
 		cluster, err := NewCluster(s.testClusterConfig, s.Logger, params)
 		s.Require().NoError(err)
@@ -284,7 +293,7 @@ func (s *IntegrationBase) registerArchivalDomain() error {
 		IsGlobalDomain:  false,
 		FailoverVersion: common.EmptyVersion,
 	}
-	response, err := s.testCluster.testBase.MetadataManager.CreateDomain(ctx, domainRequest)
+	response, err := s.testCluster.testBase.DomainManager.CreateDomain(ctx, domainRequest)
 	if err == nil {
 		s.Logger.Info("Register domain succeeded",
 			tag.WorkflowDomainName(s.archivalDomainName),

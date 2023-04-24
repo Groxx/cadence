@@ -26,7 +26,7 @@ import (
 	"sync"
 
 	"github.com/uber/cadence/common/clock"
-	"github.com/uber/cadence/common/config"
+	"github.com/uber/cadence/common/dynamicconfig"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/log/tag"
 	"github.com/uber/cadence/common/metrics"
@@ -49,18 +49,29 @@ type visibilitySamplingClient struct {
 	rateLimitersForClosed *domainToBucketMap
 	rateLimitersForList   *domainToBucketMap
 	persistence           VisibilityManager
-	config                *config.VisibilityConfig
+	config                *SamplingConfig
 	metricClient          metrics.Client
 	logger                log.Logger
 }
 
 var _ VisibilityManager = (*visibilitySamplingClient)(nil)
 
+type (
+	// SamplingConfig is config for visibility
+	SamplingConfig struct {
+		VisibilityOpenMaxQPS dynamicconfig.IntPropertyFnWithDomainFilter `yaml:"-" json:"-"`
+		// VisibilityClosedMaxQPS max QPS for record closed workflows
+		VisibilityClosedMaxQPS dynamicconfig.IntPropertyFnWithDomainFilter `yaml:"-" json:"-"`
+		// VisibilityListMaxQPS max QPS for list workflow
+		VisibilityListMaxQPS dynamicconfig.IntPropertyFnWithDomainFilter `yaml:"-" json:"-"`
+	}
+)
+
 // NewVisibilitySamplingClient creates a client to manage visibility with sampling
 // For write requests, it will do sampling which will lose some records
 // For read requests, it will do sampling which will return service busy errors.
 // Note that this is different from NewVisibilityPersistenceRateLimitedClient which is overlapping with the read processing.
-func NewVisibilitySamplingClient(persistence VisibilityManager, config *config.VisibilityConfig, metricClient metrics.Client, logger log.Logger) VisibilityManager {
+func NewVisibilitySamplingClient(persistence VisibilityManager, config *SamplingConfig, metricClient metrics.Client, logger log.Logger) VisibilityManager {
 	return &visibilitySamplingClient{
 		persistence:           persistence,
 		rateLimitersForOpen:   newDomainToBucketMap(),
@@ -148,6 +159,13 @@ func (p *visibilitySamplingClient) RecordWorkflowExecutionClosed(
 	)
 	p.metricClient.IncCounter(metrics.PersistenceRecordWorkflowExecutionClosedScope, metrics.PersistenceSampledCounter)
 	return nil
+}
+
+func (p *visibilitySamplingClient) RecordWorkflowExecutionUninitialized(
+	ctx context.Context,
+	request *RecordWorkflowExecutionUninitializedRequest,
+) error {
+	return p.persistence.RecordWorkflowExecutionUninitialized(ctx, request)
 }
 
 func (p *visibilitySamplingClient) UpsertWorkflowExecution(
@@ -264,6 +282,13 @@ func (p *visibilitySamplingClient) DeleteWorkflowExecution(
 	return p.persistence.DeleteWorkflowExecution(ctx, request)
 }
 
+func (p *visibilitySamplingClient) DeleteUninitializedWorkflowExecution(
+	ctx context.Context,
+	request *VisibilityDeleteWorkflowExecutionRequest,
+) error {
+	return p.persistence.DeleteUninitializedWorkflowExecution(ctx, request)
+}
+
 func (p *visibilitySamplingClient) ListWorkflowExecutions(
 	ctx context.Context,
 	request *ListWorkflowExecutionsByQueryRequest,
@@ -307,10 +332,9 @@ func (p *visibilitySamplingClient) tryConsumeListToken(domain string) error {
 	if ok {
 		p.logger.Debug("List API request consumed QPS token", tag.WorkflowDomainName(domain), tag.Name(callerFuncName(2)))
 		return nil
-	} else {
-		p.logger.Debug("List API request is being sampled", tag.WorkflowDomainName(domain), tag.Name(callerFuncName(2)))
-		return errPersistenceLimitExceededForList
 	}
+	p.logger.Debug("List API request is being sampled", tag.WorkflowDomainName(domain), tag.Name(callerFuncName(2)))
+	return errPersistenceLimitExceededForList
 }
 
 func callerFuncName(skip int) string {

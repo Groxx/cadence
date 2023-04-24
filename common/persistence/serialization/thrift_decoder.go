@@ -25,8 +25,7 @@ package serialization
 import (
 	"bytes"
 
-	"go.uber.org/thriftrw/protocol"
-	"go.uber.org/thriftrw/wire"
+	"go.uber.org/thriftrw/protocol/binary"
 
 	"github.com/uber/cadence/.gen/go/sqlblobs"
 )
@@ -135,6 +134,14 @@ func (d *thriftDecoder) transferTaskInfoFromBlob(data []byte) (*TransferTaskInfo
 	return transferTaskInfoFromThrift(result), nil
 }
 
+func (d *thriftDecoder) crossClusterTaskInfoFromBlob(data []byte) (*CrossClusterTaskInfo, error) {
+	result := &sqlblobsCrossClusterTaskInfo{}
+	if err := thriftRWDecode(data, result); err != nil {
+		return nil, err
+	}
+	return crossClusterTaskInfoFromThrift(result), nil
+}
+
 func (d *thriftDecoder) timerTaskInfoFromBlob(data []byte) (*TimerTaskInfo, error) {
 	result := &sqlblobs.TimerTaskInfo{}
 	if err := thriftRWDecode(data, result); err != nil {
@@ -152,9 +159,7 @@ func (d *thriftDecoder) replicationTaskInfoFromBlob(data []byte) (*ReplicationTa
 }
 
 func thriftRWDecode(b []byte, result thriftRWType) error {
-	value, err := protocol.Binary.Decode(bytes.NewReader(b), wire.TStruct)
-	if err != nil {
-		return err
-	}
-	return result.FromWire(value)
+	buf := bytes.NewReader(b)
+	sr := binary.Default.Reader(buf)
+	return result.Decode(sr)
 }

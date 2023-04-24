@@ -21,8 +21,6 @@
 package common
 
 import (
-	"context"
-
 	"go.uber.org/yarpc"
 )
 
@@ -41,34 +39,20 @@ const (
 	// Cadence server, for backward compatibility
 	FeatureVersionHeaderName = "cadence-client-feature-version"
 
+	// Header name to pass the feature flags from customer to client or server
+	ClientFeatureFlagsHeaderName = "cadence-client-feature-flags"
+
 	// ClientImplHeaderName refers to the name of the
 	// header that contains the client implementation
 	ClientImplHeaderName = "cadence-client-name"
-	// EnforceDCRedirection refers to a boolean string of whether
-	// to enforce DCRedirection(auto-forwarding)
-	// Will be removed in the future: https://github.com/uber/cadence/issues/2304
-	EnforceDCRedirection = "cadence-enforce-dc-redirection"
+	// AuthorizationTokenHeaderName refers to the jwt token in the request
+	AuthorizationTokenHeaderName = "cadence-authorization"
 )
 
 type (
 	// RPCFactory Creates a dispatcher that knows how to transport requests.
 	RPCFactory interface {
 		GetDispatcher() *yarpc.Dispatcher
-		CreateDispatcherForOutbound(callerName, serviceName, hostName string) (*yarpc.Dispatcher, error)
-		CreateGRPCDispatcherForOutbound(callerName, serviceName, hostName string) (*yarpc.Dispatcher, error)
+		GetMaxMessageSize() int
 	}
 )
-
-// AggregateYarpcOptions aggregate the header information from context to existing yarpc call options
-func AggregateYarpcOptions(ctx context.Context, opts ...yarpc.CallOption) []yarpc.CallOption {
-	var result []yarpc.CallOption
-	if ctx != nil {
-		call := yarpc.CallFromContext(ctx)
-		for _, key := range call.HeaderNames() {
-			value := call.Header(key)
-			result = append(result, yarpc.WithHeader(key, value))
-		}
-	}
-	result = append(result, opts...)
-	return result
-}

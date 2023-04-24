@@ -47,14 +47,14 @@ const scannerTaskListPrefix = "cadence-sys-tl-scanner"
 // with the assumption that the executor will schedule this task later
 //
 // Each loop of the handler proceeds as follows
-//    - Retrieve the next batch of tasks sorted by task_id for this task-list from persistence
-//    - If there are 0 tasks for this task-list, try deleting the task-list if its idle
-//    - If any of the tasks in the batch isn't expired, we are done. Since tasks are retrieved
-//      in sorted order, if one of the tasks isn't expired, chances are, none of the tasks above
-//      it are expired as well - so, we give up and wait for the next run
-//    - Delete the entire batch of tasks
-//    - If the number of tasks retrieved is less than batchSize, there are no more tasks in the task-list
-//      Try deleting the task-list if its idle
+//   - Retrieve the next batch of tasks sorted by task_id for this task-list from persistence
+//   - If there are 0 tasks for this task-list, try deleting the task-list if its idle
+//   - If any of the tasks in the batch isn't expired, we are done. Since tasks are retrieved
+//     in sorted order, if one of the tasks isn't expired, chances are, none of the tasks above
+//     it are expired as well - so, we give up and wait for the next run
+//   - Delete the entire batch of tasks
+//   - If the number of tasks retrieved is less than batchSize, there are no more tasks in the task-list
+//     Try deleting the task-list if its idle
 func (s *Scavenger) deleteHandler(taskListInfo *p.TaskListInfo) handlerStatus {
 	var err error
 	var nProcessed, nDeleted int
@@ -102,7 +102,7 @@ func (s *Scavenger) tryDeleteTaskList(info *p.TaskListInfo) {
 	if strings.HasPrefix(info.Name, scannerTaskListPrefix) {
 		return // avoid deleting our own task list
 	}
-	delta := time.Now().Sub(info.LastUpdated)
+	delta := time.Since(info.LastUpdated)
 	if delta < taskListGracePeriod {
 		return
 	}
@@ -137,7 +137,7 @@ func (s *Scavenger) deleteHandlerLog(info *p.TaskListInfo, nProcessed int, nDele
 }
 
 func (s *Scavenger) isTaskExpired(t *p.TaskInfo) bool {
-	return t.Expiry.After(epochStartTime) && time.Now().After(t.Expiry)
+	return t.Expiry.After(time.Unix(0, 0)) && time.Now().After(t.Expiry)
 }
 
 func (s *Scavenger) completeOrphanTasksHandler() handlerStatus {

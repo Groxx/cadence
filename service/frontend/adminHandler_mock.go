@@ -35,30 +35,30 @@ import (
 	types "github.com/uber/cadence/common/types"
 )
 
-// MockAdminHandler is a mock of AdminHandler interface
+// MockAdminHandler is a mock of AdminHandler interface.
 type MockAdminHandler struct {
 	ctrl     *gomock.Controller
 	recorder *MockAdminHandlerMockRecorder
 }
 
-// MockAdminHandlerMockRecorder is the mock recorder for MockAdminHandler
+// MockAdminHandlerMockRecorder is the mock recorder for MockAdminHandler.
 type MockAdminHandlerMockRecorder struct {
 	mock *MockAdminHandler
 }
 
-// NewMockAdminHandler creates a new mock instance
+// NewMockAdminHandler creates a new mock instance.
 func NewMockAdminHandler(ctrl *gomock.Controller) *MockAdminHandler {
 	mock := &MockAdminHandler{ctrl: ctrl}
 	mock.recorder = &MockAdminHandlerMockRecorder{mock}
 	return mock
 }
 
-// EXPECT returns an object that allows the caller to indicate expected use
+// EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockAdminHandler) EXPECT() *MockAdminHandlerMockRecorder {
 	return m.recorder
 }
 
-// AddSearchAttribute mocks base method
+// AddSearchAttribute mocks base method.
 func (m *MockAdminHandler) AddSearchAttribute(arg0 context.Context, arg1 *types.AddSearchAttributeRequest) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AddSearchAttribute", arg0, arg1)
@@ -66,13 +66,13 @@ func (m *MockAdminHandler) AddSearchAttribute(arg0 context.Context, arg1 *types.
 	return ret0
 }
 
-// AddSearchAttribute indicates an expected call of AddSearchAttribute
+// AddSearchAttribute indicates an expected call of AddSearchAttribute.
 func (mr *MockAdminHandlerMockRecorder) AddSearchAttribute(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddSearchAttribute", reflect.TypeOf((*MockAdminHandler)(nil).AddSearchAttribute), arg0, arg1)
 }
 
-// CloseShard mocks base method
+// CloseShard mocks base method.
 func (m *MockAdminHandler) CloseShard(arg0 context.Context, arg1 *types.CloseShardRequest) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CloseShard", arg0, arg1)
@@ -80,13 +80,43 @@ func (m *MockAdminHandler) CloseShard(arg0 context.Context, arg1 *types.CloseSha
 	return ret0
 }
 
-// CloseShard indicates an expected call of CloseShard
+// CloseShard indicates an expected call of CloseShard.
 func (mr *MockAdminHandlerMockRecorder) CloseShard(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseShard", reflect.TypeOf((*MockAdminHandler)(nil).CloseShard), arg0, arg1)
 }
 
-// DescribeCluster mocks base method
+// CountDLQMessages mocks base method.
+func (m *MockAdminHandler) CountDLQMessages(arg0 context.Context, arg1 *types.CountDLQMessagesRequest) (*types.CountDLQMessagesResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CountDLQMessages", arg0, arg1)
+	ret0, _ := ret[0].(*types.CountDLQMessagesResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CountDLQMessages indicates an expected call of CountDLQMessages.
+func (mr *MockAdminHandlerMockRecorder) CountDLQMessages(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountDLQMessages", reflect.TypeOf((*MockAdminHandler)(nil).CountDLQMessages), arg0, arg1)
+}
+
+// DeleteWorkflow mocks base method.
+func (m *MockAdminHandler) DeleteWorkflow(arg0 context.Context, arg1 *types.AdminDeleteWorkflowRequest) (*types.AdminDeleteWorkflowResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteWorkflow", arg0, arg1)
+	ret0, _ := ret[0].(*types.AdminDeleteWorkflowResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteWorkflow indicates an expected call of DeleteWorkflow.
+func (mr *MockAdminHandlerMockRecorder) DeleteWorkflow(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteWorkflow", reflect.TypeOf((*MockAdminHandler)(nil).DeleteWorkflow), arg0, arg1)
+}
+
+// DescribeCluster mocks base method.
 func (m *MockAdminHandler) DescribeCluster(arg0 context.Context) (*types.DescribeClusterResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DescribeCluster", arg0)
@@ -95,13 +125,13 @@ func (m *MockAdminHandler) DescribeCluster(arg0 context.Context) (*types.Describ
 	return ret0, ret1
 }
 
-// DescribeCluster indicates an expected call of DescribeCluster
+// DescribeCluster indicates an expected call of DescribeCluster.
 func (mr *MockAdminHandlerMockRecorder) DescribeCluster(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DescribeCluster", reflect.TypeOf((*MockAdminHandler)(nil).DescribeCluster), arg0)
 }
 
-// DescribeHistoryHost mocks base method
+// DescribeHistoryHost mocks base method.
 func (m *MockAdminHandler) DescribeHistoryHost(arg0 context.Context, arg1 *types.DescribeHistoryHostRequest) (*types.DescribeHistoryHostResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DescribeHistoryHost", arg0, arg1)
@@ -110,13 +140,13 @@ func (m *MockAdminHandler) DescribeHistoryHost(arg0 context.Context, arg1 *types
 	return ret0, ret1
 }
 
-// DescribeHistoryHost indicates an expected call of DescribeHistoryHost
+// DescribeHistoryHost indicates an expected call of DescribeHistoryHost.
 func (mr *MockAdminHandlerMockRecorder) DescribeHistoryHost(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DescribeHistoryHost", reflect.TypeOf((*MockAdminHandler)(nil).DescribeHistoryHost), arg0, arg1)
 }
 
-// DescribeQueue mocks base method
+// DescribeQueue mocks base method.
 func (m *MockAdminHandler) DescribeQueue(arg0 context.Context, arg1 *types.DescribeQueueRequest) (*types.DescribeQueueResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DescribeQueue", arg0, arg1)
@@ -125,13 +155,28 @@ func (m *MockAdminHandler) DescribeQueue(arg0 context.Context, arg1 *types.Descr
 	return ret0, ret1
 }
 
-// DescribeQueue indicates an expected call of DescribeQueue
+// DescribeQueue indicates an expected call of DescribeQueue.
 func (mr *MockAdminHandlerMockRecorder) DescribeQueue(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DescribeQueue", reflect.TypeOf((*MockAdminHandler)(nil).DescribeQueue), arg0, arg1)
 }
 
-// DescribeWorkflowExecution mocks base method
+// DescribeShardDistribution mocks base method.
+func (m *MockAdminHandler) DescribeShardDistribution(arg0 context.Context, arg1 *types.DescribeShardDistributionRequest) (*types.DescribeShardDistributionResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DescribeShardDistribution", arg0, arg1)
+	ret0, _ := ret[0].(*types.DescribeShardDistributionResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DescribeShardDistribution indicates an expected call of DescribeShardDistribution.
+func (mr *MockAdminHandlerMockRecorder) DescribeShardDistribution(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DescribeShardDistribution", reflect.TypeOf((*MockAdminHandler)(nil).DescribeShardDistribution), arg0, arg1)
+}
+
+// DescribeWorkflowExecution mocks base method.
 func (m *MockAdminHandler) DescribeWorkflowExecution(arg0 context.Context, arg1 *types.AdminDescribeWorkflowExecutionRequest) (*types.AdminDescribeWorkflowExecutionResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DescribeWorkflowExecution", arg0, arg1)
@@ -140,13 +185,28 @@ func (m *MockAdminHandler) DescribeWorkflowExecution(arg0 context.Context, arg1 
 	return ret0, ret1
 }
 
-// DescribeWorkflowExecution indicates an expected call of DescribeWorkflowExecution
+// DescribeWorkflowExecution indicates an expected call of DescribeWorkflowExecution.
 func (mr *MockAdminHandlerMockRecorder) DescribeWorkflowExecution(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DescribeWorkflowExecution", reflect.TypeOf((*MockAdminHandler)(nil).DescribeWorkflowExecution), arg0, arg1)
 }
 
-// GetDLQReplicationMessages mocks base method
+// GetCrossClusterTasks mocks base method.
+func (m *MockAdminHandler) GetCrossClusterTasks(arg0 context.Context, arg1 *types.GetCrossClusterTasksRequest) (*types.GetCrossClusterTasksResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCrossClusterTasks", arg0, arg1)
+	ret0, _ := ret[0].(*types.GetCrossClusterTasksResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCrossClusterTasks indicates an expected call of GetCrossClusterTasks.
+func (mr *MockAdminHandlerMockRecorder) GetCrossClusterTasks(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCrossClusterTasks", reflect.TypeOf((*MockAdminHandler)(nil).GetCrossClusterTasks), arg0, arg1)
+}
+
+// GetDLQReplicationMessages mocks base method.
 func (m *MockAdminHandler) GetDLQReplicationMessages(arg0 context.Context, arg1 *types.GetDLQReplicationMessagesRequest) (*types.GetDLQReplicationMessagesResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetDLQReplicationMessages", arg0, arg1)
@@ -155,13 +215,13 @@ func (m *MockAdminHandler) GetDLQReplicationMessages(arg0 context.Context, arg1 
 	return ret0, ret1
 }
 
-// GetDLQReplicationMessages indicates an expected call of GetDLQReplicationMessages
+// GetDLQReplicationMessages indicates an expected call of GetDLQReplicationMessages.
 func (mr *MockAdminHandlerMockRecorder) GetDLQReplicationMessages(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDLQReplicationMessages", reflect.TypeOf((*MockAdminHandler)(nil).GetDLQReplicationMessages), arg0, arg1)
 }
 
-// GetDomainReplicationMessages mocks base method
+// GetDomainReplicationMessages mocks base method.
 func (m *MockAdminHandler) GetDomainReplicationMessages(arg0 context.Context, arg1 *types.GetDomainReplicationMessagesRequest) (*types.GetDomainReplicationMessagesResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetDomainReplicationMessages", arg0, arg1)
@@ -170,13 +230,28 @@ func (m *MockAdminHandler) GetDomainReplicationMessages(arg0 context.Context, ar
 	return ret0, ret1
 }
 
-// GetDomainReplicationMessages indicates an expected call of GetDomainReplicationMessages
+// GetDomainReplicationMessages indicates an expected call of GetDomainReplicationMessages.
 func (mr *MockAdminHandlerMockRecorder) GetDomainReplicationMessages(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDomainReplicationMessages", reflect.TypeOf((*MockAdminHandler)(nil).GetDomainReplicationMessages), arg0, arg1)
 }
 
-// GetReplicationMessages mocks base method
+// GetDynamicConfig mocks base method.
+func (m *MockAdminHandler) GetDynamicConfig(arg0 context.Context, arg1 *types.GetDynamicConfigRequest) (*types.GetDynamicConfigResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDynamicConfig", arg0, arg1)
+	ret0, _ := ret[0].(*types.GetDynamicConfigResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetDynamicConfig indicates an expected call of GetDynamicConfig.
+func (mr *MockAdminHandlerMockRecorder) GetDynamicConfig(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDynamicConfig", reflect.TypeOf((*MockAdminHandler)(nil).GetDynamicConfig), arg0, arg1)
+}
+
+// GetReplicationMessages mocks base method.
 func (m *MockAdminHandler) GetReplicationMessages(arg0 context.Context, arg1 *types.GetReplicationMessagesRequest) (*types.GetReplicationMessagesResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetReplicationMessages", arg0, arg1)
@@ -185,13 +260,13 @@ func (m *MockAdminHandler) GetReplicationMessages(arg0 context.Context, arg1 *ty
 	return ret0, ret1
 }
 
-// GetReplicationMessages indicates an expected call of GetReplicationMessages
+// GetReplicationMessages indicates an expected call of GetReplicationMessages.
 func (mr *MockAdminHandlerMockRecorder) GetReplicationMessages(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetReplicationMessages", reflect.TypeOf((*MockAdminHandler)(nil).GetReplicationMessages), arg0, arg1)
 }
 
-// GetWorkflowExecutionRawHistoryV2 mocks base method
+// GetWorkflowExecutionRawHistoryV2 mocks base method.
 func (m *MockAdminHandler) GetWorkflowExecutionRawHistoryV2(arg0 context.Context, arg1 *types.GetWorkflowExecutionRawHistoryV2Request) (*types.GetWorkflowExecutionRawHistoryV2Response, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetWorkflowExecutionRawHistoryV2", arg0, arg1)
@@ -200,13 +275,43 @@ func (m *MockAdminHandler) GetWorkflowExecutionRawHistoryV2(arg0 context.Context
 	return ret0, ret1
 }
 
-// GetWorkflowExecutionRawHistoryV2 indicates an expected call of GetWorkflowExecutionRawHistoryV2
+// GetWorkflowExecutionRawHistoryV2 indicates an expected call of GetWorkflowExecutionRawHistoryV2.
 func (mr *MockAdminHandlerMockRecorder) GetWorkflowExecutionRawHistoryV2(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkflowExecutionRawHistoryV2", reflect.TypeOf((*MockAdminHandler)(nil).GetWorkflowExecutionRawHistoryV2), arg0, arg1)
 }
 
-// MergeDLQMessages mocks base method
+// ListDynamicConfig mocks base method.
+func (m *MockAdminHandler) ListDynamicConfig(arg0 context.Context, arg1 *types.ListDynamicConfigRequest) (*types.ListDynamicConfigResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListDynamicConfig", arg0, arg1)
+	ret0, _ := ret[0].(*types.ListDynamicConfigResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListDynamicConfig indicates an expected call of ListDynamicConfig.
+func (mr *MockAdminHandlerMockRecorder) ListDynamicConfig(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListDynamicConfig", reflect.TypeOf((*MockAdminHandler)(nil).ListDynamicConfig), arg0, arg1)
+}
+
+// MaintainCorruptWorkflow mocks base method.
+func (m *MockAdminHandler) MaintainCorruptWorkflow(arg0 context.Context, arg1 *types.AdminMaintainWorkflowRequest) (*types.AdminMaintainWorkflowResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MaintainCorruptWorkflow", arg0, arg1)
+	ret0, _ := ret[0].(*types.AdminMaintainWorkflowResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MaintainCorruptWorkflow indicates an expected call of MaintainCorruptWorkflow.
+func (mr *MockAdminHandlerMockRecorder) MaintainCorruptWorkflow(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaintainCorruptWorkflow", reflect.TypeOf((*MockAdminHandler)(nil).MaintainCorruptWorkflow), arg0, arg1)
+}
+
+// MergeDLQMessages mocks base method.
 func (m *MockAdminHandler) MergeDLQMessages(arg0 context.Context, arg1 *types.MergeDLQMessagesRequest) (*types.MergeDLQMessagesResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "MergeDLQMessages", arg0, arg1)
@@ -215,13 +320,13 @@ func (m *MockAdminHandler) MergeDLQMessages(arg0 context.Context, arg1 *types.Me
 	return ret0, ret1
 }
 
-// MergeDLQMessages indicates an expected call of MergeDLQMessages
+// MergeDLQMessages indicates an expected call of MergeDLQMessages.
 func (mr *MockAdminHandlerMockRecorder) MergeDLQMessages(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MergeDLQMessages", reflect.TypeOf((*MockAdminHandler)(nil).MergeDLQMessages), arg0, arg1)
 }
 
-// PurgeDLQMessages mocks base method
+// PurgeDLQMessages mocks base method.
 func (m *MockAdminHandler) PurgeDLQMessages(arg0 context.Context, arg1 *types.PurgeDLQMessagesRequest) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "PurgeDLQMessages", arg0, arg1)
@@ -229,13 +334,13 @@ func (m *MockAdminHandler) PurgeDLQMessages(arg0 context.Context, arg1 *types.Pu
 	return ret0
 }
 
-// PurgeDLQMessages indicates an expected call of PurgeDLQMessages
+// PurgeDLQMessages indicates an expected call of PurgeDLQMessages.
 func (mr *MockAdminHandlerMockRecorder) PurgeDLQMessages(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PurgeDLQMessages", reflect.TypeOf((*MockAdminHandler)(nil).PurgeDLQMessages), arg0, arg1)
 }
 
-// ReadDLQMessages mocks base method
+// ReadDLQMessages mocks base method.
 func (m *MockAdminHandler) ReadDLQMessages(arg0 context.Context, arg1 *types.ReadDLQMessagesRequest) (*types.ReadDLQMessagesResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ReadDLQMessages", arg0, arg1)
@@ -244,13 +349,13 @@ func (m *MockAdminHandler) ReadDLQMessages(arg0 context.Context, arg1 *types.Rea
 	return ret0, ret1
 }
 
-// ReadDLQMessages indicates an expected call of ReadDLQMessages
+// ReadDLQMessages indicates an expected call of ReadDLQMessages.
 func (mr *MockAdminHandlerMockRecorder) ReadDLQMessages(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReadDLQMessages", reflect.TypeOf((*MockAdminHandler)(nil).ReadDLQMessages), arg0, arg1)
 }
 
-// ReapplyEvents mocks base method
+// ReapplyEvents mocks base method.
 func (m *MockAdminHandler) ReapplyEvents(arg0 context.Context, arg1 *types.ReapplyEventsRequest) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ReapplyEvents", arg0, arg1)
@@ -258,13 +363,13 @@ func (m *MockAdminHandler) ReapplyEvents(arg0 context.Context, arg1 *types.Reapp
 	return ret0
 }
 
-// ReapplyEvents indicates an expected call of ReapplyEvents
+// ReapplyEvents indicates an expected call of ReapplyEvents.
 func (mr *MockAdminHandlerMockRecorder) ReapplyEvents(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReapplyEvents", reflect.TypeOf((*MockAdminHandler)(nil).ReapplyEvents), arg0, arg1)
 }
 
-// RefreshWorkflowTasks mocks base method
+// RefreshWorkflowTasks mocks base method.
 func (m *MockAdminHandler) RefreshWorkflowTasks(arg0 context.Context, arg1 *types.RefreshWorkflowTasksRequest) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RefreshWorkflowTasks", arg0, arg1)
@@ -272,13 +377,13 @@ func (m *MockAdminHandler) RefreshWorkflowTasks(arg0 context.Context, arg1 *type
 	return ret0
 }
 
-// RefreshWorkflowTasks indicates an expected call of RefreshWorkflowTasks
+// RefreshWorkflowTasks indicates an expected call of RefreshWorkflowTasks.
 func (mr *MockAdminHandlerMockRecorder) RefreshWorkflowTasks(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshWorkflowTasks", reflect.TypeOf((*MockAdminHandler)(nil).RefreshWorkflowTasks), arg0, arg1)
 }
 
-// RemoveTask mocks base method
+// RemoveTask mocks base method.
 func (m *MockAdminHandler) RemoveTask(arg0 context.Context, arg1 *types.RemoveTaskRequest) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RemoveTask", arg0, arg1)
@@ -286,13 +391,13 @@ func (m *MockAdminHandler) RemoveTask(arg0 context.Context, arg1 *types.RemoveTa
 	return ret0
 }
 
-// RemoveTask indicates an expected call of RemoveTask
+// RemoveTask indicates an expected call of RemoveTask.
 func (mr *MockAdminHandlerMockRecorder) RemoveTask(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveTask", reflect.TypeOf((*MockAdminHandler)(nil).RemoveTask), arg0, arg1)
 }
 
-// ResendReplicationTasks mocks base method
+// ResendReplicationTasks mocks base method.
 func (m *MockAdminHandler) ResendReplicationTasks(arg0 context.Context, arg1 *types.ResendReplicationTasksRequest) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ResendReplicationTasks", arg0, arg1)
@@ -300,13 +405,13 @@ func (m *MockAdminHandler) ResendReplicationTasks(arg0 context.Context, arg1 *ty
 	return ret0
 }
 
-// ResendReplicationTasks indicates an expected call of ResendReplicationTasks
+// ResendReplicationTasks indicates an expected call of ResendReplicationTasks.
 func (mr *MockAdminHandlerMockRecorder) ResendReplicationTasks(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResendReplicationTasks", reflect.TypeOf((*MockAdminHandler)(nil).ResendReplicationTasks), arg0, arg1)
 }
 
-// ResetQueue mocks base method
+// ResetQueue mocks base method.
 func (m *MockAdminHandler) ResetQueue(arg0 context.Context, arg1 *types.ResetQueueRequest) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ResetQueue", arg0, arg1)
@@ -314,8 +419,75 @@ func (m *MockAdminHandler) ResetQueue(arg0 context.Context, arg1 *types.ResetQue
 	return ret0
 }
 
-// ResetQueue indicates an expected call of ResetQueue
+// ResetQueue indicates an expected call of ResetQueue.
 func (mr *MockAdminHandlerMockRecorder) ResetQueue(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResetQueue", reflect.TypeOf((*MockAdminHandler)(nil).ResetQueue), arg0, arg1)
+}
+
+// RespondCrossClusterTasksCompleted mocks base method.
+func (m *MockAdminHandler) RespondCrossClusterTasksCompleted(arg0 context.Context, arg1 *types.RespondCrossClusterTasksCompletedRequest) (*types.RespondCrossClusterTasksCompletedResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RespondCrossClusterTasksCompleted", arg0, arg1)
+	ret0, _ := ret[0].(*types.RespondCrossClusterTasksCompletedResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RespondCrossClusterTasksCompleted indicates an expected call of RespondCrossClusterTasksCompleted.
+func (mr *MockAdminHandlerMockRecorder) RespondCrossClusterTasksCompleted(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RespondCrossClusterTasksCompleted", reflect.TypeOf((*MockAdminHandler)(nil).RespondCrossClusterTasksCompleted), arg0, arg1)
+}
+
+// RestoreDynamicConfig mocks base method.
+func (m *MockAdminHandler) RestoreDynamicConfig(arg0 context.Context, arg1 *types.RestoreDynamicConfigRequest) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RestoreDynamicConfig", arg0, arg1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RestoreDynamicConfig indicates an expected call of RestoreDynamicConfig.
+func (mr *MockAdminHandlerMockRecorder) RestoreDynamicConfig(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RestoreDynamicConfig", reflect.TypeOf((*MockAdminHandler)(nil).RestoreDynamicConfig), arg0, arg1)
+}
+
+// Start mocks base method.
+func (m *MockAdminHandler) Start() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Start")
+}
+
+// Start indicates an expected call of Start.
+func (mr *MockAdminHandlerMockRecorder) Start() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockAdminHandler)(nil).Start))
+}
+
+// Stop mocks base method.
+func (m *MockAdminHandler) Stop() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Stop")
+}
+
+// Stop indicates an expected call of Stop.
+func (mr *MockAdminHandlerMockRecorder) Stop() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockAdminHandler)(nil).Stop))
+}
+
+// UpdateDynamicConfig mocks base method.
+func (m *MockAdminHandler) UpdateDynamicConfig(arg0 context.Context, arg1 *types.UpdateDynamicConfigRequest) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateDynamicConfig", arg0, arg1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateDynamicConfig indicates an expected call of UpdateDynamicConfig.
+func (mr *MockAdminHandlerMockRecorder) UpdateDynamicConfig(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateDynamicConfig", reflect.TypeOf((*MockAdminHandler)(nil).UpdateDynamicConfig), arg0, arg1)
 }

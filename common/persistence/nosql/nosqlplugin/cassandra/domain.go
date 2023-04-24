@@ -149,8 +149,9 @@ const (
 		`WHERE domains_partition = ? `
 )
 
-// Insert a new record to domain, return error if failed or already exists
-// Must return conditionFailed error if domainName already exists
+// Insert a new record to domain
+// return types.DomainAlreadyExistsError error if failed or already exists
+// Must return ConditionFailure error if other condition doesn't match
 func (db *cdb) InsertDomain(
 	ctx context.Context,
 	row *nosqlplugin.DomainRow,
@@ -204,7 +205,7 @@ func (db *cdb) InsertDomain(
 		row.LastUpdatedTime.UnixNano(),
 		metadataNotificationVersion,
 	)
-	db.updateMetadataBatch(ctx, batch, metadataNotificationVersion)
+	db.updateMetadataBatch(batch, metadataNotificationVersion)
 
 	previous := make(map[string]interface{})
 	applied, iter, err := db.session.MapExecuteBatchCAS(batch, previous)
@@ -240,14 +241,13 @@ func (db *cdb) InsertDomain(
 		}
 
 		db.logger.Warn("Create domain operation failed because of condition update failure on domain metadata record")
-		return errConditionFailed
+		return nosqlplugin.NewConditionFailure("domain")
 	}
 
 	return nil
 }
 
 func (db *cdb) updateMetadataBatch(
-	ctx context.Context,
 	batch gocql.Batch,
 	notificationVersion int64,
 ) {
@@ -304,7 +304,7 @@ func (db *cdb) UpdateDomain(
 		constDomainPartition,
 		row.Info.Name,
 	)
-	db.updateMetadataBatch(ctx, batch, row.NotificationVersion)
+	db.updateMetadataBatch(batch, row.NotificationVersion)
 
 	previous := make(map[string]interface{})
 	applied, iter, err := db.session.MapExecuteBatchCAS(batch, previous)
@@ -318,7 +318,7 @@ func (db *cdb) UpdateDomain(
 		return err
 	}
 	if !applied {
-		return errConditionFailed
+		return nosqlplugin.NewConditionFailure("domain")
 	}
 	return nil
 }
@@ -427,8 +427,7 @@ func (db *cdb) SelectAllDomains(
 	pageSize int,
 	pageToken []byte,
 ) ([]*nosqlplugin.DomainRow, []byte, error) {
-	var query gocql.Query
-	query = db.session.Query(templateListDomainQueryV2, constDomainPartition).WithContext(ctx)
+	query := db.session.Query(templateListDomainQueryV2, constDomainPartition).WithContext(ctx)
 	iter := query.PageSize(pageSize).PageState(pageToken).Iter()
 	if iter == nil {
 		return nil, nil, &types.InternalServiceError{
@@ -509,7 +508,7 @@ func (db *cdb) SelectAllDomains(
 	return rows, nextPageToken, nil
 }
 
-//  Delete a domain, either by domainID or domainName
+// Delete a domain, either by domainID or domainName
 func (db *cdb) DeleteDomain(
 	ctx context.Context,
 	domainID *string,
@@ -569,10 +568,10 @@ func (db *cdb) deleteDomain(
 	name, ID string,
 ) error {
 	query := db.session.Query(templateDeleteDomainByNameQueryV2, constDomainPartition, name).WithContext(ctx)
-	if err := query.Exec(); err != nil {
+	if err := db.executeWithConsistencyAll(query); err != nil {
 		return err
 	}
 
 	query = db.session.Query(templateDeleteDomainQuery, ID).WithContext(ctx)
-	return query.Exec()
+	return db.executeWithConsistencyAll(query)
 }

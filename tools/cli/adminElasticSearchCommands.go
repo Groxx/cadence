@@ -26,13 +26,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/uber/cadence/common/clock"
+	"github.com/uber/cadence/common/elasticsearch"
 	"github.com/uber/cadence/common/tokenbucket"
 
 	"github.com/olekukonko/tablewriter"
@@ -45,24 +45,8 @@ import (
 )
 
 const (
-	esDocIDDelimiter = "~"
-	esDocType        = "_doc"
-
 	versionTypeExternal = "external"
 )
-
-const (
-	headerSource      = "rpc-caller"
-	headerDestination = "rpc-service"
-)
-
-// muttleyTransport wraps around default http.Transport to add muttley specific headers to all requests
-type muttleyTransport struct {
-	http.Transport
-
-	source      string
-	destination string
-}
 
 var timeKeys = map[string]bool{
 	"StartTime":     true,
@@ -87,44 +71,21 @@ func timeValProcess(timeStr string) (string, error) {
 	return fmt.Sprintf("%v", parsedTime.UnixNano()), nil
 }
 
-func (t *muttleyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	r.Header.Set(headerSource, t.source)
-	r.Header.Set(headerDestination, t.destination)
-	return t.Transport.RoundTrip(r)
-}
-
-func getESClient(c *cli.Context) *elastic.Client {
-	url := getRequiredOption(c, FlagURL)
-	var client *elastic.Client
-	var err error
-	retrier := elastic.NewBackoffRetrier(elastic.NewExponentialBackoff(128*time.Millisecond, 513*time.Millisecond))
-	if c.IsSet(FlagMuttleyDestination) {
-		httpClient := &http.Client{
-			Transport: &muttleyTransport{
-				source:      "cadence-cli",
-				destination: c.String(FlagMuttleyDestination),
-			},
-		}
-		client, err = elastic.NewClient(
-			elastic.SetHttpClient(httpClient),
-			elastic.SetURL(url),
-			elastic.SetRetrier(retrier),
-		)
-	} else {
-		client, err = elastic.NewClient(
-			elastic.SetURL(url),
-			elastic.SetRetrier(retrier),
-		)
-	}
-	if err != nil {
-		ErrorAndExit("Unable to create ElasticSearch client", err)
-	}
-	return client
+type ESIndexRow struct {
+	Health             string `header:"Health"`
+	Status             string `header:"Status"`
+	Index              string `header:"Index"`
+	PrimaryShards      int    `header:"Pri"`
+	ReplicaShards      int    `header:"Rep"`
+	DocsCount          int    `header:"Docs Count"`
+	DocsDeleted        int    `header:"Docs Deleted"`
+	StorageSize        string `header:"Store Size"`
+	PrimaryStorageSize string `header:"Pri Store Size"`
 }
 
 // AdminCatIndices cat indices for ES cluster
 func AdminCatIndices(c *cli.Context) {
-	esClient := getESClient(c)
+	esClient := cFactory.ElasticSearchClient(c)
 
 	ctx := context.Background()
 	resp, err := esClient.CatIndices().Do(ctx)
@@ -132,28 +93,26 @@ func AdminCatIndices(c *cli.Context) {
 		ErrorAndExit("Unable to cat indices", err)
 	}
 
-	table := tablewriter.NewWriter(os.Stdout)
-	header := []string{"health", "status", "index", "pri", "rep", "docs.count", "docs.deleted", "store.size", "pri.store.size"}
-	table.SetHeader(header)
+	table := []ESIndexRow{}
 	for _, row := range resp {
-		data := make([]string, len(header))
-		data[0] = row.Health
-		data[1] = row.Status
-		data[2] = row.Index
-		data[3] = strconv.Itoa(row.Pri)
-		data[4] = strconv.Itoa(row.Rep)
-		data[5] = strconv.Itoa(row.DocsCount)
-		data[6] = strconv.Itoa(row.DocsDeleted)
-		data[7] = row.StoreSize
-		data[8] = row.PriStoreSize
-		table.Append(data)
+		table = append(table, ESIndexRow{
+			Health:             row.Health,
+			Status:             row.Status,
+			Index:              row.Index,
+			PrimaryShards:      row.Pri,
+			ReplicaShards:      row.Rep,
+			DocsCount:          row.DocsCount,
+			DocsDeleted:        row.DocsDeleted,
+			StorageSize:        row.StoreSize,
+			PrimaryStorageSize: row.PriStoreSize,
+		})
 	}
-	table.Render()
+	Render(c, table, RenderOptions{DefaultTemplate: templateTable, Color: true, Border: true})
 }
 
 // AdminIndex used to bulk insert message from kafka parse
 func AdminIndex(c *cli.Context) {
-	esClient := getESClient(c)
+	esClient := cFactory.ElasticSearchClient(c)
 	indexName := getRequiredOption(c, FlagIndex)
 	inputFileName := getRequiredOption(c, FlagInputFile)
 	batchSize := c.Int(FlagBatchSize)
@@ -174,14 +133,14 @@ func AdminIndex(c *cli.Context) {
 		}
 	}
 	for i, message := range messages {
-		docID := message.GetWorkflowID() + esDocIDDelimiter + message.GetRunID()
+		docID := message.GetWorkflowID() + elasticsearch.GetESDocDelimiter() + message.GetRunID()
 		var req elastic.BulkableRequest
 		switch message.GetMessageType() {
 		case indexer.MessageTypeIndex:
 			doc := generateESDoc(message)
 			req = elastic.NewBulkIndexRequest().
 				Index(indexName).
-				Type(esDocType).
+				Type(elasticsearch.GetESDocType()).
 				Id(docID).
 				VersionType(versionTypeExternal).
 				Version(message.GetVersion()).
@@ -189,10 +148,17 @@ func AdminIndex(c *cli.Context) {
 		case indexer.MessageTypeDelete:
 			req = elastic.NewBulkDeleteRequest().
 				Index(indexName).
-				Type(esDocType).
+				Type(elasticsearch.GetESDocType()).
 				Id(docID).
 				VersionType(versionTypeExternal).
 				Version(message.GetVersion())
+		case indexer.MessageTypeCreate:
+			req = elastic.NewBulkIndexRequest().
+				OpType("create").
+				Index(indexName).
+				Type(elasticsearch.GetESDocType()).
+				Id(docID).
+				VersionType("internal")
 		default:
 			ErrorAndExit("Unknown message type", nil)
 		}
@@ -209,7 +175,7 @@ func AdminIndex(c *cli.Context) {
 
 // AdminDelete used to delete documents from ElasticSearch with input of list result
 func AdminDelete(c *cli.Context) {
-	esClient := getESClient(c)
+	esClient := cFactory.ElasticSearchClient(c)
 	indexName := getRequiredOption(c, FlagIndex)
 	inputFileName := getRequiredOption(c, FlagInputFile)
 	batchSize := c.Int(FlagBatchSize)
@@ -245,10 +211,10 @@ func AdminDelete(c *cli.Context) {
 
 	for scanner.Scan() {
 		line := strings.Split(scanner.Text(), "|")
-		docID := strings.TrimSpace(line[1]) + esDocIDDelimiter + strings.TrimSpace(line[2])
+		docID := strings.TrimSpace(line[1]) + elasticsearch.GetESDocDelimiter() + strings.TrimSpace(line[2])
 		req := elastic.NewBulkDeleteRequest().
 			Index(indexName).
-			Type(esDocType).
+			Type(elasticsearch.GetESDocType()).
 			Id(docID).
 			VersionType(versionTypeExternal).
 			Version(math.MaxInt64)
@@ -323,12 +289,8 @@ func generateESDoc(msg *indexer.Message) map[string]interface{} {
 // This function is used to trim unnecessary tag in returned json for table header
 func trimBucketKey(k string) string {
 	// group key is in form of "group_key", we only need "key" as the column name
-	if strings.HasPrefix(k, "group_") {
-		k = k[6:]
-	}
-	if strings.HasPrefix(k, "Attr_") {
-		k = k[5:]
-	}
+	k = strings.TrimPrefix(k, "group_")
+	k = strings.TrimPrefix(k, "Attr_")
 	return fmt.Sprintf(`%v(*)`, k)
 }
 
@@ -346,7 +308,6 @@ func toTimeStr(s interface{}) string {
 // GenerateReport generate report for an aggregation query to ES
 func GenerateReport(c *cli.Context) {
 	// use url command argument to create client
-	url := getRequiredOption(c, FlagURL)
 	index := getRequiredOption(c, FlagIndex)
 	sql := getRequiredOption(c, FlagListQuery)
 	var reportFormat, reportFilePath string
@@ -358,10 +319,7 @@ func GenerateReport(c *cli.Context) {
 	} else {
 		reportFilePath = "./report." + reportFormat
 	}
-	esClient, err := elastic.NewClient(elastic.SetURL(url))
-	if err != nil {
-		ErrorAndExit("Fail to create elastic client", err)
-	}
+	esClient := cFactory.ElasticSearchClient(c)
 	ctx := context.Background()
 
 	// convert sql to dsl

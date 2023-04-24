@@ -26,9 +26,6 @@ import (
 
 	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/dynamicconfig"
-	"github.com/uber/cadence/common/log"
-	"github.com/uber/cadence/common/persistence"
-	persistenceClient "github.com/uber/cadence/common/persistence/client"
 	"github.com/uber/cadence/common/resource"
 	"github.com/uber/cadence/common/service"
 )
@@ -38,14 +35,14 @@ type Service struct {
 	resource.Resource
 
 	status  int32
-	handler *handlerImpl
+	handler Handler
 	stopC   chan struct{}
 	config  *Config
 }
 
 // NewService builds a new cadence-matching service
 func NewService(
-	params *service.BootstrapParams,
+	params *resource.Params,
 ) (resource.Resource, error) {
 
 	serviceConfig := NewConfig(
@@ -55,17 +52,15 @@ func NewService(
 			dynamicconfig.ClusterNameFilter(params.ClusterMetadata.GetCurrentClusterName()),
 		),
 	)
+
 	serviceResource, err := resource.New(
 		params,
-		common.MatchingServiceName,
-		serviceConfig.PersistenceMaxQPS,
-		serviceConfig.PersistenceGlobalMaxQPS,
-		serviceConfig.ThrottledLogRPS,
-		func(
-			persistenceBean persistenceClient.Bean,
-			logger log.Logger,
-		) (persistence.VisibilityManager, error) {
-			return persistenceBean.GetVisibilityManager(), nil
+		service.Matching,
+		&service.Config{
+			PersistenceMaxQPS:       serviceConfig.PersistenceMaxQPS,
+			PersistenceGlobalMaxQPS: serviceConfig.PersistenceGlobalMaxQPS,
+			ThrottledLoggerMaxRPS:   serviceConfig.ThrottledLogRPS,
+			// matching doesn't need visibility config as it never read or write visibility
 		},
 	)
 	if err != nil {
@@ -89,7 +84,19 @@ func (s *Service) Start() {
 	logger := s.GetLogger()
 	logger.Info("matching starting")
 
-	s.handler = NewHandler(s, s.config)
+	engine := NewEngine(
+		s.GetTaskManager(),
+		s.GetClusterMetadata(),
+		s.GetHistoryClient(),
+		s.GetMatchingRawClient(), // Use non retry client inside matching
+		s.config,
+		s.GetLogger(),
+		s.GetMetricsClient(),
+		s.GetDomainCache(),
+		s.GetMembershipResolver(),
+	)
+
+	s.handler = NewHandler(engine, s.config, s.GetDomainCache(), s.GetMetricsClient(), s.GetLogger(), s.GetThrottledLogger())
 
 	thriftHandler := NewThriftHandler(s.handler)
 	thriftHandler.register(s.GetDispatcher())
@@ -114,7 +121,7 @@ func (s *Service) Stop() {
 
 	// remove self from membership ring and wait for traffic to drain
 	s.GetLogger().Info("ShutdownHandler: Evicting self from membership ring")
-	s.GetMembershipMonitor().EvictSelf()
+	s.GetMembershipResolver().EvictSelf()
 	s.GetLogger().Info("ShutdownHandler: Waiting for others to discover I am unhealthy")
 	time.Sleep(s.config.ShutdownDrainDuration())
 

@@ -51,12 +51,11 @@ type (
 		suite.Suite
 		*require.Assertions
 
-		controller          *gomock.Controller
-		mockShard           *shard.TestContext
-		mockEventsCache     *events.MockCache
-		mockTaskRefresher   *MockMutableStateTaskRefresher
-		mockDomainCache     *cache.MockDomainCache
-		mockClusterMetadata *cluster.MockMetadata
+		controller        *gomock.Controller
+		mockShard         *shard.TestContext
+		mockEventsCache   *events.MockCache
+		mockTaskRefresher *MockMutableStateTaskRefresher
+		mockDomainCache   *cache.MockDomainCache
 
 		mockHistoryV2Mgr *mocks.HistoryV2Manager
 		logger           log.Logger
@@ -92,9 +91,7 @@ func (s *stateRebuilderSuite) SetupTest() {
 
 	s.mockHistoryV2Mgr = s.mockShard.Resource.HistoryMgr
 	s.mockDomainCache = s.mockShard.Resource.DomainCache
-	s.mockClusterMetadata = s.mockShard.Resource.ClusterMetadata
 	s.mockEventsCache = s.mockShard.MockEventsCache
-	s.mockClusterMetadata.EXPECT().GetCurrentClusterName().Return(cluster.TestCurrentClusterName).AnyTimes()
 	s.mockEventsCache.EXPECT().PutEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 
 	s.logger = s.mockShard.GetLogger()
@@ -124,12 +121,12 @@ func (s *stateRebuilderSuite) TestApplyEvents() {
 	requestID := uuid.New()
 	events := []*types.HistoryEvent{
 		{
-			EventID:                                 1,
+			ID:                                      1,
 			EventType:                               types.EventTypeWorkflowExecutionStarted.Ptr(),
 			WorkflowExecutionStartedEventAttributes: &types.WorkflowExecutionStartedEventAttributes{},
 		},
 		{
-			EventID:                                  2,
+			ID:                                       2,
 			EventType:                                types.EventTypeWorkflowExecutionSignaled.Ptr(),
 			WorkflowExecutionSignaledEventAttributes: &types.WorkflowExecutionSignaledEventAttributes{},
 		},
@@ -157,33 +154,33 @@ func (s *stateRebuilderSuite) TestPagination() {
 	firstEventID := common.FirstEventID
 	nextEventID := int64(101)
 	branchToken := []byte("some random branch token")
-	workflowIdentifier := definition.NewWorkflowIdentifier(s.domainID, s.workflowID, s.runID)
+	domainName := "some random domain name"
 
 	event1 := &types.HistoryEvent{
-		EventID:                                 1,
+		ID:                                      1,
 		WorkflowExecutionStartedEventAttributes: &types.WorkflowExecutionStartedEventAttributes{},
 	}
 	event2 := &types.HistoryEvent{
-		EventID:                              2,
+		ID:                                   2,
 		DecisionTaskScheduledEventAttributes: &types.DecisionTaskScheduledEventAttributes{},
 	}
 	event3 := &types.HistoryEvent{
-		EventID:                            3,
+		ID:                                 3,
 		DecisionTaskStartedEventAttributes: &types.DecisionTaskStartedEventAttributes{},
 	}
 	event4 := &types.HistoryEvent{
-		EventID:                              4,
+		ID:                                   4,
 		DecisionTaskCompletedEventAttributes: &types.DecisionTaskCompletedEventAttributes{},
 	}
 	event5 := &types.HistoryEvent{
-		EventID:                              5,
+		ID:                                   5,
 		ActivityTaskScheduledEventAttributes: &types.ActivityTaskScheduledEventAttributes{},
 	}
 	history1 := []*types.History{{Events: []*types.HistoryEvent{event1, event2, event3}}}
 	history2 := []*types.History{{Events: []*types.HistoryEvent{event4, event5}}}
 	history := append(history1, history2...)
 	pageToken := []byte("some random token")
-
+	s.mockDomainCache.EXPECT().GetDomainName(s.domainID).Return(domainName, nil).AnyTimes()
 	s.mockHistoryV2Mgr.On("ReadHistoryBranchByBatch", mock.Anything, &persistence.ReadHistoryBranchRequest{
 		BranchToken:   branchToken,
 		MinEventID:    firstEventID,
@@ -191,6 +188,7 @@ func (s *stateRebuilderSuite) TestPagination() {
 		PageSize:      NDCDefaultPageSize,
 		NextPageToken: nil,
 		ShardID:       common.IntPtr(s.mockShard.GetShardID()),
+		DomainName:    domainName,
 	}).Return(&persistence.ReadHistoryBranchByBatchResponse{
 		History:       history1,
 		NextPageToken: pageToken,
@@ -203,13 +201,14 @@ func (s *stateRebuilderSuite) TestPagination() {
 		PageSize:      NDCDefaultPageSize,
 		NextPageToken: pageToken,
 		ShardID:       common.IntPtr(s.mockShard.GetShardID()),
+		DomainName:    domainName,
 	}).Return(&persistence.ReadHistoryBranchByBatchResponse{
 		History:       history2,
 		NextPageToken: nil,
 		Size:          67890,
 	}, nil).Once()
 
-	paginationFn := s.nDCStateRebuilder.getPaginationFn(context.Background(), workflowIdentifier, firstEventID, nextEventID, branchToken)
+	paginationFn := s.nDCStateRebuilder.getPaginationFn(context.Background(), firstEventID, nextEventID, branchToken, s.domainID)
 	iter := collection.NewPagingIterator(paginationFn)
 
 	result := []*types.History{}
@@ -238,7 +237,7 @@ func (s *stateRebuilderSuite) TestRebuild() {
 	firstEventID := common.FirstEventID
 	nextEventID := lastEventID + 1
 	events1 := []*types.HistoryEvent{{
-		EventID:   1,
+		ID:        1,
 		Version:   version,
 		EventType: types.EventTypeWorkflowExecutionStarted.Ptr(),
 		WorkflowExecutionStartedEventAttributes: &types.WorkflowExecutionStartedEventAttributes{
@@ -251,7 +250,7 @@ func (s *stateRebuilderSuite) TestRebuild() {
 		},
 	}}
 	events2 := []*types.HistoryEvent{{
-		EventID:   2,
+		ID:        2,
 		Version:   version,
 		EventType: types.EventTypeWorkflowExecutionSignaled.Ptr(),
 		WorkflowExecutionSignaledEventAttributes: &types.WorkflowExecutionSignaledEventAttributes{
@@ -266,6 +265,8 @@ func (s *stateRebuilderSuite) TestRebuild() {
 
 	historySize1 := 12345
 	historySize2 := 67890
+
+	s.mockDomainCache.EXPECT().GetDomainName(gomock.Any()).Return(targetDomainName, nil).AnyTimes()
 	s.mockHistoryV2Mgr.On("ReadHistoryBranchByBatch", mock.Anything, &persistence.ReadHistoryBranchRequest{
 		BranchToken:   branchToken,
 		MinEventID:    firstEventID,
@@ -273,6 +274,7 @@ func (s *stateRebuilderSuite) TestRebuild() {
 		PageSize:      NDCDefaultPageSize,
 		NextPageToken: nil,
 		ShardID:       common.IntPtr(s.mockShard.GetShardID()),
+		DomainName:    targetDomainName,
 	}).Return(&persistence.ReadHistoryBranchByBatchResponse{
 		History:       history1,
 		NextPageToken: pageToken,
@@ -285,6 +287,7 @@ func (s *stateRebuilderSuite) TestRebuild() {
 		PageSize:      NDCDefaultPageSize,
 		NextPageToken: pageToken,
 		ShardID:       common.IntPtr(s.mockShard.GetShardID()),
+		DomainName:    targetDomainName,
 	}).Return(&persistence.ReadHistoryBranchByBatchResponse{
 		History:       history2,
 		NextPageToken: nil,
@@ -302,7 +305,6 @@ func (s *stateRebuilderSuite) TestRebuild() {
 			},
 		},
 		1234,
-		s.mockClusterMetadata,
 	), nil).AnyTimes()
 	s.mockTaskRefresher.EXPECT().RefreshTasks(gomock.Any(), now, gomock.Any()).Return(nil).Times(1)
 
@@ -331,4 +333,46 @@ func (s *stateRebuilderSuite) TestRebuild() {
 		),
 	), rebuildMutableState.GetVersionHistories())
 	s.Equal(rebuildMutableState.GetExecutionInfo().StartTimestamp, now)
+}
+
+func (s *stateRebuilderSuite) TestInvalidStateHandling() {
+	requestID := uuid.New()
+	version := int64(12)
+	lastEventID := int64(2)
+	branchToken := []byte("other random branch token")
+	targetBranchToken := []byte("some other random branch token")
+	now := time.Now()
+
+	targetDomainID := uuid.New()
+	targetDomainName := "other random domain name"
+	targetWorkflowID := "other random workflow ID"
+	targetRunID := uuid.New()
+
+	s.mockDomainCache.EXPECT().GetDomainName(gomock.Any()).Return(targetDomainName, nil).AnyTimes()
+	s.mockHistoryV2Mgr.On("ReadHistoryBranchByBatch", mock.Anything, mock.Anything).Return(nil, &types.EntityNotExistsError{}).Once()
+
+	s.mockDomainCache.EXPECT().GetDomainByID(targetDomainID).Return(cache.NewGlobalDomainCacheEntryForTest(
+		&persistence.DomainInfo{ID: targetDomainID, Name: targetDomainName},
+		&persistence.DomainConfig{},
+		&persistence.DomainReplicationConfig{
+			ActiveClusterName: cluster.TestCurrentClusterName,
+			Clusters: []*persistence.ClusterReplicationConfig{
+				{ClusterName: cluster.TestCurrentClusterName},
+				{ClusterName: cluster.TestAlternativeClusterName},
+			},
+		},
+		1234,
+	), nil).AnyTimes()
+
+	s.nDCStateRebuilder.Rebuild(
+		context.Background(),
+		now,
+		definition.NewWorkflowIdentifier(s.domainID, s.workflowID, s.runID),
+		branchToken,
+		lastEventID,
+		version,
+		definition.NewWorkflowIdentifier(targetDomainID, targetWorkflowID, targetRunID),
+		targetBranchToken,
+		requestID,
+	)
 }

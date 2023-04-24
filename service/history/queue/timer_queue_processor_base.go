@@ -24,6 +24,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -128,8 +129,7 @@ func newTimerQueueProcessorBase(
 				taskExecutor,
 				taskProcessor,
 				processorBase.redispatcher.AddTask,
-				shard.GetTimeSource(),
-				shard.GetConfig().TimerTaskMaxRetryCount,
+				shard.GetConfig().TaskCriticalRetryCount,
 			)
 		},
 
@@ -155,8 +155,13 @@ func (t *timerQueueProcessorBase) Start() {
 
 	t.redispatcher.Start()
 
+	newPollTime := time.Time{}
+	if startJitter := t.options.MaxStartJitterInterval(); startJitter > 0 {
+		now := t.shard.GetTimeSource().Now()
+		newPollTime = now.Add(time.Duration(rand.Int63n(int64(startJitter))))
+	}
 	for _, queueCollections := range t.processingQueueCollections {
-		t.upsertPollTime(queueCollections.Level(), time.Time{})
+		t.upsertPollTime(queueCollections.Level(), newPollTime)
 	}
 
 	t.shutdownWG.Add(1)
@@ -240,7 +245,7 @@ processorPumpLoop:
 
 			t.processQueueCollections(levels)
 		case <-updateAckTimer.C:
-			processFinished, err := t.updateAckLevel()
+			processFinished, _, err := t.updateAckLevel()
 			if err == shard.ErrShardClosed || (err == nil && processFinished) {
 				go t.Stop()
 				break processorPumpLoop
@@ -631,6 +636,7 @@ func newTimerQueueProcessorOptions(
 ) *queueProcessorOptions {
 	options := &queueProcessorOptions{
 		BatchSize:                            config.TimerTaskBatchSize,
+		DeleteBatchSize:                      config.TimerTaskDeleteBatchSize,
 		MaxPollRPS:                           config.TimerProcessorMaxPollRPS,
 		MaxPollInterval:                      config.TimerProcessorMaxPollInterval,
 		MaxPollIntervalJitterCoefficient:     config.TimerProcessorMaxPollIntervalJitterCoefficient,
@@ -651,6 +657,8 @@ func newTimerQueueProcessorOptions(
 		// disable persist and load processing queue states for failover processor as it will never be split
 		options.EnablePersistQueueStates = dynamicconfig.GetBoolPropertyFn(false)
 		options.EnableLoadQueueStates = dynamicconfig.GetBoolPropertyFn(false)
+
+		options.MaxStartJitterInterval = config.TimerProcessorFailoverMaxStartJitterInterval
 	} else {
 		options.EnableSplit = config.QueueProcessorEnableSplit
 		options.SplitMaxLevel = config.QueueProcessorSplitMaxLevel
@@ -664,6 +672,8 @@ func newTimerQueueProcessorOptions(
 
 		options.EnablePersistQueueStates = config.QueueProcessorEnablePersistQueueStates
 		options.EnableLoadQueueStates = config.QueueProcessorEnableLoadQueueStates
+
+		options.MaxStartJitterInterval = dynamicconfig.GetDurationPropertyFn(0)
 	}
 
 	if isActive {

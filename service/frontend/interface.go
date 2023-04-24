@@ -45,6 +45,8 @@ type (
 		ListDomains(context.Context, *types.ListDomainsRequest) (*types.ListDomainsResponse, error)
 		ListOpenWorkflowExecutions(context.Context, *types.ListOpenWorkflowExecutionsRequest) (*types.ListOpenWorkflowExecutionsResponse, error)
 		ListTaskListPartitions(context.Context, *types.ListTaskListPartitionsRequest) (*types.ListTaskListPartitionsResponse, error)
+		GetTaskListsByDomain(context.Context, *types.GetTaskListsByDomainRequest) (*types.GetTaskListsByDomainResponse, error)
+		RefreshWorkflowTasks(context.Context, *types.RefreshWorkflowTasksRequest) error
 		ListWorkflowExecutions(context.Context, *types.ListWorkflowExecutionsRequest) (*types.ListWorkflowExecutionsResponse, error)
 		PollForActivityTask(context.Context, *types.PollForActivityTaskRequest) (*types.PollForActivityTaskResponse, error)
 		PollForDecisionTask(context.Context, *types.PollForDecisionTaskRequest) (*types.PollForDecisionTaskResponse, error)
@@ -64,6 +66,7 @@ type (
 		RespondDecisionTaskCompleted(context.Context, *types.RespondDecisionTaskCompletedRequest) (*types.RespondDecisionTaskCompletedResponse, error)
 		RespondDecisionTaskFailed(context.Context, *types.RespondDecisionTaskFailedRequest) error
 		RespondQueryTaskCompleted(context.Context, *types.RespondQueryTaskCompletedRequest) error
+		RestartWorkflowExecution(context.Context, *types.RestartWorkflowExecutionRequest) (*types.RestartWorkflowExecutionResponse, error)
 		ScanWorkflowExecutions(context.Context, *types.ListWorkflowExecutionsRequest) (*types.ListWorkflowExecutionsResponse, error)
 		SignalWithStartWorkflowExecution(context.Context, *types.SignalWithStartWorkflowExecutionRequest) (*types.StartWorkflowExecutionResponse, error)
 		SignalWorkflowExecution(context.Context, *types.SignalWorkflowExecutionRequest) error

@@ -27,12 +27,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/golang/mock/gomock"
+	"github.com/pborman/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/uber/cadence/common/cache"
+	"github.com/uber/cadence/common/cluster"
 	"github.com/uber/cadence/common/dynamicconfig"
 	"github.com/uber/cadence/common/log/loggerimpl"
 	"github.com/uber/cadence/common/log/tag"
@@ -46,7 +47,7 @@ func TestDeliverBufferTasks(t *testing.T) {
 
 	tests := []func(tlm *taskListManagerImpl){
 		func(tlm *taskListManagerImpl) { close(tlm.taskReader.taskBuffer) },
-		func(tlm *taskListManagerImpl) { close(tlm.taskReader.dispatcherShutdownC) },
+		func(tlm *taskListManagerImpl) { tlm.taskReader.cancelFunc() },
 		func(tlm *taskListManagerImpl) {
 			rps := 0.1
 			tlm.matcher.UpdateRatelimit(&rps)
@@ -93,9 +94,8 @@ func TestReadLevelForAllExpiredTasksInBatch(t *testing.T) {
 
 	tlm := createTestTaskListManager(controller)
 	tlm.db.rangeID = int64(1)
-	tlm.db.ackLevel = int64(0)
-	tlm.taskAckManager.SetAckLevel(tlm.db.ackLevel)
-	tlm.taskAckManager.SetReadLevel(tlm.db.ackLevel)
+	tlm.taskAckManager.SetAckLevel(0)
+	tlm.taskAckManager.SetReadLevel(0)
 	require.Equal(t, int64(0), tlm.taskAckManager.GetAckLevel())
 	require.Equal(t, int64(0), tlm.taskAckManager.GetReadLevel())
 
@@ -113,7 +113,7 @@ func TestReadLevelForAllExpiredTasksInBatch(t *testing.T) {
 		},
 	}
 
-	require.True(t, tlm.taskReader.addTasksToBuffer(tasks, time.Now(), time.NewTimer(time.Minute)))
+	require.True(t, tlm.taskReader.addTasksToBuffer(tasks))
 	require.Equal(t, int64(0), tlm.taskAckManager.GetAckLevel())
 	require.Equal(t, int64(12), tlm.taskAckManager.GetReadLevel())
 
@@ -129,7 +129,7 @@ func TestReadLevelForAllExpiredTasksInBatch(t *testing.T) {
 			Expiry:      time.Now().Add(time.Hour),
 			CreatedTime: time.Now().Add(time.Minute),
 		},
-	}, time.Now(), time.NewTimer(time.Minute)))
+	}))
 	require.Equal(t, int64(0), tlm.taskAckManager.GetAckLevel())
 	require.Equal(t, int64(14), tlm.taskAckManager.GetReadLevel())
 }
@@ -161,17 +161,6 @@ func createTestTaskListManagerWithConfig(controller *gomock.Controller, cfg *Con
 	return tlMgr.(*taskListManagerImpl)
 }
 
-func TestIsTaskAddedRecently(t *testing.T) {
-	controller := gomock.NewController(t)
-	defer controller.Finish()
-
-	tlm := createTestTaskListManager(controller)
-	require.True(t, tlm.taskReader.isTaskAddedRecently(time.Now()))
-	require.False(t, tlm.taskReader.isTaskAddedRecently(time.Now().Add(-tlm.config.MaxTasklistIdleTime())))
-	require.True(t, tlm.taskReader.isTaskAddedRecently(time.Now().Add(1*time.Second)))
-	require.False(t, tlm.taskReader.isTaskAddedRecently(time.Time{}))
-}
-
 func TestDescribeTaskList(t *testing.T) {
 	controller := gomock.NewController(t)
 	defer controller.Finish()
@@ -183,8 +172,7 @@ func TestDescribeTaskList(t *testing.T) {
 	// Create taskList Manager and set taskList state
 	tlm := createTestTaskListManager(controller)
 	tlm.db.rangeID = int64(1)
-	tlm.db.ackLevel = int64(0)
-	tlm.taskAckManager.SetAckLevel(tlm.db.ackLevel)
+	tlm.taskAckManager.SetAckLevel(0)
 
 	for i := int64(0); i < taskCount; i++ {
 		err := tlm.taskAckManager.ReadItem(startTaskID + i)
@@ -235,6 +223,7 @@ func TestDescribeTaskList(t *testing.T) {
 
 func tlMgrStartWithoutNotifyEvent(tlm *taskListManagerImpl) {
 	// mimic tlm.Start() but avoid calling notifyEvent
+	tlm.liveness.Start()
 	tlm.startWG.Done()
 	go tlm.taskReader.dispatchBufferedTasks()
 	go tlm.taskReader.getTasksPump()
@@ -255,21 +244,100 @@ func TestCheckIdleTaskList(t *testing.T) {
 
 	// Active poll-er
 	tlm = createTestTaskListManagerWithConfig(controller, cfg)
-	tlm.pollerHistory.updatePollerInfo(pollerIdentity("test-poll"), nil)
-	require.Equal(t, 1, len(tlm.GetAllPollerInfo()))
 	tlMgrStartWithoutNotifyEvent(tlm)
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(8 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
+	_, _ = tlm.GetTask(ctx, nil)
+	cancel()
+	time.Sleep(6 * time.Millisecond)
 	require.Equal(t, int32(0), tlm.stopped)
 	tlm.Stop()
 	require.Equal(t, int32(1), tlm.stopped)
 
 	// Active adding task
+	domainID := uuid.New()
+	workflowID := "some random workflowID"
+	runID := "some random runID"
+
+	addTaskParam := addTaskParams{
+		execution: &types.WorkflowExecution{
+			WorkflowID: workflowID,
+			RunID:      runID,
+		},
+		taskInfo: &persistence.TaskInfo{
+			DomainID:               domainID,
+			WorkflowID:             workflowID,
+			RunID:                  runID,
+			ScheduleID:             2,
+			ScheduleToStartTimeout: 5,
+			CreatedTime:            time.Now(),
+		},
+	}
 	tlm = createTestTaskListManagerWithConfig(controller, cfg)
-	require.Equal(t, 0, len(tlm.GetAllPollerInfo()))
 	tlMgrStartWithoutNotifyEvent(tlm)
-	tlm.taskReader.Signal()
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(8 * time.Millisecond)
+	ctx, cancel = context.WithTimeout(context.Background(), time.Microsecond)
+	_, _ = tlm.AddTask(ctx, addTaskParam)
+	cancel()
+	time.Sleep(6 * time.Millisecond)
 	require.Equal(t, int32(0), tlm.stopped)
 	tlm.Stop()
 	require.Equal(t, int32(1), tlm.stopped)
+}
+
+func TestAddTaskStandby(t *testing.T) {
+	controller := gomock.NewController(t)
+	defer controller.Finish()
+
+	cfg := NewConfig(dynamicconfig.NewNopCollection())
+	cfg.IdleTasklistCheckInterval = dynamicconfig.GetDurationPropertyFnFilteredByTaskListInfo(10 * time.Millisecond)
+
+	tlm := createTestTaskListManagerWithConfig(controller, cfg)
+	tlMgrStartWithoutNotifyEvent(tlm)
+	// stop taskWriter so that we can check if there's any call to it
+	// otherwise the task persist process is async and hard to test
+	tlm.taskWriter.Stop()
+
+	domainID := uuid.New()
+	workflowID := "some random workflowID"
+	runID := "some random runID"
+
+	addTaskParam := addTaskParams{
+		execution: &types.WorkflowExecution{
+			WorkflowID: workflowID,
+			RunID:      runID,
+		},
+		taskInfo: &persistence.TaskInfo{
+			DomainID:               domainID,
+			WorkflowID:             workflowID,
+			RunID:                  runID,
+			ScheduleID:             2,
+			ScheduleToStartTimeout: 5,
+			CreatedTime:            time.Now(),
+		},
+	}
+
+	testStandbyDomainEntry := cache.NewGlobalDomainCacheEntryForTest(
+		&persistence.DomainInfo{ID: domainID, Name: "some random domain name"},
+		&persistence.DomainConfig{Retention: 1},
+		&persistence.DomainReplicationConfig{
+			ActiveClusterName: cluster.TestAlternativeClusterName,
+			Clusters: []*persistence.ClusterReplicationConfig{
+				{ClusterName: cluster.TestCurrentClusterName},
+				{ClusterName: cluster.TestAlternativeClusterName},
+			},
+		},
+		1234,
+	)
+	mockDomainCache := tlm.domainCache.(*cache.MockDomainCache)
+	mockDomainCache.EXPECT().GetDomainByID(domainID).Return(testStandbyDomainEntry, nil).AnyTimes()
+
+	syncMatch, err := tlm.AddTask(context.Background(), addTaskParam)
+	require.Equal(t, errShutdown, err) // task writer was stopped above
+	require.False(t, syncMatch)
+
+	addTaskParam.forwardedFrom = "from child partition"
+	syncMatch, err = tlm.AddTask(context.Background(), addTaskParam)
+	require.Error(t, err) // should not persist the task
+	require.False(t, syncMatch)
 }

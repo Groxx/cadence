@@ -250,7 +250,7 @@ func (h *historyArchiverSuite) TestArchive_Fail_HistoryMutated() {
 		{
 			Events: []*types.HistoryEvent{
 				{
-					EventID:   common.FirstEventID + 1,
+					ID:        common.FirstEventID + 1,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   testCloseFailoverVersion + 1,
 				},
@@ -312,6 +312,54 @@ func (h *historyArchiverSuite) TestArchive_Fail_NonRetriableErrorOption() {
 	h.Equal(errUploadNonRetriable, err)
 }
 
+func (h *historyArchiverSuite) TestArchive_Skip() {
+	ctx := context.Background()
+	mockCtrl := gomock.NewController(h.T())
+	URI, err := archiver.NewURI("gs://my-bucket-cad/cadence_archival/development")
+	h.NoError(err)
+	storageWrapper := &mocks.Client{}
+	storageWrapper.On("Exist", ctx, URI, mock.Anything).Return(true, nil)
+	storageWrapper.On("Upload", ctx, URI, mock.Anything, mock.Anything).Return(nil)
+
+	defer mockCtrl.Finish()
+	historyIterator := archiver.NewMockHistoryIterator(mockCtrl)
+	historyBlob := &archiver.HistoryBlob{
+		Header: &archiver.HistoryBlobHeader{
+			IsLast: common.BoolPtr(false),
+		},
+		Body: []*types.History{
+			{
+				Events: []*types.HistoryEvent{
+					{
+						ID:        common.FirstEventID,
+						Timestamp: common.Int64Ptr(time.Now().UnixNano()),
+						Version:   testCloseFailoverVersion,
+					},
+				},
+			},
+		},
+	}
+	gomock.InOrder(
+		historyIterator.EXPECT().HasNext().Return(true),
+		historyIterator.EXPECT().Next().Return(historyBlob, nil),
+		historyIterator.EXPECT().HasNext().Return(true),
+		historyIterator.EXPECT().Next().Return(nil, &types.EntityNotExistsError{Message: "workflow not found"}),
+	)
+
+	historyArchiver := newHistoryArchiver(h.container, historyIterator, storageWrapper)
+	request := &archiver.ArchiveHistoryRequest{
+		DomainID:             testDomainID,
+		DomainName:           testDomainName,
+		WorkflowID:           testWorkflowID,
+		RunID:                testRunID,
+		BranchToken:          testBranchToken,
+		NextEventID:          testNextEventID,
+		CloseFailoverVersion: testCloseFailoverVersion,
+	}
+	err = historyArchiver.Archive(ctx, h.testArchivalURI, request)
+	h.NoError(err)
+}
+
 func (h *historyArchiverSuite) TestArchive_Success() {
 
 	ctx := context.Background()
@@ -327,12 +375,12 @@ func (h *historyArchiverSuite) TestArchive_Success() {
 		{
 			Events: []*types.HistoryEvent{
 				{
-					EventID:   common.FirstEventID + 1,
+					ID:        common.FirstEventID + 1,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   testCloseFailoverVersion,
 				},
 				{
-					EventID:   common.FirstEventID + 2,
+					ID:        common.FirstEventID + 2,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   testCloseFailoverVersion,
 				},
@@ -341,7 +389,7 @@ func (h *historyArchiverSuite) TestArchive_Success() {
 		{
 			Events: []*types.HistoryEvent{
 				{
-					EventID:   testNextEventID - 1,
+					ID:        testNextEventID - 1,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   testCloseFailoverVersion,
 				},
@@ -504,6 +552,7 @@ func (h *historyArchiverSuite) TestGet_Success_FromToken() {
 	ctx := context.Background()
 	mockCtrl := gomock.NewController(h.T())
 	URI, err := archiver.NewURI("gs://my-bucket-cad/cadence_archival/development")
+	h.Require().NoError(err)
 	storageWrapper := &mocks.Client{}
 	storageWrapper.On("Exist", ctx, URI, "").Return(true, nil).Times(1)
 	storageWrapper.On("Query", ctx, URI, "71817125141568232911739672280485489488911532452831150339470").Return([]string{"905702227796330300141628222723188294514017512010591354159_-24_0.history", "905702227796330300141628222723188294514017512010591354159_-24_1.history", "905702227796330300141628222723188294514017512010591354159_-24_2.history", "905702227796330300141628222723188294514017512010591354159_-24_3.history", "905702227796330300141628222723188294514017512010591354159_-25_0.history"}, nil).Times(1)

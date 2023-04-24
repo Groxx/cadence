@@ -62,30 +62,29 @@ func (s *fileBasedClientSuite) SetupTest() {
 }
 
 func (s *fileBasedClientSuite) TestGetValue() {
-	v, err := s.client.GetValue(testGetBoolPropertyKey, true)
+	v, err := s.client.GetValue(TestGetBoolPropertyKey)
 	s.NoError(err)
 	s.Equal(false, v)
 }
 
 func (s *fileBasedClientSuite) TestGetValue_NonExistKey() {
-	defaultValue := true
-	v, err := s.client.GetValue(lastKeyForTest, defaultValue)
+	v, err := s.client.GetValue(EnableVisibilitySampling)
 	s.Error(err)
-	s.Equal(defaultValue, v)
+	s.Equal(EnableVisibilitySampling.DefaultBool(), v)
 }
 
 func (s *fileBasedClientSuite) TestGetValueWithFilters() {
 	filters := map[Filter]interface{}{
 		DomainName: "global-samples-domain",
 	}
-	v, err := s.client.GetValueWithFilters(testGetBoolPropertyKey, filters, false)
+	v, err := s.client.GetValueWithFilters(TestGetBoolPropertyKey, filters)
 	s.NoError(err)
 	s.Equal(true, v)
 
 	filters = map[Filter]interface{}{
 		DomainName: "non-exist-domain",
 	}
-	v, err = s.client.GetValueWithFilters(testGetBoolPropertyKey, filters, true)
+	v, err = s.client.GetValueWithFilters(TestGetBoolPropertyKey, filters)
 	s.NoError(err)
 	s.Equal(false, v)
 
@@ -93,7 +92,7 @@ func (s *fileBasedClientSuite) TestGetValueWithFilters() {
 		DomainName:   "samples-domain",
 		TaskListName: "non-exist-tasklist",
 	}
-	v, err = s.client.GetValueWithFilters(testGetBoolPropertyKey, filters, false)
+	v, err = s.client.GetValueWithFilters(TestGetBoolPropertyKey, filters)
 	s.NoError(err)
 	s.Equal(true, v)
 }
@@ -101,15 +100,15 @@ func (s *fileBasedClientSuite) TestGetValueWithFilters() {
 func (s *fileBasedClientSuite) TestGetValueWithFilters_UnknownFilter() {
 	filters := map[Filter]interface{}{
 		DomainName:    "global-samples-domain1",
-		unknownFilter: "unknown-filter1",
+		UnknownFilter: "unknown-filter1",
 	}
-	v, err := s.client.GetValueWithFilters(testGetBoolPropertyKey, filters, false)
+	v, err := s.client.GetValueWithFilters(TestGetBoolPropertyKey, filters)
 	s.NoError(err)
 	s.Equal(false, v)
 }
 
 func (s *fileBasedClientSuite) TestGetIntValue() {
-	v, err := s.client.GetIntValue(testGetIntPropertyKey, nil, 1)
+	v, err := s.client.GetIntValue(TestGetIntPropertyKey, nil)
 	s.NoError(err)
 	s.Equal(1000, v)
 }
@@ -118,23 +117,22 @@ func (s *fileBasedClientSuite) TestGetIntValue_FilterNotMatch() {
 	filters := map[Filter]interface{}{
 		DomainName: "samples-domain",
 	}
-	v, err := s.client.GetIntValue(testGetIntPropertyKey, filters, 500)
+	v, err := s.client.GetIntValue(TestGetIntPropertyKey, filters)
 	s.NoError(err)
 	s.Equal(1000, v)
 }
 
 func (s *fileBasedClientSuite) TestGetIntValue_WrongType() {
-	defaultValue := 2000
 	filters := map[Filter]interface{}{
 		DomainName: "global-samples-domain",
 	}
-	v, err := s.client.GetIntValue(testGetIntPropertyKey, filters, defaultValue)
+	v, err := s.client.GetIntValue(TestGetIntPropertyKey, filters)
 	s.Error(err)
-	s.Equal(defaultValue, v)
+	s.Equal(TestGetIntPropertyKey.DefaultInt(), v)
 }
 
 func (s *fileBasedClientSuite) TestGetFloatValue() {
-	v, err := s.client.GetFloatValue(testGetFloat64PropertyKey, nil, 1)
+	v, err := s.client.GetFloatValue(TestGetFloat64PropertyKey, nil)
 	s.NoError(err)
 	s.Equal(12.0, v)
 }
@@ -143,14 +141,13 @@ func (s *fileBasedClientSuite) TestGetFloatValue_WrongType() {
 	filters := map[Filter]interface{}{
 		DomainName: "samples-domain",
 	}
-	defaultValue := 1.0
-	v, err := s.client.GetFloatValue(testGetFloat64PropertyKey, filters, defaultValue)
+	v, err := s.client.GetFloatValue(TestGetFloat64PropertyKey, filters)
 	s.Error(err)
-	s.Equal(defaultValue, v)
+	s.Equal(TestGetFloat64PropertyKey.DefaultFloat(), v)
 }
 
 func (s *fileBasedClientSuite) TestGetBoolValue() {
-	v, err := s.client.GetBoolValue(testGetBoolPropertyKey, nil, true)
+	v, err := s.client.GetBoolValue(TestGetBoolPropertyKey, nil)
 	s.NoError(err)
 	s.Equal(false, v)
 }
@@ -159,14 +156,13 @@ func (s *fileBasedClientSuite) TestGetStringValue() {
 	filters := map[Filter]interface{}{
 		TaskListName: "random tasklist",
 	}
-	v, err := s.client.GetStringValue(testGetStringPropertyKey, filters, "defaultString")
+	v, err := s.client.GetStringValue(TestGetStringPropertyKey, filters)
 	s.NoError(err)
 	s.Equal("constrained-string", v)
 }
 
 func (s *fileBasedClientSuite) TestGetMapValue() {
-	var defaultVal map[string]interface{}
-	v, err := s.client.GetMapValue(testGetMapPropertyKey, nil, defaultVal)
+	v, err := s.client.GetMapValue(TestGetMapPropertyKey, nil)
 	s.NoError(err)
 	expectedVal := map[string]interface{}{
 		"key1": "1",
@@ -183,17 +179,16 @@ func (s *fileBasedClientSuite) TestGetMapValue() {
 }
 
 func (s *fileBasedClientSuite) TestGetMapValue_WrongType() {
-	var defaultVal map[string]interface{}
 	filters := map[Filter]interface{}{
 		TaskListName: "random tasklist",
 	}
-	v, err := s.client.GetMapValue(testGetMapPropertyKey, filters, defaultVal)
+	v, err := s.client.GetMapValue(TestGetMapPropertyKey, filters)
 	s.Error(err)
-	s.Equal(defaultVal, v)
+	s.Equal(TestGetMapPropertyKey.DefaultMap(), v)
 }
 
 func (s *fileBasedClientSuite) TestGetDurationValue() {
-	v, err := s.client.GetDurationValue(testGetDurationPropertyKey, nil, time.Second)
+	v, err := s.client.GetDurationValue(TestGetDurationPropertyKey, nil)
 	s.NoError(err)
 	s.Equal(time.Minute, v)
 }
@@ -202,9 +197,9 @@ func (s *fileBasedClientSuite) TestGetDurationValue_NotStringRepresentation() {
 	filters := map[Filter]interface{}{
 		DomainName: "samples-domain",
 	}
-	v, err := s.client.GetDurationValue(testGetDurationPropertyKey, filters, time.Second)
+	v, err := s.client.GetDurationValue(TestGetDurationPropertyKey, filters)
 	s.Error(err)
-	s.Equal(time.Second, v)
+	s.Equal(TestGetDurationPropertyKey.DefaultDuration(), v)
 }
 
 func (s *fileBasedClientSuite) TestGetDurationValue_ParseFailed() {
@@ -212,9 +207,9 @@ func (s *fileBasedClientSuite) TestGetDurationValue_ParseFailed() {
 		DomainName:   "samples-domain",
 		TaskListName: "longIdleTimeTasklist",
 	}
-	v, err := s.client.GetDurationValue(testGetDurationPropertyKey, filters, time.Second)
+	v, err := s.client.GetDurationValue(TestGetDurationPropertyKey, filters)
 	s.Error(err)
-	s.Equal(time.Second, v)
+	s.Equal(TestGetDurationPropertyKey.DefaultDuration(), v)
 }
 
 func (s *fileBasedClientSuite) TestValidateConfig_ConfigNotExist() {
@@ -231,11 +226,14 @@ func (s *fileBasedClientSuite) TestValidateConfig_FileNotExist() {
 }
 
 func (s *fileBasedClientSuite) TestValidateConfig_ShortPollInterval() {
-	_, err := NewFileBasedClient(&FileBasedClientConfig{
+	cfg := &FileBasedClientConfig{
 		Filepath:     "config/testConfig.yaml",
 		PollInterval: time.Second,
-	}, nil, nil)
-	s.Error(err)
+	}
+	_, err := NewFileBasedClient(cfg, log.NewNoop(), nil)
+	s.NoError(err)
+	s.Equal(minPollInterval, cfg.PollInterval, "fallback to default poll interval")
+
 }
 
 func (s *fileBasedClientSuite) TestMatch() {
@@ -319,7 +317,7 @@ func (s *fileBasedClientSuite) TestUpdateConfig() {
 	key := ValidSearchAttributes
 
 	// pre-check existing config
-	current, err := client.GetMapValue(key, nil, nil)
+	current, err := client.GetMapValue(key, nil)
 	s.NoError(err)
 	currentDomainVal, ok := current["DomainID"]
 	s.True(ok)
@@ -336,7 +334,7 @@ func (s *fileBasedClientSuite) TestUpdateConfig() {
 	s.NoError(err)
 
 	// verify update result
-	current, err = client.GetMapValue(key, nil, nil)
+	current, err = client.GetMapValue(key, nil)
 	s.NoError(err)
 	currentDomainVal, ok = current["DomainID"]
 	s.True(ok)

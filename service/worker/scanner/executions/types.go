@@ -30,6 +30,7 @@ import (
 
 	"github.com/uber/cadence/service/worker/scanner/shardscanner"
 
+	"github.com/uber/cadence/common/cache"
 	"github.com/uber/cadence/common/pagination"
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/reconciliation/entity"
@@ -49,7 +50,7 @@ type ScanType int
 
 type (
 	//InvariantFactory represents a function which returns Invariant
-	InvariantFactory func(retryer persistence.Retryer) invariant.Invariant
+	InvariantFactory func(retryer persistence.Retryer, domainCache cache.DomainCache) invariant.Invariant
 
 	//ExecutionFetcher represents a function which returns specific execution entity
 	ExecutionFetcher func(ctx context.Context, retryer persistence.Retryer, request fetcher.ExecutionRequest) (entity.Entity, error)
@@ -97,6 +98,8 @@ func (st ScanType) ToInvariants(collections []invariant.Collection) []InvariantF
 	case ConcreteExecutionType:
 		for _, collection := range collections {
 			switch collection {
+			case invariant.CollectionDomain:
+				fns = append(fns, invariant.NewInactiveDomainExists)
 			case invariant.CollectionHistory:
 				fns = append(fns, invariant.NewHistoryExists)
 			case invariant.CollectionMutableState:

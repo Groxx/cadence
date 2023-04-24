@@ -37,18 +37,18 @@ import (
 // that drains backlog from db. Consumers are the task list pollers
 type TaskMatcher struct {
 	// synchronous task channel to match producer/consumer
-	taskC chan *internalTask
+	taskC chan *InternalTask
 	// synchronous task channel to match query task - the reason to have
 	// separate channel for this is because there are cases when consumers
 	// are interested in queryTasks but not others. Example is when domain is
 	// not active in a cluster
-	queryTaskC chan *internalTask
+	queryTaskC chan *InternalTask
 	// ratelimiter that limits the rate at which tasks can be dispatched to consumers
 	limiter *quotas.RateLimiter
 
 	fwdr          *Forwarder
-	scope         func() metrics.Scope // domain metric scope
-	numPartitions func() int           // number of task list partitions
+	scope         metrics.Scope // domain metric scope
+	numPartitions func() int    // number of task list partitions
 }
 
 const (
@@ -61,15 +61,15 @@ var errTasklistThrottled = errors.New("cannot add to tasklist, limit exceeded")
 // newTaskMatcher returns an task matcher instance. The returned instance can be
 // used by task producers and consumers to find a match. Both sync matches and non-sync
 // matches should use this implementation
-func newTaskMatcher(config *taskListConfig, fwdr *Forwarder, scopeFunc func() metrics.Scope) *TaskMatcher {
+func newTaskMatcher(config *taskListConfig, fwdr *Forwarder, scope metrics.Scope) *TaskMatcher {
 	dPtr := _defaultTaskDispatchRPS
 	limiter := quotas.NewRateLimiter(&dPtr, _defaultTaskDispatchRPSTTL, config.MinTaskThrottlingBurstSize())
 	return &TaskMatcher{
 		limiter:       limiter,
-		scope:         scopeFunc,
+		scope:         scope,
 		fwdr:          fwdr,
-		taskC:         make(chan *internalTask),
-		queryTaskC:    make(chan *internalTask),
+		taskC:         make(chan *InternalTask),
+		queryTaskC:    make(chan *InternalTask),
 		numPartitions: config.NumReadPartitions,
 	}
 }
@@ -100,16 +100,16 @@ func newTaskMatcher(config *taskListConfig, fwdr *Forwarder, scopeFunc func() me
 // correct context timeout.
 //
 // returns error when:
-//  - ratelimit is exceeded (does not apply to query task)
-//  - context deadline is exceeded
-//  - task is matched and consumer returns error in response channel
-func (tm *TaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, error) {
+//   - ratelimit is exceeded (does not apply to query task)
+//   - context deadline is exceeded
+//   - task is matched and consumer returns error in response channel
+func (tm *TaskMatcher) Offer(ctx context.Context, task *InternalTask) (bool, error) {
 	var err error
 	var rsv *rate.Reservation
 	if !task.isForwarded() {
 		rsv, err = tm.ratelimit(ctx)
 		if err != nil {
-			tm.scope().IncCounter(metrics.SyncThrottlePerTaskListCounter)
+			tm.scope.IncCounter(metrics.SyncThrottlePerTaskListCounter)
 			return false, err
 		}
 	}
@@ -153,7 +153,7 @@ func (tm *TaskMatcher) Offer(ctx context.Context, task *internalTask) (bool, err
 	}
 }
 
-func (tm *TaskMatcher) offerOrTimeout(ctx context.Context, task *internalTask) (bool, error) {
+func (tm *TaskMatcher) offerOrTimeout(ctx context.Context, task *InternalTask) (bool, error) {
 	select {
 	case tm.taskC <- task: // poller picked up the task
 		if task.responseC != nil {
@@ -164,7 +164,7 @@ func (tm *TaskMatcher) offerOrTimeout(ctx context.Context, task *internalTask) (
 				return false, nil
 			}
 		}
-		return false, nil
+		return task.activityTaskDispatchInfo != nil, nil
 	case <-ctx.Done():
 		return false, nil
 	}
@@ -173,7 +173,7 @@ func (tm *TaskMatcher) offerOrTimeout(ctx context.Context, task *internalTask) (
 // OfferQuery will either match task to local poller or will forward query task.
 // Local match is always attempted before forwarding is attempted. If local match occurs
 // response and error are both nil, if forwarding occurs then response or error is returned.
-func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *internalTask) (*types.QueryWorkflowResponse, error) {
+func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *InternalTask) (*types.QueryWorkflowResponse, error) {
 	select {
 	case tm.queryTaskC <- task:
 		<-task.responseC
@@ -210,7 +210,7 @@ func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *internalTask) (*typ
 // MustOffer blocks until a consumer is found to handle this task
 // Returns error only when context is canceled or the ratelimit is set to zero (allow nothing)
 // The passed in context MUST NOT have a deadline associated with it
-func (tm *TaskMatcher) MustOffer(ctx context.Context, task *internalTask) error {
+func (tm *TaskMatcher) MustOffer(ctx context.Context, task *InternalTask) error {
 	if _, err := tm.ratelimit(ctx); err != nil {
 		return err
 	}
@@ -266,7 +266,7 @@ forLoop:
 // Poll blocks until a task is found or context deadline is exceeded
 // On success, the returned task could be a query task or a regular task
 // Returns ErrNoTasks when context deadline is exceeded
-func (tm *TaskMatcher) Poll(ctx context.Context) (*internalTask, error) {
+func (tm *TaskMatcher) Poll(ctx context.Context) (*InternalTask, error) {
 	// try local match first without blocking until context timeout
 	if task, err := tm.pollNonBlocking(ctx, tm.taskC, tm.queryTaskC); err == nil {
 		return task, nil
@@ -279,7 +279,7 @@ func (tm *TaskMatcher) Poll(ctx context.Context) (*internalTask, error) {
 
 // PollForQuery blocks until a *query* task is found or context deadline is exceeded
 // Returns ErrNoTasks when context deadline is exceeded
-func (tm *TaskMatcher) PollForQuery(ctx context.Context) (*internalTask, error) {
+func (tm *TaskMatcher) PollForQuery(ctx context.Context) (*InternalTask, error) {
 	// try local match first without blocking until context timeout
 	if task, err := tm.pollNonBlocking(ctx, nil, tm.queryTaskC); err == nil {
 		return task, nil
@@ -311,22 +311,22 @@ func (tm *TaskMatcher) Rate() float64 {
 
 func (tm *TaskMatcher) pollOrForward(
 	ctx context.Context,
-	taskC <-chan *internalTask,
-	queryTaskC <-chan *internalTask,
-) (*internalTask, error) {
+	taskC <-chan *InternalTask,
+	queryTaskC <-chan *InternalTask,
+) (*InternalTask, error) {
 	select {
 	case task := <-taskC:
 		if task.responseC != nil {
-			tm.scope().IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
+			tm.scope.IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
 		}
-		tm.scope().IncCounter(metrics.PollSuccessPerTaskListCounter)
+		tm.scope.IncCounter(metrics.PollSuccessPerTaskListCounter)
 		return task, nil
 	case task := <-queryTaskC:
-		tm.scope().IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
-		tm.scope().IncCounter(metrics.PollSuccessPerTaskListCounter)
+		tm.scope.IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
+		tm.scope.IncCounter(metrics.PollSuccessPerTaskListCounter)
 		return task, nil
 	case <-ctx.Done():
-		tm.scope().IncCounter(metrics.PollTimeoutPerTaskListCounter)
+		tm.scope.IncCounter(metrics.PollTimeoutPerTaskListCounter)
 		return nil, ErrNoTasks
 	case token := <-tm.fwdrPollReqTokenC():
 		if task, err := tm.fwdr.ForwardPoll(ctx); err == nil {
@@ -340,41 +340,41 @@ func (tm *TaskMatcher) pollOrForward(
 
 func (tm *TaskMatcher) poll(
 	ctx context.Context,
-	taskC <-chan *internalTask,
-	queryTaskC <-chan *internalTask,
-) (*internalTask, error) {
+	taskC <-chan *InternalTask,
+	queryTaskC <-chan *InternalTask,
+) (*InternalTask, error) {
 	select {
 	case task := <-taskC:
 		if task.responseC != nil {
-			tm.scope().IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
+			tm.scope.IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
 		}
-		tm.scope().IncCounter(metrics.PollSuccessPerTaskListCounter)
+		tm.scope.IncCounter(metrics.PollSuccessPerTaskListCounter)
 		return task, nil
 	case task := <-queryTaskC:
-		tm.scope().IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
-		tm.scope().IncCounter(metrics.PollSuccessPerTaskListCounter)
+		tm.scope.IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
+		tm.scope.IncCounter(metrics.PollSuccessPerTaskListCounter)
 		return task, nil
 	case <-ctx.Done():
-		tm.scope().IncCounter(metrics.PollTimeoutPerTaskListCounter)
+		tm.scope.IncCounter(metrics.PollTimeoutPerTaskListCounter)
 		return nil, ErrNoTasks
 	}
 }
 
 func (tm *TaskMatcher) pollNonBlocking(
 	ctx context.Context,
-	taskC <-chan *internalTask,
-	queryTaskC <-chan *internalTask,
-) (*internalTask, error) {
+	taskC <-chan *InternalTask,
+	queryTaskC <-chan *InternalTask,
+) (*InternalTask, error) {
 	select {
 	case task := <-taskC:
 		if task.responseC != nil {
-			tm.scope().IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
+			tm.scope.IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
 		}
-		tm.scope().IncCounter(metrics.PollSuccessPerTaskListCounter)
+		tm.scope.IncCounter(metrics.PollSuccessPerTaskListCounter)
 		return task, nil
 	case task := <-queryTaskC:
-		tm.scope().IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
-		tm.scope().IncCounter(metrics.PollSuccessPerTaskListCounter)
+		tm.scope.IncCounter(metrics.PollSuccessWithSyncPerTaskListCounter)
+		tm.scope.IncCounter(metrics.PollSuccessPerTaskListCounter)
 		return task, nil
 	default:
 		return nil, ErrNoTasks
@@ -412,7 +412,7 @@ func (tm *TaskMatcher) ratelimit(ctx context.Context) (*rate.Reservation, error)
 
 	rsv := tm.limiter.Reserve()
 	// If we have to wait too long for reservation, give up and return
-	if !rsv.OK() || rsv.Delay() > deadline.Sub(time.Now()) {
+	if !rsv.OK() || rsv.Delay() > time.Until(deadline) {
 		if rsv.OK() { // if we were indeed given a reservation, return it before we bail out
 			rsv.Cancel()
 		}

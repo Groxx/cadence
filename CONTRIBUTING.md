@@ -6,6 +6,9 @@ Join our Slack channel(invite link in the [home page](https://github.com/uber/ca
 >Note: All contributors need to fill out the [Uber Contributor License Agreement](http://t.uber.com/cla) before we can merge in any of your changes
 
 ## Development Environment
+Below are the instructions of how to set up a development Environment.
+
+### 1. Building Environment
 
 * Golang. Install on OS X with.
 ```
@@ -29,55 +32,137 @@ go mod download
 After check out and go to the Cadence repo, compile the `cadence` service and helper tools without running test:
 
 ```bash
+git submodule update --init --recursive
+
 make bins
 ``` 
 
->Note: If running into any compiling issue, 
->1. Make sure you upgrade to the latest stable version of Golang.
-> 2. Check if this document is outdated by comparing with the building steps in [Dockerfile](https://github.com/uber/cadence/blob/master/Dockerfile)
-* Database. The default setup of Cadence depends on Cassandra. Before running the Cadence or tests you must have `cassandra` dependency(or equivalent database in the below notes)
+You should be able to get all the binaries of this repo:
+* cadence-server: the server binary
+* cadence: the CLI binary
+* cadence-cassandra-tool: the Cassandra schema tools
+* cadence-sql-tool: the SQL schema tools(for now only supports MySQL and Postgres)
+* cadence-canary: the canary test binary
+* cadence-bench: the benchmark test binary
 
->Note: This section assumes you are working with Cassandra. Please refer to [persistence documentation](https://github.com/uber/cadence/blob/master/docs/persistence.md) if you want to test with others like MySQL/Postgres.
-> Also, you don't need those local stores if you want to connect to your existing staging/QA environment. 
 
-```bash
-# install cassandra
-# you can reduce memory used by cassandra (by default 4GB), by following instructions here: http://codefoundries.com/developer/cassandra/cassandra-installation-mac.html
-brew install cassandra
+:warning: Note: 
 
-# start services
-brew services start cassandra 
-# or 
-cassandra -f
+If running into any compiling issue
+>1. For proto/thrift errors, run `git submodule update --init --recursive` to fix  
+>2. Make sure you upgrade to the latest stable version of Golang.
+>3. Check if this document is outdated by comparing with the building steps in [Dockerfile](https://github.com/uber/cadence/blob/master/Dockerfile)
 
-# after a short while, then use cqlsh to login, to make sure Cassandra is up  
-cqlsh 
-Connected to Test Cluster at 127.0.0.1:9042.
-[cqlsh 5.0.1 | Cassandra 3.11.8 | CQL spec 3.4.4 | Native protocol v4]
-Use HELP for help.
-cqlsh>
+### 2. Setup Dependency
+NOTE: you may skip this section if you have installed the dependencies in any other ways, for example, using homebrew.
+
+Cadence's core data model can be running with different persistence storages, including Cassandra,MySQL and Postgres.
+Please refer to [persistence documentation](https://github.com/uber/cadence/blob/master/docs/persistence.md) if you want to learn more.
+Cadence's visibility data model can be running with either Cassandra/MySQL/Postgres database, or ElasticSearch+Kafka. The latter provides [advanced visibility feature](./docs/visibility-on-elasticsearch.md)
+
+We recommend to use [docker-compose](https://docs.docker.com/compose/) to start those dependencies:
+
+* If you want to start Cassandra dependency, use `./docker/dev/cassandra.yml`:
 ```
->If you are running Cadence on top of [Mysql](docs/setup/MYSQL_SETUP.md) or [Postgres](docs/setup/POSTGRES_SETUP.md), you can follow the instructions to run the SQL DB and then run:
+docker-compose -f ./docker/dev/cassandra.yml up
+```
+You will use `CTRL+C` to stop it. Then `docker-compose -f ./docker/dev/cassandra.yml down` to clean up the resources. 
 
-Now you can setup the database schema
-```bash
-make install-schema
+Or to run in the background
+```
+docker-compose -f ./docker/dev/cassandra.yml up -d 
+```
+Also use `docker-compose -f ./docker/dev/cassandra.yml down` to stop and clean up the resources.
 
-# If you use SQL DB, then run:
-make install-schema-mysql OR make install-schema-postgres
+* Alternatively, use `./docker/dev/mysql.yml` for MySQL dependency
+* Alternatively, use `./docker/dev/postgres.yml` for PostgreSQL dependency 
+* Alternatively, use `./docker/dev/cassandra-esv7-kafka.yml` for Cassandra, ElasticSearch(v7) and Kafka/ZooKeeper dependencies
+* Alternatively, use `./docker/dev/mysql-esv7-kafka.yml` for MySQL, ElasticSearch(v7) and Kafka/ZooKeeper dependencies
+* Alternatively, use `./docker/dev/cassandra-opensearch-kafka.yml` for Cassandra, OpenSearch(compatible with ElasticSearch v7) and Kafka/ZooKeeper dependencies
+* Alternatively, use `./docker/dev/mongo-esv7-kafka.yml` for MongoDB, ElasticSearch(v7) and Kafka/ZooKeeper dependencies
+
+### 3. Schema installation 
+Based on the above dependency setup, you also need to install the schemas. 
+
+* If you use `cassandra.yml` then run `make install-schema` to install Cassandra schemas
+* If you use `cassandra-esv7-kafka.yml` then run `make install-schema && make install-schema-es-v7` to install Cassandra & ElasticSearch schemas
+* If you use `cassandra-opensearch-kafka.yml` then run `make install-schema && make install-schema-es-opensearch` to install Cassandra & OpenSearch schemas 
+* If you use `mysql.yml` then run `install-schema-mysql` to install MySQL schemas
+* If you use `postgres.yml` then run `install-schema-postgres` to install Postgres schemas
+* `mysql-esv7-kafka.yml` can be used for single MySQL + ElasticSearch or multiple MySQL + ElasticSearch mode
+  * for single MySQL: run `install-schema-mysql && make install-schema-es-v7`
+  * for multiple MySQL: run `make install-schema-multiple-mysql` which will install schemas for 4 mysql databases and ElasticSearch 
+
+:warning: Note: 
+>If you use `cassandra-esv7-kafka.yml` and start server before `make install-schema-es-v7`, ElasticSearch may create a wrong index on demand. 
+You will have to delete the wrong index and then run the `make install-schema-es-v7` again. To delete the wrong index:
+```
+curl -X DELETE "http://127.0.0.1:9200/cadence-visibility-dev"
 ```
 
-Then you will be able to run a basic local Cadence server for development:
-```bash
-./cadence-server start
+### 4. Run  
+Once you have done all above, try running the local binaries:
 
-# If you use SQL DB, then run:
-./cadence-server --zone <mysql/postgres> start
+
+Then you will be able to run a basic local Cadence server for development. 
+
+  * If you use `cassandra.yml`, then run `./cadence-server start`, which will load `config/development.yaml` as config  
+  * If you use `mysql.yml` then run `./cadence-server --zone mysql start`, which will load `config/development.yaml` + `config/development_mysql.yaml` as config
+  * If you use `postgres.yml` then run `./cadence-server --zone postgres start` , which will load `config/development.yaml` + `config/development_postgres.yaml` as config  
+  * If you use `cassandra-esv7-kafka.yml` then run `./cadence-server --zone es_v7 start`, which will load `config/development.yaml` + `config/development_es_v7.yaml` as config
+  * If you use `cassandra-opensearch-kafka.yml` then run `./cadence-server --zone es_opensearch start` , which will load `config/development.yaml` + `config/development_es_opensearch.yaml` as config
+  * If you use `mysql-esv7-kafka.yaml` 
+    * To run with multiple MySQL : `./cadence-server --zone multiple_mysql start`, which will load `config/development.yaml` + `config/development_multiple_mysql.yaml` as config
+
+Then register a domain:
+```
+./cadence --do samples-domain domain register
 ```
 
-You can run some workflow [samples](https://github.com/uber-common/cadence-samples) to test the development server.
- 
-> This basic local server doesn't have some features like advanced visibility, archival, which require more dependency than Cassandra/Database and setup. 
+### Sample Repo
+The sample code is available in the [Sample repo]https://github.com/uber-common/cadence-samples
+
+Then run a helloworld from [Go Client Sample](https://github.com/uber-common/cadence-samples/) or [Java Client Sample](https://github.com/uber/cadence-java-samples)
+
+```
+make bins
+```
+will build all the samples. 
+
+Then 
+```
+./bin/helloworld -m worker & 
+``` 
+will start a worker for helloworld workflow.
+You will see like:
+```
+$./bin/helloworld -m worker &
+[1] 16520
+2021-09-24T21:07:03.242-0700	INFO	common/sample_helper.go:109	Logger created.
+2021-09-24T21:07:03.243-0700	DEBUG	common/factory.go:151	Creating RPC dispatcher outbound	{"ServiceName": "cadence-frontend", "HostPort": "127.0.0.1:7933"}
+2021-09-24T21:07:03.250-0700	INFO	common/sample_helper.go:161	Domain successfully registered.	{"Domain": "samples-domain"}
+2021-09-24T21:07:03.291-0700	INFO	internal/internal_worker.go:833	Started Workflow Worker	{"Domain": "samples-domain", "TaskList": "helloWorldGroup", "WorkerID": "16520@IT-USA-25920@helloWorldGroup"}
+2021-09-24T21:07:03.300-0700	INFO	internal/internal_worker.go:858	Started Activity Worker	{"Domain": "samples-domain", "TaskList": "helloWorldGroup", "WorkerID": "16520@IT-USA-25920@helloWorldGroup"}
+``` 
+Then 
+```
+./bin/helloworld
+```
+to start a helloworld workflow.
+You will see the result like :
+```
+$./bin/helloworld
+2021-09-24T21:07:06.220-0700	INFO	common/sample_helper.go:109	Logger created.
+2021-09-24T21:07:06.220-0700	DEBUG	common/factory.go:151	Creating RPC dispatcher outbound	{"ServiceName": "cadence-frontend", "HostPort": "127.0.0.1:7933"}
+2021-09-24T21:07:06.226-0700	INFO	common/sample_helper.go:161	Domain successfully registered.	{"Domain": "samples-domain"}
+2021-09-24T21:07:06.272-0700	INFO	common/sample_helper.go:195	Started Workflow	{"WorkflowID": "helloworld_75cf142b-c0de-407e-9115-1d33e9b7551a", "RunID": "98a229b8-8fdd-4d1f-bf41-df00fb06f441"}
+2021-09-24T21:07:06.347-0700	INFO	helloworld/helloworld_workflow.go:31	helloworld workflow started	{"Domain": "samples-domain", "TaskList": "helloWorldGroup", "WorkerID": "16520@IT-USA-25920@helloWorldGroup", "WorkflowType": "helloWorldWorkflow", "WorkflowID": "helloworld_75cf142b-c0de-407e-9115-1d33e9b7551a", "RunID": "98a229b8-8fdd-4d1f-bf41-df00fb06f441"}
+2021-09-24T21:07:06.347-0700	DEBUG	internal/internal_event_handlers.go:489	ExecuteActivity	{"Domain": "samples-domain", "TaskList": "helloWorldGroup", "WorkerID": "16520@IT-USA-25920@helloWorldGroup", "WorkflowType": "helloWorldWorkflow", "WorkflowID": "helloworld_75cf142b-c0de-407e-9115-1d33e9b7551a", "RunID": "98a229b8-8fdd-4d1f-bf41-df00fb06f441", "ActivityID": "0", "ActivityType": "main.helloWorldActivity"}
+2021-09-24T21:07:06.437-0700	INFO	helloworld/helloworld_workflow.go:62	helloworld activity started	{"Domain": "samples-domain", "TaskList": "helloWorldGroup", "WorkerID": "16520@IT-USA-25920@helloWorldGroup", "ActivityID": "0", "ActivityType": "main.helloWorldActivity", "WorkflowType": "helloWorldWorkflow", "WorkflowID": "helloworld_75cf142b-c0de-407e-9115-1d33e9b7551a", "RunID": "98a229b8-8fdd-4d1f-bf41-df00fb06f441"}
+2021-09-24T21:07:06.513-0700	INFO	helloworld/helloworld_workflow.go:55	Workflow completed.	{"Domain": "samples-domain", "TaskList": "helloWorldGroup", "WorkerID": "16520@IT-USA-25920@helloWorldGroup", "WorkflowType": "helloWorldWorkflow", "WorkflowID": "helloworld_75cf142b-c0de-407e-9115-1d33e9b7551a", "RunID": "98a229b8-8fdd-4d1f-bf41-df00fb06f441", "Result": "Hello Cadence!"}
+```
+
+See [instructions](service/worker/README.md) for setting up replication(XDC). 
 
 ## Issues to start with
 
@@ -132,6 +217,12 @@ go test -v <path> -run <TestSuite> -testify.m <TestSpercificTaskName>
 # example:
 go test -v github.com/uber/cadence/common/persistence/persistence-tests -run TestVisibilitySamplingSuite -testify.m TestListClosedWorkflowExecutions
 ```
+
+## IDL Changes
+
+If you make changes in the idls submodule and want to test them locally, you can easily do that by using go mod to use the local idls directory instead of github.com/uber/cadence-idl. Temporarily add the following to the bottom of go.mod:
+
+```replace github.com/uber/cadence-idl => ./idls```
 
 ## Pull Requests
 After all the preparation you are about to write code and make a Pull Request for the issue.

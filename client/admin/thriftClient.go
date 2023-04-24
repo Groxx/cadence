@@ -54,6 +54,11 @@ func (t thriftClient) DescribeCluster(ctx context.Context, opts ...yarpc.CallOpt
 	return thrift.ToDescribeClusterResponse(response), thrift.ToError(err)
 }
 
+func (t thriftClient) DescribeShardDistribution(ctx context.Context, request *types.DescribeShardDistributionRequest, opts ...yarpc.CallOption) (*types.DescribeShardDistributionResponse, error) {
+	response, err := t.c.DescribeShardDistribution(ctx, thrift.FromDescribeShardDistributionRequest(request), opts...)
+	return thrift.ToDescribeShardDistributionResponse(response), thrift.ToError(err)
+}
+
 func (t thriftClient) DescribeHistoryHost(ctx context.Context, request *types.DescribeHistoryHostRequest, opts ...yarpc.CallOption) (*types.DescribeHistoryHostResponse, error) {
 	response, err := t.c.DescribeHistoryHost(ctx, thrift.FromDescribeHistoryHostRequest(request), opts...)
 	return thrift.ToDescribeHistoryHostResponse(response), thrift.ToError(err)
@@ -99,6 +104,10 @@ func (t thriftClient) PurgeDLQMessages(ctx context.Context, request *types.Purge
 	return thrift.ToError(err)
 }
 
+func (t thriftClient) CountDLQMessages(ctx context.Context, request *types.CountDLQMessagesRequest, opts ...yarpc.CallOption) (*types.CountDLQMessagesResponse, error) {
+	return nil, thrift.ToError(&types.BadRequestError{Message: "Feature not supported on TChannel"})
+}
+
 func (t thriftClient) ReadDLQMessages(ctx context.Context, request *types.ReadDLQMessagesRequest, opts ...yarpc.CallOption) (*types.ReadDLQMessagesResponse, error) {
 	response, err := t.c.ReadDLQMessages(ctx, thrift.FromReadDLQMessagesRequest(request), opts...)
 	return thrift.ToReadDLQMessagesResponse(response), thrift.ToError(err)
@@ -127,4 +136,44 @@ func (t thriftClient) ResendReplicationTasks(ctx context.Context, request *types
 func (t thriftClient) ResetQueue(ctx context.Context, request *types.ResetQueueRequest, opts ...yarpc.CallOption) error {
 	err := t.c.ResetQueue(ctx, thrift.FromResetQueueRequest(request), opts...)
 	return thrift.ToError(err)
+}
+
+func (t thriftClient) GetCrossClusterTasks(ctx context.Context, request *types.GetCrossClusterTasksRequest, opts ...yarpc.CallOption) (*types.GetCrossClusterTasksResponse, error) {
+	response, err := t.c.GetCrossClusterTasks(ctx, thrift.FromGetCrossClusterTasksRequest(request), opts...)
+	return thrift.ToGetCrossClusterTasksResponse(response), thrift.ToError(err)
+}
+
+func (t thriftClient) RespondCrossClusterTasksCompleted(ctx context.Context, request *types.RespondCrossClusterTasksCompletedRequest, opts ...yarpc.CallOption) (*types.RespondCrossClusterTasksCompletedResponse, error) {
+	response, err := t.c.RespondCrossClusterTasksCompleted(ctx, thrift.FromRespondCrossClusterTasksCompletedRequest(request), opts...)
+	return thrift.ToRespondCrossClusterTasksCompletedResponse(response), thrift.ToError(err)
+}
+
+func (t thriftClient) GetDynamicConfig(ctx context.Context, request *types.GetDynamicConfigRequest, opts ...yarpc.CallOption) (*types.GetDynamicConfigResponse, error) {
+	response, err := t.c.GetDynamicConfig(ctx, thrift.FromGetDynamicConfigRequest(request), opts...)
+	return thrift.ToGetDynamicConfigResponse(response), thrift.ToError(err)
+}
+
+func (t thriftClient) UpdateDynamicConfig(ctx context.Context, request *types.UpdateDynamicConfigRequest, opts ...yarpc.CallOption) error {
+	err := t.c.UpdateDynamicConfig(ctx, thrift.FromUpdateDynamicConfigRequest(request), opts...)
+	return thrift.ToError(err)
+}
+
+func (t thriftClient) RestoreDynamicConfig(ctx context.Context, request *types.RestoreDynamicConfigRequest, opts ...yarpc.CallOption) error {
+	err := t.c.RestoreDynamicConfig(ctx, thrift.FromRestoreDynamicConfigRequest(request), opts...)
+	return thrift.ToError(err)
+}
+
+func (t thriftClient) DeleteWorkflow(ctx context.Context, request *types.AdminDeleteWorkflowRequest, opts ...yarpc.CallOption) (*types.AdminDeleteWorkflowResponse, error) {
+	response, err := t.c.DeleteWorkflow(ctx, thrift.FromAdminDeleteWorkflowRequest(request), opts...)
+	return thrift.ToAdminDeleteWorkflowResponse(response), thrift.ToError(err)
+}
+
+func (t thriftClient) MaintainCorruptWorkflow(ctx context.Context, request *types.AdminMaintainWorkflowRequest, opts ...yarpc.CallOption) (*types.AdminMaintainWorkflowResponse, error) {
+	response, err := t.c.MaintainCorruptWorkflow(ctx, thrift.FromAdminMaintainWorkflowRequest(request), opts...)
+	return thrift.ToAdminMaintainWorkflowResponse(response), thrift.ToError(err)
+}
+
+func (t thriftClient) ListDynamicConfig(ctx context.Context, request *types.ListDynamicConfigRequest, opts ...yarpc.CallOption) (*types.ListDynamicConfigResponse, error) {
+	response, err := t.c.ListDynamicConfig(ctx, thrift.FromListDynamicConfigRequest(request), opts...)
+	return thrift.ToListDynamicConfigResponse(response), thrift.ToError(err)
 }

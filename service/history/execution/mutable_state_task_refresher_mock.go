@@ -34,39 +34,39 @@ import (
 	gomock "github.com/golang/mock/gomock"
 )
 
-// MockMutableStateTaskRefresher is a mock of MutableStateTaskRefresher interface
+// MockMutableStateTaskRefresher is a mock of MutableStateTaskRefresher interface.
 type MockMutableStateTaskRefresher struct {
 	ctrl     *gomock.Controller
 	recorder *MockMutableStateTaskRefresherMockRecorder
 }
 
-// MockMutableStateTaskRefresherMockRecorder is the mock recorder for MockMutableStateTaskRefresher
+// MockMutableStateTaskRefresherMockRecorder is the mock recorder for MockMutableStateTaskRefresher.
 type MockMutableStateTaskRefresherMockRecorder struct {
 	mock *MockMutableStateTaskRefresher
 }
 
-// NewMockMutableStateTaskRefresher creates a new mock instance
+// NewMockMutableStateTaskRefresher creates a new mock instance.
 func NewMockMutableStateTaskRefresher(ctrl *gomock.Controller) *MockMutableStateTaskRefresher {
 	mock := &MockMutableStateTaskRefresher{ctrl: ctrl}
 	mock.recorder = &MockMutableStateTaskRefresherMockRecorder{mock}
 	return mock
 }
 
-// EXPECT returns an object that allows the caller to indicate expected use
+// EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockMutableStateTaskRefresher) EXPECT() *MockMutableStateTaskRefresherMockRecorder {
 	return m.recorder
 }
 
-// RefreshTasks mocks base method
-func (m *MockMutableStateTaskRefresher) RefreshTasks(ctx context.Context, now time.Time, mutableState MutableState) error {
+// RefreshTasks mocks base method.
+func (m *MockMutableStateTaskRefresher) RefreshTasks(ctx context.Context, startTime time.Time, mutableState MutableState) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RefreshTasks", ctx, now, mutableState)
+	ret := m.ctrl.Call(m, "RefreshTasks", ctx, startTime, mutableState)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// RefreshTasks indicates an expected call of RefreshTasks
-func (mr *MockMutableStateTaskRefresherMockRecorder) RefreshTasks(ctx, now, mutableState interface{}) *gomock.Call {
+// RefreshTasks indicates an expected call of RefreshTasks.
+func (mr *MockMutableStateTaskRefresherMockRecorder) RefreshTasks(ctx, startTime, mutableState interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshTasks", reflect.TypeOf((*MockMutableStateTaskRefresher)(nil).RefreshTasks), ctx, now, mutableState)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RefreshTasks", reflect.TypeOf((*MockMutableStateTaskRefresher)(nil).RefreshTasks), ctx, startTime, mutableState)
 }

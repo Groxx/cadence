@@ -160,9 +160,6 @@ func NewHistoryReplicator(
 				shard,
 				logger,
 				state,
-				func(mutableState execution.MutableState) execution.MutableStateTaskGenerator {
-					return execution.NewMutableStateTaskGenerator(shard.GetDomainCache(), logger, mutableState)
-				},
 			)
 		},
 		newMutableState: func(
@@ -231,20 +228,7 @@ func (r *historyReplicatorImpl) applyEvents(
 	default:
 		// apply events, other than simple start workflow execution
 		// the continue as new + start workflow execution combination will also be processed here
-		var mutableState execution.MutableState
-		var err error
-		domainName, err := r.domainCache.GetDomainName(context.GetDomainID())
-		if err != nil {
-			return err
-		}
-
-		if r.shard.GetConfig().ReplicationEventsFromCurrentCluster(domainName) {
-			// this branch is used when replicating events (generated from current cluster)from remote cluster to current cluster.
-			// this could happen when the events are lost in current cluster and plan to recover them from remote cluster.
-			mutableState, err = context.LoadWorkflowExecutionForReplication(ctx, task.getVersion())
-		} else {
-			mutableState, err = context.LoadWorkflowExecution(ctx)
-		}
+		mutableState, err := context.LoadWorkflowExecutionWithTaskVersion(ctx, task.getVersion())
 		switch err.(type) {
 		case nil:
 			// Sanity check to make only 3DC mutable state here
@@ -322,7 +306,6 @@ func (r *historyReplicatorImpl) applyStartEvents(
 		task.getEventTime(),
 		execution.NewWorkflow(
 			ctx,
-			r.domainCache,
 			r.clusterMetadata,
 			context,
 			mutableState,
@@ -352,8 +335,8 @@ func (r *historyReplicatorImpl) applyNonStartEventsPrepareBranch(
 	doContinue, versionHistoryIndex, err := branchManager.prepareVersionHistory(
 		ctx,
 		incomingVersionHistory,
-		task.getFirstEvent().GetEventID(),
-		task.getFirstEvent().GetVersion(),
+		task.getFirstEvent().ID,
+		task.getFirstEvent().Version,
 	)
 	switch err.(type) {
 	case nil:
@@ -423,7 +406,6 @@ func (r *historyReplicatorImpl) applyNonStartEventsToCurrentBranch(
 
 	targetWorkflow := execution.NewWorkflow(
 		ctx,
-		r.domainCache,
 		r.clusterMetadata,
 		context,
 		mutableState,
@@ -446,7 +428,6 @@ func (r *historyReplicatorImpl) applyNonStartEventsToCurrentBranch(
 
 		newWorkflow = execution.NewWorkflow(
 			ctx,
-			r.domainCache,
 			r.clusterMetadata,
 			newContext,
 			newMutableState,
@@ -510,8 +491,8 @@ func (r *historyReplicatorImpl) applyNonStartEventsToNoneCurrentBranchWithoutCon
 ) error {
 
 	versionHistoryItem := persistence.NewVersionHistoryItem(
-		task.getLastEvent().GetEventID(),
-		task.getLastEvent().GetVersion(),
+		task.getLastEvent().ID,
+		task.getLastEvent().Version,
 	)
 	versionHistories := mutableState.GetVersionHistories()
 	if versionHistories == nil {
@@ -530,7 +511,6 @@ func (r *historyReplicatorImpl) applyNonStartEventsToNoneCurrentBranchWithoutCon
 		task.getEventTime(),
 		execution.NewWorkflow(
 			ctx,
-			r.domainCache,
 			r.clusterMetadata,
 			context,
 			mutableState,
@@ -615,13 +595,13 @@ func (r *historyReplicatorImpl) applyNonStartEventsMissingMutableState(
 			task.getRunID(),
 			nil,
 			nil,
-			common.Int64Ptr(firstEvent.GetEventID()),
-			common.Int64Ptr(firstEvent.GetVersion()),
+			common.Int64Ptr(firstEvent.ID),
+			common.Int64Ptr(firstEvent.Version),
 		)
 	}
 
 	decisionTaskEvent := task.getFirstEvent()
-	baseEventID := decisionTaskEvent.GetEventID() - 1
+	baseEventID := decisionTaskEvent.ID - 1
 	baseRunID, newRunID, baseEventVersion := task.getWorkflowResetMetadata()
 
 	workflowResetter := r.newWorkflowResetter(
@@ -638,7 +618,7 @@ func (r *historyReplicatorImpl) applyNonStartEventsMissingMutableState(
 		task.getEventTime(),
 		baseEventID,
 		baseEventVersion,
-		task.getFirstEvent().GetEventID(),
+		task.getFirstEvent().ID,
 		task.getVersion(),
 	)
 	if err != nil {
@@ -677,7 +657,6 @@ func (r *historyReplicatorImpl) applyNonStartEventsResetWorkflow(
 
 	targetWorkflow := execution.NewWorkflow(
 		ctx,
-		r.domainCache,
 		r.clusterMetadata,
 		context,
 		mutableState,

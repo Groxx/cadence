@@ -208,7 +208,7 @@ func (s *historyArchiverSuite) TestArchive_Fail_HistoryMutated() {
 		{
 			Events: []*types.HistoryEvent{
 				{
-					EventID:   common.FirstEventID + 1,
+					ID:        common.FirstEventID + 1,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   testCloseFailoverVersion + 1,
 				},
@@ -264,6 +264,47 @@ func (s *historyArchiverSuite) TestArchive_Fail_NonRetriableErrorOption() {
 	s.Equal(nonRetryableErr, err)
 }
 
+func (s *historyArchiverSuite) TestArchive_Skip() {
+	mockCtrl := gomock.NewController(s.T())
+	defer mockCtrl.Finish()
+	historyIterator := archiver.NewMockHistoryIterator(mockCtrl)
+	historyBlob := &archiver.HistoryBlob{
+		Header: &archiver.HistoryBlobHeader{
+			IsLast: common.BoolPtr(false),
+		},
+		Body: []*types.History{
+			{
+				Events: []*types.HistoryEvent{
+					{
+						ID:        common.FirstEventID,
+						Timestamp: common.Int64Ptr(time.Now().UnixNano()),
+						Version:   testCloseFailoverVersion,
+					},
+				},
+			},
+		},
+	}
+	gomock.InOrder(
+		historyIterator.EXPECT().HasNext().Return(true),
+		historyIterator.EXPECT().Next().Return(historyBlob, nil),
+		historyIterator.EXPECT().HasNext().Return(true),
+		historyIterator.EXPECT().Next().Return(nil, &types.EntityNotExistsError{Message: "workflow not found"}),
+	)
+
+	historyArchiver := s.newTestHistoryArchiver(historyIterator)
+	request := &archiver.ArchiveHistoryRequest{
+		DomainID:             testDomainID,
+		DomainName:           testDomainName,
+		WorkflowID:           testWorkflowID,
+		RunID:                testRunID,
+		BranchToken:          testBranchToken,
+		NextEventID:          testNextEventID,
+		CloseFailoverVersion: testCloseFailoverVersion,
+	}
+	err := historyArchiver.Archive(context.Background(), s.testArchivalURI, request)
+	s.NoError(err)
+}
+
 func (s *historyArchiverSuite) TestArchive_Success() {
 	mockCtrl := gomock.NewController(s.T())
 	defer mockCtrl.Finish()
@@ -272,12 +313,12 @@ func (s *historyArchiverSuite) TestArchive_Success() {
 		{
 			Events: []*types.HistoryEvent{
 				{
-					EventID:   common.FirstEventID + 1,
+					ID:        common.FirstEventID + 1,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   testCloseFailoverVersion,
 				},
 				{
-					EventID:   common.FirstEventID + 2,
+					ID:        common.FirstEventID + 2,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   testCloseFailoverVersion,
 				},
@@ -286,7 +327,7 @@ func (s *historyArchiverSuite) TestArchive_Success() {
 		{
 			Events: []*types.HistoryEvent{
 				{
-					EventID:   testNextEventID - 1,
+					ID:        testNextEventID - 1,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   testCloseFailoverVersion,
 				},
@@ -537,7 +578,7 @@ func (s *historyArchiverSuite) setupHistoryDirectory() {
 		{
 			Events: []*types.HistoryEvent{
 				{
-					EventID:   testNextEventID - 1,
+					ID:        testNextEventID - 1,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   1,
 				},
@@ -549,12 +590,12 @@ func (s *historyArchiverSuite) setupHistoryDirectory() {
 		{
 			Events: []*types.HistoryEvent{
 				{
-					EventID:   common.FirstEventID + 1,
+					ID:        common.FirstEventID + 1,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   testCloseFailoverVersion,
 				},
 				{
-					EventID:   common.FirstEventID + 1,
+					ID:        common.FirstEventID + 1,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   testCloseFailoverVersion,
 				},
@@ -563,7 +604,7 @@ func (s *historyArchiverSuite) setupHistoryDirectory() {
 		{
 			Events: []*types.HistoryEvent{
 				{
-					EventID:   testNextEventID - 1,
+					ID:        testNextEventID - 1,
 					Timestamp: common.Int64Ptr(time.Now().UnixNano()),
 					Version:   testCloseFailoverVersion,
 				},

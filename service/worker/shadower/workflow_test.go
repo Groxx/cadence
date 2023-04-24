@@ -85,7 +85,6 @@ func (s *workflowSuite) SetupTest() {
 			},
 		},
 		1234,
-		cluster.GetTestClusterMetadata(true, true),
 	)
 	s.mockDomainCache.EXPECT().GetDomain(testActiveDomainName).Return(activeDomainCache, nil).AnyTimes()
 
@@ -100,7 +99,6 @@ func (s *workflowSuite) SetupTest() {
 			},
 		},
 		1234,
-		cluster.GetTestClusterMetadata(true, true),
 	)
 	s.mockDomainCache.EXPECT().GetDomain(testStandbyDomainName).Return(standbyDomainCache, nil).AnyTimes()
 
@@ -352,6 +350,7 @@ func (s *workflowSuite) TestShadowWorkflow_ContinueAsNew_MaxShadowCount() {
 	s.True(ok)
 	s.Equal(shadower.WorkflowName, continueAsNewErr.WorkflowType().Name)
 	shadowParams, ok := continueAsNewErr.Args()[0].(shadower.WorkflowParams)
+	s.True(ok)
 	s.Equal(testActiveDomainName, shadowParams.GetDomain())
 	s.Equal(testTaskListName, shadowParams.GetTaskList())
 	s.Equal(testWorkflowQuery, shadowParams.GetWorkflowQuery())
@@ -408,6 +407,7 @@ func (s *workflowSuite) TestShadowWorkflow_ContinueAsNew_ContinuousShadowing() {
 	s.True(ok)
 	s.Equal(shadower.WorkflowName, continueAsNewErr.WorkflowType().Name)
 	shadowParams, ok := continueAsNewErr.Args()[0].(shadower.WorkflowParams)
+	s.True(ok)
 	s.Equal(testActiveDomainName, shadowParams.GetDomain())
 	s.Equal(testTaskListName, shadowParams.GetTaskList())
 	s.Equal(testWorkflowQuery, shadowParams.GetWorkflowQuery())

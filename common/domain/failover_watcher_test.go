@@ -85,7 +85,7 @@ func (s *failoverWatcherSuite) SetupTest() {
 
 	logger := loggerimpl.NewNopLogger()
 	scope := tally.NewTestScope("failover_test", nil)
-	metricsClient := metrics.NewClient(scope, metrics.DomainFailoverScope)
+	metricsClient := metrics.NewClient(scope, metrics.Frontend)
 	s.watcher = NewFailoverWatcher(
 		s.mockDomainCache,
 		s.mockMetadataMgr,
@@ -119,9 +119,7 @@ func (s *failoverWatcherSuite) TestCleanPendingActiveState() {
 	replicationConfig := &persistence.DomainReplicationConfig{
 		ActiveClusterName: "active",
 		Clusters: []*persistence.ClusterReplicationConfig{
-			{
-				"active",
-			},
+			{ClusterName: "active"},
 		},
 	}
 
@@ -206,9 +204,7 @@ func (s *failoverWatcherSuite) TestHandleFailoverTimeout() {
 	replicationConfig := &persistence.DomainReplicationConfig{
 		ActiveClusterName: "active",
 		Clusters: []*persistence.ClusterReplicationConfig{
-			{
-				"active",
-			},
+			{ClusterName: "active"},
 		},
 	}
 	endtime := common.Int64Ptr(s.timeSource.Now().UnixNano() - 1)
@@ -244,7 +240,6 @@ func (s *failoverWatcherSuite) TestHandleFailoverTimeout() {
 		replicationConfig,
 		1,
 		endtime,
-		nil,
 	)
 	s.watcher.handleFailoverTimeout(domainEntry)
 }

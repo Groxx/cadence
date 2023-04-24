@@ -20,7 +20,11 @@
 
 package metrics
 
-import "github.com/uber-go/tally"
+import (
+	"time"
+
+	"github.com/uber-go/tally"
+)
 
 // types used/defined by the package
 type (
@@ -54,6 +58,7 @@ const (
 	Counter MetricType = iota
 	Timer
 	Gauge
+	Histogram
 )
 
 // Service names for all services that emit metrics.
@@ -166,6 +171,12 @@ const (
 	PersistenceCompleteTransferTaskScope
 	// PersistenceRangeCompleteTransferTaskScope tracks CompleteTransferTasks calls made by service to persistence layer
 	PersistenceRangeCompleteTransferTaskScope
+	// PersistenceGetCrossClusterTasksScope tracks GetCrossClusterTasks calls made by service to persistence layer
+	PersistenceGetCrossClusterTasksScope
+	// PersistenceCompleteCrossClusterTaskScope tracks CompleteCrossClusterTasks calls made by service to persistence layer
+	PersistenceCompleteCrossClusterTaskScope
+	// PersistenceRangeCompleteCrossClusterTaskScope tracks CompleteCrossClusterTasks calls made by service to persistence layer
+	PersistenceRangeCompleteCrossClusterTaskScope
 	// PersistenceGetReplicationTasksScope tracks GetReplicationTasks calls made by service to persistence layer
 	PersistenceGetReplicationTasksScope
 	// PersistenceCompleteReplicationTaskScope tracks CompleteReplicationTasks calls made by service to persistence layer
@@ -232,6 +243,8 @@ const (
 	PersistenceRecordWorkflowExecutionStartedScope
 	// PersistenceRecordWorkflowExecutionClosedScope tracks RecordWorkflowExecutionClosed calls made by service to persistence layer
 	PersistenceRecordWorkflowExecutionClosedScope
+	// PersistenceRecordWorkflowExecutionUninitializedScope tracks RecordWorkflowExecutionUninitialized calls made by service to persistence layer
+	PersistenceRecordWorkflowExecutionUninitializedScope
 	// PersistenceUpsertWorkflowExecutionScope tracks UpsertWorkflowExecution calls made by service to persistence layer
 	PersistenceUpsertWorkflowExecutionScope
 	// PersistenceListOpenWorkflowExecutionsScope tracks ListOpenWorkflowExecutions calls made by service to persistence layer
@@ -252,6 +265,8 @@ const (
 	PersistenceGetClosedWorkflowExecutionScope
 	// PersistenceVisibilityDeleteWorkflowExecutionScope is the metrics scope for persistence.VisibilityManager.DeleteWorkflowExecution
 	PersistenceVisibilityDeleteWorkflowExecutionScope
+	// PersistenceVisibilityDeleteUninitializedWorkflowExecutionScope tracks DeleteUninitializedWorkflowExecution calls made by service to persistence layer
+	PersistenceVisibilityDeleteUninitializedWorkflowExecutionScope
 	// PersistenceListWorkflowExecutionsScope tracks ListWorkflowExecutions calls made by service to persistence layer
 	PersistenceListWorkflowExecutionsScope
 	// PersistenceScanWorkflowExecutionsScope tracks ScanWorkflowExecutions calls made by service to persistence layer
@@ -282,6 +297,12 @@ const (
 	PersistenceGetDLQAckLevelScope
 	// PersistenceGetDLQSizeScope tracks GetDLQSize calls made by service to persistence layer
 	PersistenceGetDLQSizeScope
+	// PersistenceFetchDynamicConfigScope tracks FetchDynamicConfig calls made by service to persistence layer
+	PersistenceFetchDynamicConfigScope
+	// PersistenceUpdateDynamicConfigScope tracks UpdateDynamicConfig calls made by service to persistence layer
+	PersistenceUpdateDynamicConfigScope
+	// PersistenceShardRequestCountScope tracks number of persistence calls made to each shard
+	PersistenceShardRequestCountScope
 	// HistoryClientStartWorkflowExecutionScope tracks RPC calls to history service
 	HistoryClientStartWorkflowExecutionScope
 	// HistoryClientDescribeHistoryHostScope tracks RPC calls to history service
@@ -350,6 +371,8 @@ const (
 	HistoryClientQueryWorkflowScope
 	// HistoryClientReapplyEventsScope tracks RPC calls to history service
 	HistoryClientReapplyEventsScope
+	// HistoryClientCountDLQMessagesScope tracks RPC calls to history service
+	HistoryClientCountDLQMessagesScope
 	// HistoryClientReadDLQMessagesScope tracks RPC calls to history service
 	HistoryClientReadDLQMessagesScope
 	// HistoryClientPurgeDLQMessagesScope tracks RPC calls to history service
@@ -360,6 +383,12 @@ const (
 	HistoryClientRefreshWorkflowTasksScope
 	// HistoryClientNotifyFailoverMarkersScope tracks RPC calls to history service
 	HistoryClientNotifyFailoverMarkersScope
+	// HistoryClientGetCrossClusterTasksScope tracks RPC calls to history service
+	HistoryClientGetCrossClusterTasksScope
+	// HistoryClientRespondCrossClusterTasksCompletedScope tracks RPC calls to history service
+	HistoryClientRespondCrossClusterTasksCompletedScope
+	// HistoryClientGetFailoverInfoScope tracks RPC calls to history service
+	HistoryClientGetFailoverInfoScope
 	// MatchingClientPollForDecisionTaskScope tracks RPC calls to matching service
 	MatchingClientPollForDecisionTaskScope
 	// MatchingClientPollForActivityTaskScope tracks RPC calls to matching service
@@ -378,6 +407,8 @@ const (
 	MatchingClientDescribeTaskListScope
 	// MatchingClientListTaskListPartitionsScope tracks RPC calls to matching service
 	MatchingClientListTaskListPartitionsScope
+	// MatchingClientGetTaskListsByDomainScope tracks RPC calls to matching service
+	MatchingClientGetTaskListsByDomainScope
 	// FrontendClientDeprecateDomainScope tracks RPC calls to frontend service
 	FrontendClientDeprecateDomainScope
 	// FrontendClientDescribeDomainScope tracks RPC calls to frontend service
@@ -416,6 +447,8 @@ const (
 	FrontendClientRequestCancelWorkflowExecutionScope
 	// FrontendClientResetStickyTaskListScope tracks RPC calls to frontend service
 	FrontendClientResetStickyTaskListScope
+	// FrontendClientRefreshWorkflowTasksScope tracks RPC calls to frontend service
+	FrontendClientRefreshWorkflowTasksScope
 	// FrontendClientResetWorkflowExecutionScope tracks RPC calls to frontend service
 	FrontendClientResetWorkflowExecutionScope
 	// FrontendClientRespondActivityTaskCanceledScope tracks RPC calls to frontend service
@@ -466,6 +499,8 @@ const (
 	FrontendClientGetClusterInfoScope
 	// FrontendClientListTaskListPartitionsScope tracks RPC calls to frontend service
 	FrontendClientListTaskListPartitionsScope
+	// FrontendClientGetTaskListsByDomainScope tracks RPC calls to frontend service
+	FrontendClientGetTaskListsByDomainScope
 	// AdminClientAddSearchAttributeScope tracks RPC calls to admin service
 	AdminClientAddSearchAttributeScope
 	// AdminClientCloseShardScope tracks RPC calls to admin service
@@ -478,12 +513,16 @@ const (
 	AdminClientDescribeQueueScope
 	// AdminClientDescribeHistoryHostScope tracks RPC calls to admin service
 	AdminClientDescribeHistoryHostScope
+	// AdminClientDescribeShardDistributionScope tracks RPC calls to admin service
+	AdminClientDescribeShardDistributionScope
 	// AdminClientDescribeWorkflowExecutionScope tracks RPC calls to admin service
 	AdminClientDescribeWorkflowExecutionScope
 	// AdminClientGetWorkflowExecutionRawHistoryV2Scope tracks RPC calls to admin service
 	AdminClientGetWorkflowExecutionRawHistoryV2Scope
 	// AdminClientDescribeClusterScope tracks RPC calls to admin service
 	AdminClientDescribeClusterScope
+	// AdminClientCountDLQMessagesScope tracks RPC calls to admin service
+	AdminClientCountDLQMessagesScope
 	// AdminClientReadDLQMessagesScope tracks RPC calls to admin service
 	AdminClientReadDLQMessagesScope
 	// AdminClientPurgeDLQMessagesScope tracks RPC calls to admin service
@@ -494,6 +533,18 @@ const (
 	AdminClientRefreshWorkflowTasksScope
 	// AdminClientResendReplicationTasksScope tracks RPC calls to admin service
 	AdminClientResendReplicationTasksScope
+	// AdminClientGetCrossClusterTasksScope tracks RPC calls to Admin service
+	AdminClientGetCrossClusterTasksScope
+	// AdminClientRespondCrossClusterTasksCompletedScope tracks RPC calls to Admin service
+	AdminClientRespondCrossClusterTasksCompletedScope
+	// AdminClientGetDynamicConfigScope tracks RPC calls to admin service
+	AdminClientGetDynamicConfigScope
+	// AdminClientUpdateDynamicConfigScope tracks RPC calls to admin service
+	AdminClientUpdateDynamicConfigScope
+	// AdminClientRestoreDynamicConfigScope tracks RPC calls to admin service
+	AdminClientRestoreDynamicConfigScope
+	// AdminClientListDynamicConfigScope tracks RPC calls to admin service
+	AdminClientListDynamicConfigScope
 	// DCRedirectionDeprecateDomainScope tracks RPC calls for dc redirection
 	DCRedirectionDeprecateDomainScope
 	// DCRedirectionDescribeDomainScope tracks RPC calls for dc redirection
@@ -572,6 +623,10 @@ const (
 	DCRedirectionUpdateDomainScope
 	// DCRedirectionListTaskListPartitionsScope tracks RPC calls for dc redirection
 	DCRedirectionListTaskListPartitionsScope
+	// DCRedirectionGetTaskListsByDomainScope tracks RPC calls for dc redirection
+	DCRedirectionGetTaskListsByDomainScope
+	// DCRedirectionRefreshWorkflowTasksScope tracks RPC calls for dc redirection
+	DCRedirectionRefreshWorkflowTasksScope
 
 	// MessagingPublishScope tracks Publish calls made by service to messaging layer
 	MessagingClientPublishScope
@@ -615,6 +670,8 @@ const (
 	ElasticsearchRecordWorkflowExecutionStartedScope
 	// ElasticsearchRecordWorkflowExecutionClosedScope tracks RecordWorkflowExecutionClosed calls made by service to persistence layer
 	ElasticsearchRecordWorkflowExecutionClosedScope
+	// ElasticsearchRecordWorkflowExecutionUninitializedScope tracks RecordWorkflowExecutionUninitialized calls made by service to persistence layer
+	ElasticsearchRecordWorkflowExecutionUninitializedScope
 	// ElasticsearchUpsertWorkflowExecutionScope tracks UpsertWorkflowExecution calls made by service to persistence layer
 	ElasticsearchUpsertWorkflowExecutionScope
 	// ElasticsearchListOpenWorkflowExecutionsScope tracks ListOpenWorkflowExecutions calls made by service to persistence layer
@@ -641,6 +698,8 @@ const (
 	ElasticsearchCountWorkflowExecutionsScope
 	// ElasticsearchDeleteWorkflowExecutionsScope tracks DeleteWorkflowExecution calls made by service to persistence layer
 	ElasticsearchDeleteWorkflowExecutionsScope
+	// ElasticsearchDeleteUninitializedWorkflowExecutionsScope tracks DeleteUninitializedWorkflowExecution calls made by service to persistence layer
+	ElasticsearchDeleteUninitializedWorkflowExecutionsScope
 
 	// SequentialTaskProcessingScope is used by sequential task processing logic
 	SequentialTaskProcessingScope
@@ -674,6 +733,8 @@ const (
 	DomainFailoverScope
 	// DomainReplicationQueueScope is used in domainreplication queue
 	DomainReplicationQueueScope
+	// ClusterMetadataScope is used for the cluster metadata
+	ClusterMetadataScope
 
 	NumCommonScopes
 )
@@ -682,6 +743,8 @@ const (
 const (
 	// AdminDescribeHistoryHostScope is the metric scope for admin.AdminDescribeHistoryHostScope
 	AdminDescribeHistoryHostScope = iota + NumCommonScopes
+	// AdminDescribeClusterScope is the metric scope for admin.AdminDescribeClusterScope
+	AdminDescribeClusterScope
 	// AdminAddSearchAttributeScope is the metric scope for admin.AdminAddSearchAttributeScope
 	AdminAddSearchAttributeScope
 	// AdminDescribeWorkflowExecutionScope is the metric scope for admin.AdminDescribeWorkflowExecutionScope
@@ -710,20 +773,42 @@ const (
 	AdminResetQueueScope
 	// AdminDescribeQueueScope is the metrics scope for admin.AdminDescribeQueueScope
 	AdminDescribeQueueScope
+	// AdminCountDLQMessagesScope is the metric scope for admin.AdminCountDLQMessagesScope
+	AdminCountDLQMessagesScope
 	// AdminReadDLQMessagesScope is the metric scope for admin.AdminReadDLQMessagesScope
 	AdminReadDLQMessagesScope
 	// AdminPurgeDLQMessagesScope is the metric scope for admin.AdminPurgeDLQMessagesScope
 	AdminPurgeDLQMessagesScope
 	// AdminMergeDLQMessagesScope is the metric scope for admin.AdminMergeDLQMessagesScope
 	AdminMergeDLQMessagesScope
+	// AdminDescribeShardDistributionScope is the metric scope for admin.DescribeShardDistribution
+	AdminDescribeShardDistributionScope
+	// AdminGetCrossClusterTasksScope is the metric scope for admin.GetCrossClusterTasks
+	AdminGetCrossClusterTasksScope
+	// AdminRespondCrossClusterTasksCompletedScope is the metric scope for admin.AdminRespondCrossClusterTasksCompleted
+	AdminRespondCrossClusterTasksCompletedScope
+	// AdminGetDynamicConfigScope is the metric scope for admin.GetDynamicConfig
+	AdminGetDynamicConfigScope
+	// AdminUpdateDynamicConfigScope is the metric scope for admin.UpdateDynamicConfig
+	AdminUpdateDynamicConfigScope
+	// AdminRestoreDynamicConfigScope is the metric scope for admin.RestoreDynamicConfig
+	AdminRestoreDynamicConfigScope
+	// AdminListDynamicConfigScope is the metric scope for admin.ListDynamicConfig
+	AdminListDynamicConfigScope
+	// AdminDeleteWorkflowScope is the metric scope for admin.DeleteWorkflow
+	AdminDeleteWorkflowScope
+	// MaintainCorruptWorkflowScope is the metric scope for admin.MaintainCorruptWorkflow
+	MaintainCorruptWorkflowScope
 
 	NumAdminScopes
 )
 
 // -- Operation scopes for Frontend service --
 const (
+	// FrontendRestartWorkflowExecutionScope is the metric for frontend.RestartWorkflowExecution
+	FrontendRestartWorkflowExecutionScope = iota + NumAdminScopes
 	// FrontendStartWorkflowExecutionScope is the metric scope for frontend.StartWorkflowExecution
-	FrontendStartWorkflowExecutionScope = iota + NumAdminScopes
+	FrontendStartWorkflowExecutionScope
 	// PollForDecisionTaskScope is the metric scope for frontend.PollForDecisionTask
 	FrontendPollForDecisionTaskScope
 	// FrontendPollForActivityTaskScope is the metric scope for frontend.PollForActivityTask
@@ -792,6 +877,10 @@ const (
 	FrontendDescribeTaskListScope
 	// FrontendResetStickyTaskListScope is the metric scope for frontend.ResetStickyTaskList
 	FrontendListTaskListPartitionsScope
+	// FrontendGetTaskListsByDomainScope is the metric scope for frontend.ResetStickyTaskList
+	FrontendGetTaskListsByDomainScope
+	// FrontendRefreshWorkflowTasksScope is the metric scope for frontend.RefreshWorkflowTasks
+	FrontendRefreshWorkflowTasksScope
 	// FrontendResetStickyTaskListScope is the metric scope for frontend.ResetStickyTaskList
 	FrontendResetStickyTaskListScope
 	// FrontendListDomainsScope is the metric scope for frontend.ListDomain
@@ -868,6 +957,8 @@ const (
 	HistoryGetReplicationMessagesScope
 	// HistoryGetDLQReplicationMessagesScope tracks GetReplicationMessages API calls received by service
 	HistoryGetDLQReplicationMessagesScope
+	// HistoryCountDLQMessagesScope tracks CountDLQMessages API calls received by service
+	HistoryCountDLQMessagesScope
 	// HistoryReadDLQMessagesScope tracks ReadDLQMessages API calls received by service
 	HistoryReadDLQMessagesScope
 	// HistoryPurgeDLQMessagesScope tracks PurgeDLQMessages API calls received by service
@@ -876,12 +967,18 @@ const (
 	HistoryMergeDLQMessagesScope
 	// HistoryShardControllerScope is the scope used by shard controller
 	HistoryShardControllerScope
-	// HistoryReapplyEventsScope is the scope used by event reapplication
+	// HistoryReapplyEventsScope tracks ReapplyEvents API calls received by service
 	HistoryReapplyEventsScope
-	// HistoryRefreshWorkflowTasksScope is the scope used by refresh workflow tasks API
+	// HistoryRefreshWorkflowTasksScope tracks RefreshWorkflowTasks API calls received by service
 	HistoryRefreshWorkflowTasksScope
-	// HistoryNotifyFailoverMarkersScope is the scope used by refresh workflow tasks API
+	// HistoryNotifyFailoverMarkersScope is the scope used by notify failover marker API
 	HistoryNotifyFailoverMarkersScope
+	// HistoryGetCrossClusterTasksScope tracks GetCrossClusterTasks API calls received by service
+	HistoryGetCrossClusterTasksScope
+	// HistoryRespondCrossClusterTasksCompletedScope tracks RespondCrossClusterTasksCompleted API calls received by service
+	HistoryRespondCrossClusterTasksCompletedScope
+	// HistoryGetFailoverInfoScope tracks HistoryGetFailoverInfo API calls received by service
+	HistoryGetFailoverInfoScope
 	// TaskPriorityAssignerScope is the scope used by all metric emitted by task priority assigner
 	TaskPriorityAssignerScope
 	// TransferQueueProcessorScope is the scope used by all metric emitted by transfer queue processor
@@ -908,6 +1005,12 @@ const (
 	TransferActiveTaskResetWorkflowScope
 	// TransferActiveTaskUpsertWorkflowSearchAttributesScope is the scope used for upsert search attributes processing by transfer queue processor
 	TransferActiveTaskUpsertWorkflowSearchAttributesScope
+	// TransferActiveTaskRecordWorkflowClosedScope is the scope used for record workflow closed task processing by transfer queue processor
+	TransferActiveTaskRecordWorkflowClosedScope
+	// TransferActiveTaskRecordChildExecutionCompletedScope is the scope used for record child execution completed task processing by transfer queue processor
+	TransferActiveTaskRecordChildExecutionCompletedScope
+	// TransferActiveTaskApplyParentClosePolicyScope is the scope used for apply parent close policy task processing by transfer queue processor
+	TransferActiveTaskApplyParentClosePolicyScope
 	// TransferStandbyTaskResetWorkflowScope is the scope used for record workflow started task processing by transfer queue processor
 	TransferStandbyTaskResetWorkflowScope
 	// TransferStandbyTaskActivityScope is the scope used for activity task processing by transfer queue processor
@@ -926,6 +1029,12 @@ const (
 	TransferStandbyTaskRecordWorkflowStartedScope
 	// TransferStandbyTaskUpsertWorkflowSearchAttributesScope is the scope used for upsert search attributes processing by transfer queue processor
 	TransferStandbyTaskUpsertWorkflowSearchAttributesScope
+	// TransferActiveTaskRecordWorkflowClosedScope is the scope used for record workflow closed task processing by transfer queue processor
+	TransferStandbyTaskRecordWorkflowClosedScope
+	// TransferActiveTaskRecordChildExecutionCompletedScope is the scope used for record child execution completed task processing by transfer queue processor
+	TransferStandbyTaskRecordChildExecutionCompletedScope
+	// TransferActiveTaskApplyParentClosePolicyScope is the scope used for apply parent close policy task processing by transfer queue processor
+	TransferStandbyTaskApplyParentClosePolicyScope
 	// TimerQueueProcessorScope is the scope used by all metric emitted by timer queue processor
 	TimerQueueProcessorScope
 	// TimerActiveQueueProcessorScope is the scope used by all metric emitted by timer queue processor
@@ -960,16 +1069,46 @@ const (
 	TimerStandbyTaskDeleteHistoryEventScope
 	// TimerStandbyTaskWorkflowBackoffTimerScope is the scope used by metric emitted by timer queue processor for processing retry task.
 	TimerStandbyTaskWorkflowBackoffTimerScope
+	// CrossClusterQueueProcessorScope is the scope used by all metric emitted by cross cluster queue processor in the source cluster
+	CrossClusterQueueProcessorScope
+	// CrossClusterTaskProcessorScope is the scope used by all metric emitted by cross cluster task processor in the target cluster
+	CrossClusterTaskProcessorScope
+	// CrossClusterTaskFetcherScope is the scope used by all metrics emitted by cross cluster task fetcher in the target cluster
+	CrossClusterTaskFetcherScope
+	// CrossClusterSourceTaskStartChildExecutionScope is the scope used by metric emitted by cross cluster queue processor for processing start child workflow task.
+	CrossClusterSourceTaskStartChildExecutionScope
+	// CrossClusterSourceTaskCancelExecutionScope is the scope used by metric emitted by cross cluster queue processor for processing cancel workflow task.
+	CrossClusterSourceTaskCancelExecutionScope
+	// CrossClusterSourceTaskSignalExecutionScope is the scope used by metric emitted by cross cluster queue processor for processing signal workflow task.
+	CrossClusterSourceTaskSignalExecutionScope
+	// CrossClusterSourceTaskRecordChildWorkflowExecutionCompleteScope is the scope used by metric emitted by cross cluster queue processor for recording child workflow completion task.
+	CrossClusterSourceTaskRecordChildWorkflowExecutionCompleteScope
+	// CrossClusterSourceTaskApplyParentClosePolicyScope is the scope used by metric emitted by cross cluster queue processor for processing applying parent close policy
+	CrossClusterSourceTaskApplyParentClosePolicyScope
+	// CrossClusterTargetTaskStartChildExecutionScope is the scope used by metric emitted by cross cluster queue processor for processing start child workflow task.
+	CrossClusterTargetTaskStartChildExecutionScope
+	// CrossClusterTargetTaskCancelExecutionScope is the scope used by metric emitted by cross cluster queue processor for processing cancel workflow task.
+	CrossClusterTargetTaskCancelExecutionScope
+	// CrossClusterTargetTaskSignalExecutionScope is the scope used by metric emitted by cross cluster queue processor for processing signal workflow task.
+	CrossClusterTargetTaskSignalExecutionScope
+	// CrossClusterTargetTaskRecordChildWorkflowExecutionCompleteScope is the scope used by metric emitted by cross cluster queue processor for recording child workflow completion task.
+	CrossClusterTargetTaskRecordChildWorkflowExecutionCompleteScope
+	// CrossClusterTargetTaskApplyParentClosePolicyScope is the scope used by metric emitted by cross cluster queue processor for processing applying parent close policy
+	CrossClusterTargetTaskApplyParentClosePolicyScope
 	// HistoryEventNotificationScope is the scope used by shard history event notification
 	HistoryEventNotificationScope
 	// ReplicatorQueueProcessorScope is the scope used by all metric emitted by replicator queue processor
 	ReplicatorQueueProcessorScope
+	// ReplicatorCacheManagerScope is the scope used by all metric emitted by replicator cache manager
+	ReplicatorCacheManagerScope
 	// ReplicatorTaskHistoryScope is the scope used for history task processing by replicator queue processor
 	ReplicatorTaskHistoryScope
 	// ReplicatorTaskSyncActivityScope is the scope used for sync activity by replicator queue processor
 	ReplicatorTaskSyncActivityScope
 	// ReplicateHistoryEventsScope is the scope used by historyReplicator API for applying events
 	ReplicateHistoryEventsScope
+	// ReplicationMetricEmitterScope is the scope used by all metrics emitted by replication metric emitter
+	ReplicationMetricEmitterScope
 	// ShardInfoScope is the scope used when updating shard info
 	ShardInfoScope
 	// WorkflowContextScope is the scope used by WorkflowContext component
@@ -1018,6 +1157,12 @@ const (
 	HistoryReplicationV2TaskScope
 	// SyncActivityTaskScope is the scope used by sync activity information processing
 	SyncActivityTaskScope
+	// LargeExecutionSizeShardScope is the scope to track large history size for hotshard detection
+	LargeExecutionSizeShardScope
+	// LargeExecutionCountShardScope is the scope to track large history count for hotshard detection
+	LargeExecutionCountShardScope
+	// LargeExecutionBlobShardScope is the scope to track large blobs for hotshard detection
+	LargeExecutionBlobShardScope
 
 	NumHistoryScopes
 )
@@ -1032,6 +1177,8 @@ const (
 	MatchingAddActivityTaskScope
 	// MatchingAddDecisionTaskScope tracks AddDecisionTask API calls received by service
 	MatchingAddDecisionTaskScope
+	// MatchingAddTaskScope tracks both AddActivityTask and AddDevisionTask API calls received by service
+	MatchingAddTaskScope
 	// MatchingTaskListMgrScope is the metrics scope for matching.TaskListManager component
 	MatchingTaskListMgrScope
 	// MatchingQueryWorkflowScope tracks AddDecisionTask API calls received by service
@@ -1044,6 +1191,8 @@ const (
 	MatchingDescribeTaskListScope
 	// MatchingListTaskListPartitionsScope tracks ListTaskListPartitions API calls received by service
 	MatchingListTaskListPartitionsScope
+	// MatchingGetTaskListsByDomainScope tracks GetTaskListsByDomain API calls received by service
+	MatchingGetTaskListsByDomainScope
 
 	NumMatchingScopes
 )
@@ -1084,6 +1233,12 @@ const (
 	ParentClosePolicyProcessorScope
 	// ShardScannerScope is scope used by all metrics emitted by worker.shardscanner module
 	ShardScannerScope
+	// CheckDataCorruptionWorkflowScope is scope used by the data corruption workflow
+	CheckDataCorruptionWorkflowScope
+	// ESAnalyzerScope is scope used by ElasticSearch Analyzer (esanalyzer) workflow
+	ESAnalyzerScope
+	// WatchDogScope is scope used by WatchDog workflow
+	WatchDogScope
 
 	NumWorkerScopes
 )
@@ -1092,88 +1247,96 @@ const (
 var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 	// common scope Names
 	Common: {
-		PersistenceCreateShardScope:                              {operation: "CreateShard"},
-		PersistenceGetShardScope:                                 {operation: "GetShard"},
-		PersistenceUpdateShardScope:                              {operation: "UpdateShard"},
-		PersistenceCreateWorkflowExecutionScope:                  {operation: "CreateWorkflowExecution"},
-		PersistenceGetWorkflowExecutionScope:                     {operation: "GetWorkflowExecution"},
-		PersistenceUpdateWorkflowExecutionScope:                  {operation: "UpdateWorkflowExecution"},
-		PersistenceConflictResolveWorkflowExecutionScope:         {operation: "ConflictResolveWorkflowExecution"},
-		PersistenceResetWorkflowExecutionScope:                   {operation: "ResetWorkflowExecution"},
-		PersistenceDeleteWorkflowExecutionScope:                  {operation: "DeleteWorkflowExecution"},
-		PersistenceDeleteCurrentWorkflowExecutionScope:           {operation: "DeleteCurrentWorkflowExecution"},
-		PersistenceGetCurrentExecutionScope:                      {operation: "GetCurrentExecution"},
-		PersistenceIsWorkflowExecutionExistsScope:                {operation: "IsWorkflowExecutionExists"},
-		PersistenceListCurrentExecutionsScope:                    {operation: "ListCurrentExecutions"},
-		PersistenceListConcreteExecutionsScope:                   {operation: "ListConcreteExecutions"},
-		PersistenceGetTransferTasksScope:                         {operation: "GetTransferTasks"},
-		PersistenceCompleteTransferTaskScope:                     {operation: "CompleteTransferTask"},
-		PersistenceRangeCompleteTransferTaskScope:                {operation: "RangeCompleteTransferTask"},
-		PersistenceGetReplicationTasksScope:                      {operation: "GetReplicationTasks"},
-		PersistenceCompleteReplicationTaskScope:                  {operation: "CompleteReplicationTask"},
-		PersistenceRangeCompleteReplicationTaskScope:             {operation: "RangeCompleteReplicationTask"},
-		PersistencePutReplicationTaskToDLQScope:                  {operation: "PutReplicationTaskToDLQ"},
-		PersistenceGetReplicationTasksFromDLQScope:               {operation: "GetReplicationTasksFromDLQ"},
-		PersistenceGetReplicationDLQSizeScope:                    {operation: "GetReplicationDLQSize"},
-		PersistenceDeleteReplicationTaskFromDLQScope:             {operation: "DeleteReplicationTaskFromDLQ"},
-		PersistenceRangeDeleteReplicationTaskFromDLQScope:        {operation: "RangeDeleteReplicationTaskFromDLQ"},
-		PersistenceCreateFailoverMarkerTasksScope:                {operation: "CreateFailoverMarkerTasks"},
-		PersistenceGetTimerIndexTasksScope:                       {operation: "GetTimerIndexTasks"},
-		PersistenceCompleteTimerTaskScope:                        {operation: "CompleteTimerTask"},
-		PersistenceRangeCompleteTimerTaskScope:                   {operation: "RangeCompleteTimerTask"},
-		PersistenceCreateTaskScope:                               {operation: "CreateTask"},
-		PersistenceGetTasksScope:                                 {operation: "GetTasks"},
-		PersistenceCompleteTaskScope:                             {operation: "CompleteTask"},
-		PersistenceCompleteTasksLessThanScope:                    {operation: "CompleteTasksLessThan"},
-		PersistenceGetOrphanTasksScope:                           {operation: "GetOrphanTasks"},
-		PersistenceLeaseTaskListScope:                            {operation: "LeaseTaskList"},
-		PersistenceUpdateTaskListScope:                           {operation: "UpdateTaskList"},
-		PersistenceListTaskListScope:                             {operation: "ListTaskList"},
-		PersistenceDeleteTaskListScope:                           {operation: "DeleteTaskList"},
-		PersistenceAppendHistoryEventsScope:                      {operation: "AppendHistoryEvents"},
-		PersistenceGetWorkflowExecutionHistoryScope:              {operation: "GetWorkflowExecutionHistory"},
-		PersistenceDeleteWorkflowExecutionHistoryScope:           {operation: "DeleteWorkflowExecutionHistory"},
-		PersistenceCreateDomainScope:                             {operation: "CreateDomain"},
-		PersistenceGetDomainScope:                                {operation: "GetDomain"},
-		PersistenceUpdateDomainScope:                             {operation: "UpdateDomain"},
-		PersistenceDeleteDomainScope:                             {operation: "DeleteDomain"},
-		PersistenceDeleteDomainByNameScope:                       {operation: "DeleteDomainByName"},
-		PersistenceListDomainScope:                               {operation: "ListDomain"},
-		PersistenceGetMetadataScope:                              {operation: "GetMetadata"},
-		PersistenceRecordWorkflowExecutionStartedScope:           {operation: "RecordWorkflowExecutionStarted"},
-		PersistenceRecordWorkflowExecutionClosedScope:            {operation: "RecordWorkflowExecutionClosed"},
-		PersistenceUpsertWorkflowExecutionScope:                  {operation: "UpsertWorkflowExecution"},
-		PersistenceListOpenWorkflowExecutionsScope:               {operation: "ListOpenWorkflowExecutions"},
-		PersistenceListClosedWorkflowExecutionsScope:             {operation: "ListClosedWorkflowExecutions"},
-		PersistenceListOpenWorkflowExecutionsByTypeScope:         {operation: "ListOpenWorkflowExecutionsByType"},
-		PersistenceListClosedWorkflowExecutionsByTypeScope:       {operation: "ListClosedWorkflowExecutionsByType"},
-		PersistenceListOpenWorkflowExecutionsByWorkflowIDScope:   {operation: "ListOpenWorkflowExecutionsByWorkflowID"},
-		PersistenceListClosedWorkflowExecutionsByWorkflowIDScope: {operation: "ListClosedWorkflowExecutionsByWorkflowID"},
-		PersistenceListClosedWorkflowExecutionsByStatusScope:     {operation: "ListClosedWorkflowExecutionsByStatus"},
-		PersistenceGetClosedWorkflowExecutionScope:               {operation: "GetClosedWorkflowExecution"},
-		PersistenceVisibilityDeleteWorkflowExecutionScope:        {operation: "VisibilityDeleteWorkflowExecution"},
-		PersistenceListWorkflowExecutionsScope:                   {operation: "ListWorkflowExecutions"},
-		PersistenceScanWorkflowExecutionsScope:                   {operation: "ScanWorkflowExecutions"},
-		PersistenceCountWorkflowExecutionsScope:                  {operation: "CountWorkflowExecutions"},
-		PersistenceAppendHistoryNodesScope:                       {operation: "AppendHistoryNodes"},
-		PersistenceReadHistoryBranchScope:                        {operation: "ReadHistoryBranch"},
-		PersistenceForkHistoryBranchScope:                        {operation: "ForkHistoryBranch"},
-		PersistenceDeleteHistoryBranchScope:                      {operation: "DeleteHistoryBranch"},
-		PersistenceCompleteForkBranchScope:                       {operation: "CompleteForkBranch"},
-		PersistenceGetHistoryTreeScope:                           {operation: "GetHistoryTree"},
-		PersistenceGetAllHistoryTreeBranchesScope:                {operation: "GetAllHistoryTreeBranches"},
-		PersistenceEnqueueMessageScope:                           {operation: "EnqueueMessage"},
-		PersistenceEnqueueMessageToDLQScope:                      {operation: "EnqueueMessageToDLQ"},
-		PersistenceReadQueueMessagesScope:                        {operation: "ReadQueueMessages"},
-		PersistenceReadQueueMessagesFromDLQScope:                 {operation: "ReadQueueMessagesFromDLQ"},
-		PersistenceDeleteQueueMessagesScope:                      {operation: "DeleteQueueMessages"},
-		PersistenceDeleteQueueMessageFromDLQScope:                {operation: "DeleteQueueMessageFromDLQ"},
-		PersistenceRangeDeleteMessagesFromDLQScope:               {operation: "RangeDeleteMessagesFromDLQ"},
-		PersistenceUpdateAckLevelScope:                           {operation: "UpdateAckLevel"},
-		PersistenceGetAckLevelScope:                              {operation: "GetAckLevel"},
-		PersistenceUpdateDLQAckLevelScope:                        {operation: "UpdateDLQAckLevel"},
-		PersistenceGetDLQAckLevelScope:                           {operation: "GetDLQAckLevel"},
-		PersistenceGetDLQSizeScope:                               {operation: "GetDLQSize"},
+		PersistenceCreateShardScope:                                    {operation: "CreateShard"},
+		PersistenceGetShardScope:                                       {operation: "GetShard"},
+		PersistenceUpdateShardScope:                                    {operation: "UpdateShard"},
+		PersistenceCreateWorkflowExecutionScope:                        {operation: "CreateWorkflowExecution"},
+		PersistenceGetWorkflowExecutionScope:                           {operation: "GetWorkflowExecution"},
+		PersistenceUpdateWorkflowExecutionScope:                        {operation: "UpdateWorkflowExecution"},
+		PersistenceConflictResolveWorkflowExecutionScope:               {operation: "ConflictResolveWorkflowExecution"},
+		PersistenceResetWorkflowExecutionScope:                         {operation: "ResetWorkflowExecution"},
+		PersistenceDeleteWorkflowExecutionScope:                        {operation: "DeleteWorkflowExecution"},
+		PersistenceDeleteCurrentWorkflowExecutionScope:                 {operation: "DeleteCurrentWorkflowExecution"},
+		PersistenceGetCurrentExecutionScope:                            {operation: "GetCurrentExecution"},
+		PersistenceIsWorkflowExecutionExistsScope:                      {operation: "IsWorkflowExecutionExists"},
+		PersistenceListCurrentExecutionsScope:                          {operation: "ListCurrentExecutions"},
+		PersistenceListConcreteExecutionsScope:                         {operation: "ListConcreteExecutions"},
+		PersistenceGetTransferTasksScope:                               {operation: "GetTransferTasks"},
+		PersistenceCompleteTransferTaskScope:                           {operation: "CompleteTransferTask"},
+		PersistenceRangeCompleteTransferTaskScope:                      {operation: "RangeCompleteTransferTask"},
+		PersistenceGetCrossClusterTasksScope:                           {operation: "GetCrossClusterTasks"},
+		PersistenceCompleteCrossClusterTaskScope:                       {operation: "GetCrossClusterTasks"},
+		PersistenceRangeCompleteCrossClusterTaskScope:                  {operation: "GetCrossClusterTasks"},
+		PersistenceGetReplicationTasksScope:                            {operation: "GetReplicationTasks"},
+		PersistenceCompleteReplicationTaskScope:                        {operation: "CompleteReplicationTask"},
+		PersistenceRangeCompleteReplicationTaskScope:                   {operation: "RangeCompleteReplicationTask"},
+		PersistencePutReplicationTaskToDLQScope:                        {operation: "PutReplicationTaskToDLQ"},
+		PersistenceGetReplicationTasksFromDLQScope:                     {operation: "GetReplicationTasksFromDLQ"},
+		PersistenceGetReplicationDLQSizeScope:                          {operation: "GetReplicationDLQSize"},
+		PersistenceDeleteReplicationTaskFromDLQScope:                   {operation: "DeleteReplicationTaskFromDLQ"},
+		PersistenceRangeDeleteReplicationTaskFromDLQScope:              {operation: "RangeDeleteReplicationTaskFromDLQ"},
+		PersistenceCreateFailoverMarkerTasksScope:                      {operation: "CreateFailoverMarkerTasks"},
+		PersistenceGetTimerIndexTasksScope:                             {operation: "GetTimerIndexTasks"},
+		PersistenceCompleteTimerTaskScope:                              {operation: "CompleteTimerTask"},
+		PersistenceRangeCompleteTimerTaskScope:                         {operation: "RangeCompleteTimerTask"},
+		PersistenceCreateTaskScope:                                     {operation: "CreateTask"},
+		PersistenceGetTasksScope:                                       {operation: "GetTasks"},
+		PersistenceCompleteTaskScope:                                   {operation: "CompleteTask"},
+		PersistenceCompleteTasksLessThanScope:                          {operation: "CompleteTasksLessThan"},
+		PersistenceGetOrphanTasksScope:                                 {operation: "GetOrphanTasks"},
+		PersistenceLeaseTaskListScope:                                  {operation: "LeaseTaskList"},
+		PersistenceUpdateTaskListScope:                                 {operation: "UpdateTaskList"},
+		PersistenceListTaskListScope:                                   {operation: "ListTaskList"},
+		PersistenceDeleteTaskListScope:                                 {operation: "DeleteTaskList"},
+		PersistenceAppendHistoryEventsScope:                            {operation: "AppendHistoryEvents"},
+		PersistenceGetWorkflowExecutionHistoryScope:                    {operation: "GetWorkflowExecutionHistory"},
+		PersistenceDeleteWorkflowExecutionHistoryScope:                 {operation: "DeleteWorkflowExecutionHistory"},
+		PersistenceCreateDomainScope:                                   {operation: "CreateDomain"},
+		PersistenceGetDomainScope:                                      {operation: "GetDomain"},
+		PersistenceUpdateDomainScope:                                   {operation: "UpdateDomain"},
+		PersistenceDeleteDomainScope:                                   {operation: "DeleteDomain"},
+		PersistenceDeleteDomainByNameScope:                             {operation: "DeleteDomainByName"},
+		PersistenceListDomainScope:                                     {operation: "ListDomain"},
+		PersistenceGetMetadataScope:                                    {operation: "GetMetadata"},
+		PersistenceRecordWorkflowExecutionStartedScope:                 {operation: "RecordWorkflowExecutionStarted"},
+		PersistenceRecordWorkflowExecutionClosedScope:                  {operation: "RecordWorkflowExecutionClosed"},
+		PersistenceRecordWorkflowExecutionUninitializedScope:           {operation: "RecordWorkflowExecutionUninitialized"},
+		PersistenceUpsertWorkflowExecutionScope:                        {operation: "UpsertWorkflowExecution"},
+		PersistenceListOpenWorkflowExecutionsScope:                     {operation: "ListOpenWorkflowExecutions"},
+		PersistenceListClosedWorkflowExecutionsScope:                   {operation: "ListClosedWorkflowExecutions"},
+		PersistenceListOpenWorkflowExecutionsByTypeScope:               {operation: "ListOpenWorkflowExecutionsByType"},
+		PersistenceListClosedWorkflowExecutionsByTypeScope:             {operation: "ListClosedWorkflowExecutionsByType"},
+		PersistenceListOpenWorkflowExecutionsByWorkflowIDScope:         {operation: "ListOpenWorkflowExecutionsByWorkflowID"},
+		PersistenceListClosedWorkflowExecutionsByWorkflowIDScope:       {operation: "ListClosedWorkflowExecutionsByWorkflowID"},
+		PersistenceListClosedWorkflowExecutionsByStatusScope:           {operation: "ListClosedWorkflowExecutionsByStatus"},
+		PersistenceGetClosedWorkflowExecutionScope:                     {operation: "GetClosedWorkflowExecution"},
+		PersistenceVisibilityDeleteWorkflowExecutionScope:              {operation: "VisibilityDeleteWorkflowExecution"},
+		PersistenceVisibilityDeleteUninitializedWorkflowExecutionScope: {operation: "VisibilityDeleteUninitializedWorkflowExecution"},
+		PersistenceListWorkflowExecutionsScope:                         {operation: "ListWorkflowExecutions"},
+		PersistenceScanWorkflowExecutionsScope:                         {operation: "ScanWorkflowExecutions"},
+		PersistenceCountWorkflowExecutionsScope:                        {operation: "CountWorkflowExecutions"},
+		PersistenceAppendHistoryNodesScope:                             {operation: "AppendHistoryNodes"},
+		PersistenceReadHistoryBranchScope:                              {operation: "ReadHistoryBranch"},
+		PersistenceForkHistoryBranchScope:                              {operation: "ForkHistoryBranch"},
+		PersistenceDeleteHistoryBranchScope:                            {operation: "DeleteHistoryBranch"},
+		PersistenceCompleteForkBranchScope:                             {operation: "CompleteForkBranch"},
+		PersistenceGetHistoryTreeScope:                                 {operation: "GetHistoryTree"},
+		PersistenceGetAllHistoryTreeBranchesScope:                      {operation: "GetAllHistoryTreeBranches"},
+		PersistenceEnqueueMessageScope:                                 {operation: "EnqueueMessage"},
+		PersistenceEnqueueMessageToDLQScope:                            {operation: "EnqueueMessageToDLQ"},
+		PersistenceReadQueueMessagesScope:                              {operation: "ReadQueueMessages"},
+		PersistenceReadQueueMessagesFromDLQScope:                       {operation: "ReadQueueMessagesFromDLQ"},
+		PersistenceDeleteQueueMessagesScope:                            {operation: "DeleteQueueMessages"},
+		PersistenceDeleteQueueMessageFromDLQScope:                      {operation: "DeleteQueueMessageFromDLQ"},
+		PersistenceRangeDeleteMessagesFromDLQScope:                     {operation: "RangeDeleteMessagesFromDLQ"},
+		PersistenceUpdateAckLevelScope:                                 {operation: "UpdateAckLevel"},
+		PersistenceGetAckLevelScope:                                    {operation: "GetAckLevel"},
+		PersistenceUpdateDLQAckLevelScope:                              {operation: "UpdateDLQAckLevel"},
+		PersistenceGetDLQAckLevelScope:                                 {operation: "GetDLQAckLevel"},
+		PersistenceGetDLQSizeScope:                                     {operation: "GetDLQSize"},
+		PersistenceFetchDynamicConfigScope:                             {operation: "FetchDynamicConfig"},
+		PersistenceUpdateDynamicConfigScope:                            {operation: "UpdateDynamicConfig"},
+		PersistenceShardRequestCountScope:                              {operation: "ShardIdPersistenceRequest"},
 
 		ClusterMetadataArchivalConfigScope: {operation: "ArchivalConfig"},
 
@@ -1211,11 +1374,15 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		HistoryClientGetDLQReplicationTasksScope:              {operation: "HistoryClientGetDLQReplicationTasksScope", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
 		HistoryClientQueryWorkflowScope:                       {operation: "HistoryClientQueryWorkflowScope", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
 		HistoryClientReapplyEventsScope:                       {operation: "HistoryClientReapplyEventsScope", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
+		HistoryClientCountDLQMessagesScope:                    {operation: "HistoryClientCountDLQMessagesScope", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
 		HistoryClientReadDLQMessagesScope:                     {operation: "HistoryClientReadDLQMessagesScope", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
 		HistoryClientPurgeDLQMessagesScope:                    {operation: "HistoryClientPurgeDLQMessagesScope", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
 		HistoryClientMergeDLQMessagesScope:                    {operation: "HistoryClientMergeDLQMessagesScope", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
 		HistoryClientRefreshWorkflowTasksScope:                {operation: "HistoryClientRefreshWorkflowTasksScope", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
 		HistoryClientNotifyFailoverMarkersScope:               {operation: "HistoryClientNotifyFailoverMarkersScope", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
+		HistoryClientGetCrossClusterTasksScope:                {operation: "HistoryClientGetCrossClusterTasks", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
+		HistoryClientRespondCrossClusterTasksCompletedScope:   {operation: "HistoryClientRespondCrossClusterTasksCompleted", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
+		HistoryClientGetFailoverInfoScope:                     {operation: "HistoryClientGetFailoverInfo", tags: map[string]string{CadenceRoleTagName: HistoryClientRoleTagValue}},
 		MatchingClientPollForDecisionTaskScope:                {operation: "MatchingClientPollForDecisionTask", tags: map[string]string{CadenceRoleTagName: MatchingClientRoleTagValue}},
 		MatchingClientPollForActivityTaskScope:                {operation: "MatchingClientPollForActivityTask", tags: map[string]string{CadenceRoleTagName: MatchingClientRoleTagValue}},
 		MatchingClientAddActivityTaskScope:                    {operation: "MatchingClientAddActivityTask", tags: map[string]string{CadenceRoleTagName: MatchingClientRoleTagValue}},
@@ -1225,6 +1392,7 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		MatchingClientCancelOutstandingPollScope:              {operation: "MatchingClientCancelOutstandingPoll", tags: map[string]string{CadenceRoleTagName: MatchingClientRoleTagValue}},
 		MatchingClientDescribeTaskListScope:                   {operation: "MatchingClientDescribeTaskList", tags: map[string]string{CadenceRoleTagName: MatchingClientRoleTagValue}},
 		MatchingClientListTaskListPartitionsScope:             {operation: "MatchingClientListTaskListPartitions", tags: map[string]string{CadenceRoleTagName: MatchingClientRoleTagValue}},
+		MatchingClientGetTaskListsByDomainScope:               {operation: "MatchingClientGetTaskListsByDomain", tags: map[string]string{CadenceRoleTagName: MatchingClientRoleTagValue}},
 		FrontendClientDeprecateDomainScope:                    {operation: "FrontendClientDeprecateDomain", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
 		FrontendClientDescribeDomainScope:                     {operation: "FrontendClientDescribeDomain", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
 		FrontendClientDescribeTaskListScope:                   {operation: "FrontendClientDescribeTaskList", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
@@ -1244,6 +1412,7 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		FrontendClientRegisterDomainScope:                     {operation: "FrontendClientRegisterDomain", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
 		FrontendClientRequestCancelWorkflowExecutionScope:     {operation: "FrontendClientRequestCancelWorkflowExecution", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
 		FrontendClientResetStickyTaskListScope:                {operation: "FrontendClientResetStickyTaskList", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
+		FrontendClientRefreshWorkflowTasksScope:               {operation: "FrontendClientRefreshWorkflowTasks", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
 		FrontendClientResetWorkflowExecutionScope:             {operation: "FrontendClientResetWorkflowExecution", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
 		FrontendClientRespondActivityTaskCanceledScope:        {operation: "FrontendClientRespondActivityTaskCanceled", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
 		FrontendClientRespondActivityTaskCanceledByIDScope:    {operation: "FrontendClientRespondActivityTaskCanceledByID", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
@@ -1269,8 +1438,10 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		FrontendClientReapplyEventsScope:                      {operation: "FrontendClientReapplyEventsScope", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
 		FrontendClientGetClusterInfoScope:                     {operation: "FrontendClientGetClusterInfoScope", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
 		FrontendClientListTaskListPartitionsScope:             {operation: "FrontendClientListTaskListPartitions", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
+		FrontendClientGetTaskListsByDomainScope:               {operation: "FrontendClientGetTaskListsByDomain", tags: map[string]string{CadenceRoleTagName: FrontendClientRoleTagValue}},
 		AdminClientAddSearchAttributeScope:                    {operation: "AdminClientAddSearchAttribute", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
 		AdminClientDescribeHistoryHostScope:                   {operation: "AdminClientDescribeHistoryHost", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
+		AdminClientDescribeShardDistributionScope:             {operation: "AdminClientDescribeShardDistribution", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
 		AdminClientDescribeWorkflowExecutionScope:             {operation: "AdminClientDescribeWorkflowExecution", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
 		AdminClientGetWorkflowExecutionRawHistoryV2Scope:      {operation: "AdminClientGetWorkflowExecutionRawHistoryV2", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
 		AdminClientDescribeClusterScope:                       {operation: "AdminClientDescribeCluster", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
@@ -1280,9 +1451,16 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		AdminClientRemoveTaskScope:                            {operation: "AdminClientRemoveTask", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
 		AdminClientResetQueueScope:                            {operation: "AdminClientResetQueue", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
 		AdminClientDescribeQueueScope:                         {operation: "AdminClientDescribeQueue", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
+		AdminClientCountDLQMessagesScope:                      {operation: "AdminClientCountDLQMessages", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
 		AdminClientReadDLQMessagesScope:                       {operation: "AdminClientReadDLQMessages", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
 		AdminClientPurgeDLQMessagesScope:                      {operation: "AdminClientPurgeDLQMessages", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
 		AdminClientMergeDLQMessagesScope:                      {operation: "AdminClientMergeDLQMessages", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
+		AdminClientGetCrossClusterTasksScope:                  {operation: "AdminClientGetCrossClusterTasks", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
+		AdminClientRespondCrossClusterTasksCompletedScope:     {operation: "AdminClientRespondCrossClusterTasksCompleted", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
+		AdminClientGetDynamicConfigScope:                      {operation: "AdminClientGetDynamicConfigScope", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
+		AdminClientUpdateDynamicConfigScope:                   {operation: "AdminClientUpdateDynamicConfigScope", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
+		AdminClientRestoreDynamicConfigScope:                  {operation: "AdminClientRestoreDynamicConfigScope", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
+		AdminClientListDynamicConfigScope:                     {operation: "AdminClientListDynamicConfigScope", tags: map[string]string{CadenceRoleTagName: AdminClientRoleTagValue}},
 		DCRedirectionDeprecateDomainScope:                     {operation: "DCRedirectionDeprecateDomain", tags: map[string]string{CadenceRoleTagName: DCRedirectionRoleTagValue}},
 		DCRedirectionDescribeDomainScope:                      {operation: "DCRedirectionDescribeDomain", tags: map[string]string{CadenceRoleTagName: DCRedirectionRoleTagValue}},
 		DCRedirectionDescribeTaskListScope:                    {operation: "DCRedirectionDescribeTaskList", tags: map[string]string{CadenceRoleTagName: DCRedirectionRoleTagValue}},
@@ -1322,6 +1500,8 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		DCRedirectionTerminateWorkflowExecutionScope:          {operation: "DCRedirectionTerminateWorkflowExecution", tags: map[string]string{CadenceRoleTagName: DCRedirectionRoleTagValue}},
 		DCRedirectionUpdateDomainScope:                        {operation: "DCRedirectionUpdateDomain", tags: map[string]string{CadenceRoleTagName: DCRedirectionRoleTagValue}},
 		DCRedirectionListTaskListPartitionsScope:              {operation: "DCRedirectionListTaskListPartitions", tags: map[string]string{CadenceRoleTagName: DCRedirectionRoleTagValue}},
+		DCRedirectionGetTaskListsByDomainScope:                {operation: "DCRedirectionGetTaskListsByDomain", tags: map[string]string{CadenceRoleTagName: DCRedirectionRoleTagValue}},
+		DCRedirectionRefreshWorkflowTasksScope:                {operation: "DCRedirectionRefreshWorkflowTasks", tags: map[string]string{CadenceRoleTagName: DCRedirectionRoleTagValue}},
 
 		MessagingClientPublishScope:      {operation: "MessagingClientPublish"},
 		MessagingClientPublishBatchScope: {operation: "MessagingClientPublishBatch"},
@@ -1336,6 +1516,7 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 
 		ElasticsearchRecordWorkflowExecutionStartedScope:           {operation: "RecordWorkflowExecutionStarted"},
 		ElasticsearchRecordWorkflowExecutionClosedScope:            {operation: "RecordWorkflowExecutionClosed"},
+		ElasticsearchRecordWorkflowExecutionUninitializedScope:     {operation: "RecordWorkflowExecutionUninitialized"},
 		ElasticsearchUpsertWorkflowExecutionScope:                  {operation: "UpsertWorkflowExecution"},
 		ElasticsearchListOpenWorkflowExecutionsScope:               {operation: "ListOpenWorkflowExecutions"},
 		ElasticsearchListClosedWorkflowExecutionsScope:             {operation: "ListClosedWorkflowExecutions"},
@@ -1349,6 +1530,7 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		ElasticsearchScanWorkflowExecutionsScope:                   {operation: "ScanWorkflowExecutions"},
 		ElasticsearchCountWorkflowExecutionsScope:                  {operation: "CountWorkflowExecutions"},
 		ElasticsearchDeleteWorkflowExecutionsScope:                 {operation: "DeleteWorkflowExecution"},
+		ElasticsearchDeleteUninitializedWorkflowExecutionsScope:    {operation: "DeleteUninitializedWorkflowExecution"},
 		SequentialTaskProcessingScope:                              {operation: "SequentialTaskProcessing"},
 		ParallelTaskProcessingScope:                                {operation: "ParallelTaskProcessing"},
 		TaskSchedulerScope:                                         {operation: "TaskScheduler"},
@@ -1365,29 +1547,42 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 
 		DomainFailoverScope:         {operation: "DomainFailover"},
 		DomainReplicationQueueScope: {operation: "DomainReplicationQueue"},
+		ClusterMetadataScope:        {operation: "ClusterMetadata"},
 	},
 	// Frontend Scope Names
 	Frontend: {
 		// Admin API scope co-locates with with frontend
-		AdminRemoveTaskScope:                       {operation: "AdminRemoveTask"},
-		AdminCloseShardScope:                       {operation: "AdminCloseShard"},
-		AdminResetQueueScope:                       {operation: "AdminResetQueueScope"},
-		AdminDescribeQueueScope:                    {operation: "AdminDescribeQueueScope"},
-		AdminReadDLQMessagesScope:                  {operation: "AdminReadDLQMessages"},
-		AdminPurgeDLQMessagesScope:                 {operation: "AdminPurgeDLQMessages"},
-		AdminMergeDLQMessagesScope:                 {operation: "AdminMergeDLQMessages"},
-		AdminDescribeHistoryHostScope:              {operation: "DescribeHistoryHost"},
-		AdminAddSearchAttributeScope:               {operation: "AddSearchAttribute"},
-		AdminDescribeWorkflowExecutionScope:        {operation: "DescribeWorkflowExecution"},
-		AdminGetWorkflowExecutionRawHistoryScope:   {operation: "GetWorkflowExecutionRawHistory"},
-		AdminGetWorkflowExecutionRawHistoryV2Scope: {operation: "GetWorkflowExecutionRawHistoryV2"},
-		AdminGetReplicationMessagesScope:           {operation: "GetReplicationMessages"},
-		AdminGetDomainReplicationMessagesScope:     {operation: "GetDomainReplicationMessages"},
-		AdminGetDLQReplicationMessagesScope:        {operation: "AdminGetDLQReplicationMessages"},
-		AdminReapplyEventsScope:                    {operation: "ReapplyEvents"},
-		AdminRefreshWorkflowTasksScope:             {operation: "RefreshWorkflowTasks"},
-		AdminResendReplicationTasksScope:           {operation: "ResendReplicationTasks"},
+		AdminRemoveTaskScope:                        {operation: "AdminRemoveTask"},
+		AdminCloseShardScope:                        {operation: "AdminCloseShard"},
+		AdminResetQueueScope:                        {operation: "AdminResetQueue"},
+		AdminDescribeQueueScope:                     {operation: "AdminDescribeQueue"},
+		AdminCountDLQMessagesScope:                  {operation: "AdminCountDLQMessages"},
+		AdminReadDLQMessagesScope:                   {operation: "AdminReadDLQMessages"},
+		AdminPurgeDLQMessagesScope:                  {operation: "AdminPurgeDLQMessages"},
+		AdminMergeDLQMessagesScope:                  {operation: "AdminMergeDLQMessages"},
+		AdminDescribeHistoryHostScope:               {operation: "DescribeHistoryHost"},
+		AdminDescribeShardDistributionScope:         {operation: "AdminShardList"},
+		AdminDescribeClusterScope:                   {operation: "DescribeCluster"},
+		AdminAddSearchAttributeScope:                {operation: "AddSearchAttribute"},
+		AdminDescribeWorkflowExecutionScope:         {operation: "DescribeWorkflowExecution"},
+		AdminGetWorkflowExecutionRawHistoryScope:    {operation: "GetWorkflowExecutionRawHistory"},
+		AdminGetWorkflowExecutionRawHistoryV2Scope:  {operation: "GetWorkflowExecutionRawHistoryV2"},
+		AdminGetReplicationMessagesScope:            {operation: "GetReplicationMessages"},
+		AdminGetDomainReplicationMessagesScope:      {operation: "GetDomainReplicationMessages"},
+		AdminGetDLQReplicationMessagesScope:         {operation: "AdminGetDLQReplicationMessages"},
+		AdminReapplyEventsScope:                     {operation: "ReapplyEvents"},
+		AdminRefreshWorkflowTasksScope:              {operation: "RefreshWorkflowTasks"},
+		AdminResendReplicationTasksScope:            {operation: "ResendReplicationTasks"},
+		AdminGetCrossClusterTasksScope:              {operation: "AdminGetCrossClusterTasks"},
+		AdminRespondCrossClusterTasksCompletedScope: {operation: "AdminRespondCrossClusterTasksCompleted"},
+		AdminGetDynamicConfigScope:                  {operation: "AdminGetDynamicConfig"},
+		AdminUpdateDynamicConfigScope:               {operation: "AdminUpdateDynamicConfig"},
+		AdminRestoreDynamicConfigScope:              {operation: "AdminRestoreDynamicConfig"},
+		AdminListDynamicConfigScope:                 {operation: "AdminListDynamicConfig"},
+		AdminDeleteWorkflowScope:                    {operation: "AdminDeleteWorkflow"},
+		MaintainCorruptWorkflowScope:                {operation: "MaintainCorruptWorkflow"},
 
+		FrontendRestartWorkflowExecutionScope:           {operation: "RestartWorkflowExecution"},
 		FrontendStartWorkflowExecutionScope:             {operation: "StartWorkflowExecution"},
 		FrontendPollForDecisionTaskScope:                {operation: "PollForDecisionTask"},
 		FrontendPollForActivityTaskScope:                {operation: "PollForActivityTask"},
@@ -1424,118 +1619,148 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		FrontendQueryWorkflowScope:                      {operation: "QueryWorkflow"},
 		FrontendDescribeWorkflowExecutionScope:          {operation: "DescribeWorkflowExecution"},
 		FrontendListTaskListPartitionsScope:             {operation: "FrontendListTaskListPartitions"},
+		FrontendGetTaskListsByDomainScope:               {operation: "FrontendGetTaskListsByDomain"},
+		FrontendRefreshWorkflowTasksScope:               {operation: "FrontendRefreshWorkflowTasks"},
 		FrontendDescribeTaskListScope:                   {operation: "DescribeTaskList"},
 		FrontendResetStickyTaskListScope:                {operation: "ResetStickyTaskList"},
 		FrontendGetSearchAttributesScope:                {operation: "GetSearchAttributes"},
 	},
 	// History Scope Names
 	History: {
-		HistoryStartWorkflowExecutionScope:                     {operation: "StartWorkflowExecution"},
-		HistoryRecordActivityTaskHeartbeatScope:                {operation: "RecordActivityTaskHeartbeat"},
-		HistoryRespondDecisionTaskCompletedScope:               {operation: "RespondDecisionTaskCompleted"},
-		HistoryRespondDecisionTaskFailedScope:                  {operation: "RespondDecisionTaskFailed"},
-		HistoryRespondActivityTaskCompletedScope:               {operation: "RespondActivityTaskCompleted"},
-		HistoryRespondActivityTaskFailedScope:                  {operation: "RespondActivityTaskFailed"},
-		HistoryRespondActivityTaskCanceledScope:                {operation: "RespondActivityTaskCanceled"},
-		HistoryResetQueueScope:                                 {operation: "ResetQueue"},
-		HistoryDescribeQueueScope:                              {operation: "DescribeQueue"},
-		HistoryDescribeMutabelStateScope:                       {operation: "DescribeMutableState"},
-		HistoryGetMutableStateScope:                            {operation: "GetMutableState"},
-		HistoryPollMutableStateScope:                           {operation: "PollMutableState"},
-		HistoryResetStickyTaskListScope:                        {operation: "ResetStickyTaskListScope"},
-		HistoryDescribeWorkflowExecutionScope:                  {operation: "DescribeWorkflowExecution"},
-		HistoryRecordDecisionTaskStartedScope:                  {operation: "RecordDecisionTaskStarted"},
-		HistoryRecordActivityTaskStartedScope:                  {operation: "RecordActivityTaskStarted"},
-		HistorySignalWorkflowExecutionScope:                    {operation: "SignalWorkflowExecution"},
-		HistorySignalWithStartWorkflowExecutionScope:           {operation: "SignalWithStartWorkflowExecution"},
-		HistoryRemoveSignalMutableStateScope:                   {operation: "RemoveSignalMutableState"},
-		HistoryTerminateWorkflowExecutionScope:                 {operation: "TerminateWorkflowExecution"},
-		HistoryResetWorkflowExecutionScope:                     {operation: "ResetWorkflowExecution"},
-		HistoryQueryWorkflowScope:                              {operation: "QueryWorkflow"},
-		HistoryProcessDeleteHistoryEventScope:                  {operation: "ProcessDeleteHistoryEvent"},
-		HistoryScheduleDecisionTaskScope:                       {operation: "ScheduleDecisionTask"},
-		HistoryRecordChildExecutionCompletedScope:              {operation: "RecordChildExecutionCompleted"},
-		HistoryRequestCancelWorkflowExecutionScope:             {operation: "RequestCancelWorkflowExecution"},
-		HistoryReplicateEventsScope:                            {operation: "ReplicateEvents"},
-		HistoryReplicateRawEventsScope:                         {operation: "ReplicateRawEvents"},
-		HistoryReplicateEventsV2Scope:                          {operation: "ReplicateEventsV2"},
-		HistorySyncShardStatusScope:                            {operation: "SyncShardStatus"},
-		HistorySyncActivityScope:                               {operation: "SyncActivity"},
-		HistoryDescribeMutableStateScope:                       {operation: "DescribeMutableState"},
-		HistoryGetReplicationMessagesScope:                     {operation: "GetReplicationMessages"},
-		HistoryGetDLQReplicationMessagesScope:                  {operation: "GetDLQReplicationMessages"},
-		HistoryReadDLQMessagesScope:                            {operation: "ReadDLQMessages"},
-		HistoryPurgeDLQMessagesScope:                           {operation: "PurgeDLQMessages"},
-		HistoryMergeDLQMessagesScope:                           {operation: "MergeDLQMessages"},
-		HistoryShardControllerScope:                            {operation: "ShardController"},
-		HistoryReapplyEventsScope:                              {operation: "EventReapplication"},
-		HistoryRefreshWorkflowTasksScope:                       {operation: "RefreshWorkflowTasks"},
-		HistoryNotifyFailoverMarkersScope:                      {operation: "NotifyFailoverMarkers"},
-		TaskPriorityAssignerScope:                              {operation: "TaskPriorityAssigner"},
-		TransferQueueProcessorScope:                            {operation: "TransferQueueProcessor"},
-		TransferActiveQueueProcessorScope:                      {operation: "TransferActiveQueueProcessor"},
-		TransferStandbyQueueProcessorScope:                     {operation: "TransferStandbyQueueProcessor"},
-		TransferActiveTaskActivityScope:                        {operation: "TransferActiveTaskActivity"},
-		TransferActiveTaskDecisionScope:                        {operation: "TransferActiveTaskDecision"},
-		TransferActiveTaskCloseExecutionScope:                  {operation: "TransferActiveTaskCloseExecution"},
-		TransferActiveTaskCancelExecutionScope:                 {operation: "TransferActiveTaskCancelExecution"},
-		TransferActiveTaskSignalExecutionScope:                 {operation: "TransferActiveTaskSignalExecution"},
-		TransferActiveTaskStartChildExecutionScope:             {operation: "TransferActiveTaskStartChildExecution"},
-		TransferActiveTaskRecordWorkflowStartedScope:           {operation: "TransferActiveTaskRecordWorkflowStarted"},
-		TransferActiveTaskResetWorkflowScope:                   {operation: "TransferActiveTaskResetWorkflow"},
-		TransferActiveTaskUpsertWorkflowSearchAttributesScope:  {operation: "TransferActiveTaskUpsertWorkflowSearchAttributes"},
-		TransferStandbyTaskActivityScope:                       {operation: "TransferStandbyTaskActivity"},
-		TransferStandbyTaskDecisionScope:                       {operation: "TransferStandbyTaskDecision"},
-		TransferStandbyTaskCloseExecutionScope:                 {operation: "TransferStandbyTaskCloseExecution"},
-		TransferStandbyTaskCancelExecutionScope:                {operation: "TransferStandbyTaskCancelExecution"},
-		TransferStandbyTaskSignalExecutionScope:                {operation: "TransferStandbyTaskSignalExecution"},
-		TransferStandbyTaskStartChildExecutionScope:            {operation: "TransferStandbyTaskStartChildExecution"},
-		TransferStandbyTaskRecordWorkflowStartedScope:          {operation: "TransferStandbyTaskRecordWorkflowStarted"},
-		TransferStandbyTaskResetWorkflowScope:                  {operation: "TransferStandbyTaskResetWorkflow"},
-		TransferStandbyTaskUpsertWorkflowSearchAttributesScope: {operation: "TransferStandbyTaskUpsertWorkflowSearchAttributes"},
-		TimerQueueProcessorScope:                               {operation: "TimerQueueProcessor"},
-		TimerActiveQueueProcessorScope:                         {operation: "TimerActiveQueueProcessor"},
-		TimerStandbyQueueProcessorScope:                        {operation: "TimerStandbyQueueProcessor"},
-		TimerActiveTaskActivityTimeoutScope:                    {operation: "TimerActiveTaskActivityTimeout"},
-		TimerActiveTaskDecisionTimeoutScope:                    {operation: "TimerActiveTaskDecisionTimeout"},
-		TimerActiveTaskUserTimerScope:                          {operation: "TimerActiveTaskUserTimer"},
-		TimerActiveTaskWorkflowTimeoutScope:                    {operation: "TimerActiveTaskWorkflowTimeout"},
-		TimerActiveTaskActivityRetryTimerScope:                 {operation: "TimerActiveTaskActivityRetryTimer"},
-		TimerActiveTaskWorkflowBackoffTimerScope:               {operation: "TimerActiveTaskWorkflowBackoffTimer"},
-		TimerActiveTaskDeleteHistoryEventScope:                 {operation: "TimerActiveTaskDeleteHistoryEvent"},
-		TimerStandbyTaskActivityTimeoutScope:                   {operation: "TimerStandbyTaskActivityTimeout"},
-		TimerStandbyTaskDecisionTimeoutScope:                   {operation: "TimerStandbyTaskDecisionTimeout"},
-		TimerStandbyTaskUserTimerScope:                         {operation: "TimerStandbyTaskUserTimer"},
-		TimerStandbyTaskWorkflowTimeoutScope:                   {operation: "TimerStandbyTaskWorkflowTimeout"},
-		TimerStandbyTaskActivityRetryTimerScope:                {operation: "TimerStandbyTaskActivityRetryTimer"},
-		TimerStandbyTaskWorkflowBackoffTimerScope:              {operation: "TimerStandbyTaskWorkflowBackoffTimer"},
-		TimerStandbyTaskDeleteHistoryEventScope:                {operation: "TimerStandbyTaskDeleteHistoryEvent"},
-		HistoryEventNotificationScope:                          {operation: "HistoryEventNotification"},
-		ReplicatorQueueProcessorScope:                          {operation: "ReplicatorQueueProcessor"},
-		ReplicatorTaskHistoryScope:                             {operation: "ReplicatorTaskHistory"},
-		ReplicatorTaskSyncActivityScope:                        {operation: "ReplicatorTaskSyncActivity"},
-		ReplicateHistoryEventsScope:                            {operation: "ReplicateHistoryEvents"},
-		ShardInfoScope:                                         {operation: "ShardInfo"},
-		WorkflowContextScope:                                   {operation: "WorkflowContext"},
-		HistoryCacheGetAndCreateScope:                          {operation: "HistoryCacheGetAndCreate", tags: map[string]string{CacheTypeTagName: MutableStateCacheTypeTagValue}},
-		HistoryCacheGetOrCreateScope:                           {operation: "HistoryCacheGetOrCreate", tags: map[string]string{CacheTypeTagName: MutableStateCacheTypeTagValue}},
-		HistoryCacheGetOrCreateCurrentScope:                    {operation: "HistoryCacheGetOrCreateCurrent", tags: map[string]string{CacheTypeTagName: MutableStateCacheTypeTagValue}},
-		HistoryCacheGetCurrentExecutionScope:                   {operation: "HistoryCacheGetCurrentExecution", tags: map[string]string{CacheTypeTagName: MutableStateCacheTypeTagValue}},
-		EventsCacheGetEventScope:                               {operation: "EventsCacheGetEvent", tags: map[string]string{CacheTypeTagName: EventsCacheTypeTagValue}},
-		EventsCachePutEventScope:                               {operation: "EventsCachePutEvent", tags: map[string]string{CacheTypeTagName: EventsCacheTypeTagValue}},
-		EventsCacheGetFromStoreScope:                           {operation: "EventsCacheGetFromStore", tags: map[string]string{CacheTypeTagName: EventsCacheTypeTagValue}},
-		ExecutionSizeStatsScope:                                {operation: "ExecutionStats", tags: map[string]string{StatsTypeTagName: SizeStatsTypeTagValue}},
-		ExecutionCountStatsScope:                               {operation: "ExecutionStats", tags: map[string]string{StatsTypeTagName: CountStatsTypeTagValue}},
-		SessionSizeStatsScope:                                  {operation: "SessionStats", tags: map[string]string{StatsTypeTagName: SizeStatsTypeTagValue}},
-		SessionCountStatsScope:                                 {operation: "SessionStats", tags: map[string]string{StatsTypeTagName: CountStatsTypeTagValue}},
-		WorkflowCompletionStatsScope:                           {operation: "CompletionStats", tags: map[string]string{StatsTypeTagName: CountStatsTypeTagValue}},
-		ArchiverClientScope:                                    {operation: "ArchiverClient"},
-		ReplicationTaskFetcherScope:                            {operation: "ReplicationTaskFetcher"},
-		ReplicationTaskCleanupScope:                            {operation: "ReplicationTaskCleanup"},
-		ReplicationDLQStatsScope:                               {operation: "ReplicationDLQStats"},
-		FailoverMarkerScope:                                    {operation: "FailoverMarker"},
-		HistoryReplicationV2TaskScope:                          {operation: "HistoryReplicationV2Task"},
-		SyncActivityTaskScope:                                  {operation: "SyncActivityTask"},
+		HistoryStartWorkflowExecutionScope:                              {operation: "StartWorkflowExecution"},
+		HistoryRecordActivityTaskHeartbeatScope:                         {operation: "RecordActivityTaskHeartbeat"},
+		HistoryRespondDecisionTaskCompletedScope:                        {operation: "RespondDecisionTaskCompleted"},
+		HistoryRespondDecisionTaskFailedScope:                           {operation: "RespondDecisionTaskFailed"},
+		HistoryRespondActivityTaskCompletedScope:                        {operation: "RespondActivityTaskCompleted"},
+		HistoryRespondActivityTaskFailedScope:                           {operation: "RespondActivityTaskFailed"},
+		HistoryRespondActivityTaskCanceledScope:                         {operation: "RespondActivityTaskCanceled"},
+		HistoryResetQueueScope:                                          {operation: "ResetQueue"},
+		HistoryDescribeQueueScope:                                       {operation: "DescribeQueue"},
+		HistoryDescribeMutabelStateScope:                                {operation: "DescribeMutableState"},
+		HistoryGetMutableStateScope:                                     {operation: "GetMutableState"},
+		HistoryPollMutableStateScope:                                    {operation: "PollMutableState"},
+		HistoryResetStickyTaskListScope:                                 {operation: "ResetStickyTaskListScope"},
+		HistoryDescribeWorkflowExecutionScope:                           {operation: "DescribeWorkflowExecution"},
+		HistoryRecordDecisionTaskStartedScope:                           {operation: "RecordDecisionTaskStarted"},
+		HistoryRecordActivityTaskStartedScope:                           {operation: "RecordActivityTaskStarted"},
+		HistorySignalWorkflowExecutionScope:                             {operation: "SignalWorkflowExecution"},
+		HistorySignalWithStartWorkflowExecutionScope:                    {operation: "SignalWithStartWorkflowExecution"},
+		HistoryRemoveSignalMutableStateScope:                            {operation: "RemoveSignalMutableState"},
+		HistoryTerminateWorkflowExecutionScope:                          {operation: "TerminateWorkflowExecution"},
+		HistoryResetWorkflowExecutionScope:                              {operation: "ResetWorkflowExecution"},
+		HistoryQueryWorkflowScope:                                       {operation: "QueryWorkflow"},
+		HistoryProcessDeleteHistoryEventScope:                           {operation: "ProcessDeleteHistoryEvent"},
+		HistoryScheduleDecisionTaskScope:                                {operation: "ScheduleDecisionTask"},
+		HistoryRecordChildExecutionCompletedScope:                       {operation: "RecordChildExecutionCompleted"},
+		HistoryRequestCancelWorkflowExecutionScope:                      {operation: "RequestCancelWorkflowExecution"},
+		HistoryReplicateEventsScope:                                     {operation: "ReplicateEvents"},
+		HistoryReplicateRawEventsScope:                                  {operation: "ReplicateRawEvents"},
+		HistoryReplicateEventsV2Scope:                                   {operation: "ReplicateEventsV2"},
+		HistorySyncShardStatusScope:                                     {operation: "SyncShardStatus"},
+		HistorySyncActivityScope:                                        {operation: "SyncActivity"},
+		HistoryDescribeMutableStateScope:                                {operation: "DescribeMutableState"},
+		HistoryGetReplicationMessagesScope:                              {operation: "GetReplicationMessages"},
+		HistoryGetDLQReplicationMessagesScope:                           {operation: "GetDLQReplicationMessages"},
+		HistoryCountDLQMessagesScope:                                    {operation: "CountDLQMessages"},
+		HistoryReadDLQMessagesScope:                                     {operation: "ReadDLQMessages"},
+		HistoryPurgeDLQMessagesScope:                                    {operation: "PurgeDLQMessages"},
+		HistoryMergeDLQMessagesScope:                                    {operation: "MergeDLQMessages"},
+		HistoryShardControllerScope:                                     {operation: "ShardController"},
+		HistoryReapplyEventsScope:                                       {operation: "EventReapplication"},
+		HistoryRefreshWorkflowTasksScope:                                {operation: "RefreshWorkflowTasks"},
+		HistoryNotifyFailoverMarkersScope:                               {operation: "NotifyFailoverMarkers"},
+		HistoryGetCrossClusterTasksScope:                                {operation: "GetCrossClusterTasks"},
+		HistoryRespondCrossClusterTasksCompletedScope:                   {operation: "RespondCrossClusterTasksCompleted"},
+		HistoryGetFailoverInfoScope:                                     {operation: "GetFailoverInfo"},
+		TaskPriorityAssignerScope:                                       {operation: "TaskPriorityAssigner"},
+		TransferQueueProcessorScope:                                     {operation: "TransferQueueProcessor"},
+		TransferActiveQueueProcessorScope:                               {operation: "TransferActiveQueueProcessor"},
+		TransferStandbyQueueProcessorScope:                              {operation: "TransferStandbyQueueProcessor"},
+		TransferActiveTaskActivityScope:                                 {operation: "TransferActiveTaskActivity"},
+		TransferActiveTaskDecisionScope:                                 {operation: "TransferActiveTaskDecision"},
+		TransferActiveTaskCloseExecutionScope:                           {operation: "TransferActiveTaskCloseExecution"},
+		TransferActiveTaskCancelExecutionScope:                          {operation: "TransferActiveTaskCancelExecution"},
+		TransferActiveTaskSignalExecutionScope:                          {operation: "TransferActiveTaskSignalExecution"},
+		TransferActiveTaskStartChildExecutionScope:                      {operation: "TransferActiveTaskStartChildExecution"},
+		TransferActiveTaskRecordWorkflowStartedScope:                    {operation: "TransferActiveTaskRecordWorkflowStarted"},
+		TransferActiveTaskResetWorkflowScope:                            {operation: "TransferActiveTaskResetWorkflow"},
+		TransferActiveTaskUpsertWorkflowSearchAttributesScope:           {operation: "TransferActiveTaskUpsertWorkflowSearchAttributes"},
+		TransferActiveTaskRecordWorkflowClosedScope:                     {operation: "TransferActiveTaskRecordWorkflowClosed"},
+		TransferActiveTaskRecordChildExecutionCompletedScope:            {operation: "TransferActiveTaskRecordChildExecutionCompleted"},
+		TransferActiveTaskApplyParentClosePolicyScope:                   {operation: "TransferActiveTaskApplyParentClosePolicy"},
+		TransferStandbyTaskActivityScope:                                {operation: "TransferStandbyTaskActivity"},
+		TransferStandbyTaskDecisionScope:                                {operation: "TransferStandbyTaskDecision"},
+		TransferStandbyTaskCloseExecutionScope:                          {operation: "TransferStandbyTaskCloseExecution"},
+		TransferStandbyTaskCancelExecutionScope:                         {operation: "TransferStandbyTaskCancelExecution"},
+		TransferStandbyTaskSignalExecutionScope:                         {operation: "TransferStandbyTaskSignalExecution"},
+		TransferStandbyTaskStartChildExecutionScope:                     {operation: "TransferStandbyTaskStartChildExecution"},
+		TransferStandbyTaskRecordWorkflowStartedScope:                   {operation: "TransferStandbyTaskRecordWorkflowStarted"},
+		TransferStandbyTaskResetWorkflowScope:                           {operation: "TransferStandbyTaskResetWorkflow"},
+		TransferStandbyTaskUpsertWorkflowSearchAttributesScope:          {operation: "TransferStandbyTaskUpsertWorkflowSearchAttributes"},
+		TransferStandbyTaskRecordWorkflowClosedScope:                    {operation: "TransferStandbyTaskRecordWorkflowClosed"},
+		TransferStandbyTaskRecordChildExecutionCompletedScope:           {operation: "TransferStandbyTaskRecordChildExecutionCompleted"},
+		TransferStandbyTaskApplyParentClosePolicyScope:                  {operation: "TransferStandbyTaskApplyParentClosePolicy"},
+		TimerQueueProcessorScope:                                        {operation: "TimerQueueProcessor"},
+		TimerActiveQueueProcessorScope:                                  {operation: "TimerActiveQueueProcessor"},
+		TimerStandbyQueueProcessorScope:                                 {operation: "TimerStandbyQueueProcessor"},
+		TimerActiveTaskActivityTimeoutScope:                             {operation: "TimerActiveTaskActivityTimeout"},
+		TimerActiveTaskDecisionTimeoutScope:                             {operation: "TimerActiveTaskDecisionTimeout"},
+		TimerActiveTaskUserTimerScope:                                   {operation: "TimerActiveTaskUserTimer"},
+		TimerActiveTaskWorkflowTimeoutScope:                             {operation: "TimerActiveTaskWorkflowTimeout"},
+		TimerActiveTaskActivityRetryTimerScope:                          {operation: "TimerActiveTaskActivityRetryTimer"},
+		TimerActiveTaskWorkflowBackoffTimerScope:                        {operation: "TimerActiveTaskWorkflowBackoffTimer"},
+		TimerActiveTaskDeleteHistoryEventScope:                          {operation: "TimerActiveTaskDeleteHistoryEvent"},
+		TimerStandbyTaskActivityTimeoutScope:                            {operation: "TimerStandbyTaskActivityTimeout"},
+		TimerStandbyTaskDecisionTimeoutScope:                            {operation: "TimerStandbyTaskDecisionTimeout"},
+		TimerStandbyTaskUserTimerScope:                                  {operation: "TimerStandbyTaskUserTimer"},
+		TimerStandbyTaskWorkflowTimeoutScope:                            {operation: "TimerStandbyTaskWorkflowTimeout"},
+		TimerStandbyTaskActivityRetryTimerScope:                         {operation: "TimerStandbyTaskActivityRetryTimer"},
+		TimerStandbyTaskWorkflowBackoffTimerScope:                       {operation: "TimerStandbyTaskWorkflowBackoffTimer"},
+		TimerStandbyTaskDeleteHistoryEventScope:                         {operation: "TimerStandbyTaskDeleteHistoryEvent"},
+		CrossClusterQueueProcessorScope:                                 {operation: "CrossClusterQueueProcessor"},
+		CrossClusterTaskProcessorScope:                                  {operation: "CrossClusterTaskProcessor"},
+		CrossClusterTaskFetcherScope:                                    {operation: "CrossClusterTaskFetcher"},
+		CrossClusterSourceTaskStartChildExecutionScope:                  {operation: "CrossClusterSourceTaskStartChildExecution"},
+		CrossClusterSourceTaskCancelExecutionScope:                      {operation: "CrossClusterSourceTaskCancelExecution"},
+		CrossClusterSourceTaskSignalExecutionScope:                      {operation: "CrossClusterSourceTaskSignalExecution"},
+		CrossClusterSourceTaskRecordChildWorkflowExecutionCompleteScope: {operation: "CrossClusterSourceTaskTypeRecordChildWorkflowExecutionComplete"},
+		CrossClusterSourceTaskApplyParentClosePolicyScope:               {operation: "CrossClusterSourceTaskTypeApplyParentClosePolicy"},
+		CrossClusterTargetTaskStartChildExecutionScope:                  {operation: "CrossClusterTargetTaskStartChildExecution"},
+		CrossClusterTargetTaskCancelExecutionScope:                      {operation: "CrossClusterTargetTaskCancelExecution"},
+		CrossClusterTargetTaskSignalExecutionScope:                      {operation: "CrossClusterTargetTaskSignalExecution"},
+		CrossClusterTargetTaskRecordChildWorkflowExecutionCompleteScope: {operation: "CrossClusterTargetTaskTypeRecordChildWorkflowExecutionComplete"},
+		CrossClusterTargetTaskApplyParentClosePolicyScope:               {operation: "CrossClusterTargetTaskTypeApplyParentClosePolicy"},
+		HistoryEventNotificationScope:                                   {operation: "HistoryEventNotification"},
+		ReplicatorQueueProcessorScope:                                   {operation: "ReplicatorQueueProcessor"},
+		ReplicatorCacheManagerScope:                                     {operation: "ReplicatorCacheManager"},
+		ReplicatorTaskHistoryScope:                                      {operation: "ReplicatorTaskHistory"},
+		ReplicatorTaskSyncActivityScope:                                 {operation: "ReplicatorTaskSyncActivity"},
+		ReplicateHistoryEventsScope:                                     {operation: "ReplicateHistoryEvents"},
+		ReplicationMetricEmitterScope:                                   {operation: "ReplicationMetricEmitter"},
+		ShardInfoScope:                                                  {operation: "ShardInfo"},
+		WorkflowContextScope:                                            {operation: "WorkflowContext"},
+		HistoryCacheGetAndCreateScope:                                   {operation: "HistoryCacheGetAndCreate", tags: map[string]string{CacheTypeTagName: MutableStateCacheTypeTagValue}},
+		HistoryCacheGetOrCreateScope:                                    {operation: "HistoryCacheGetOrCreate", tags: map[string]string{CacheTypeTagName: MutableStateCacheTypeTagValue}},
+		HistoryCacheGetOrCreateCurrentScope:                             {operation: "HistoryCacheGetOrCreateCurrent", tags: map[string]string{CacheTypeTagName: MutableStateCacheTypeTagValue}},
+		HistoryCacheGetCurrentExecutionScope:                            {operation: "HistoryCacheGetCurrentExecution", tags: map[string]string{CacheTypeTagName: MutableStateCacheTypeTagValue}},
+		EventsCacheGetEventScope:                                        {operation: "EventsCacheGetEvent", tags: map[string]string{CacheTypeTagName: EventsCacheTypeTagValue}},
+		EventsCachePutEventScope:                                        {operation: "EventsCachePutEvent", tags: map[string]string{CacheTypeTagName: EventsCacheTypeTagValue}},
+		EventsCacheGetFromStoreScope:                                    {operation: "EventsCacheGetFromStore", tags: map[string]string{CacheTypeTagName: EventsCacheTypeTagValue}},
+		ExecutionSizeStatsScope:                                         {operation: "ExecutionStats", tags: map[string]string{StatsTypeTagName: SizeStatsTypeTagValue}},
+		ExecutionCountStatsScope:                                        {operation: "ExecutionStats", tags: map[string]string{StatsTypeTagName: CountStatsTypeTagValue}},
+		SessionSizeStatsScope:                                           {operation: "SessionStats", tags: map[string]string{StatsTypeTagName: SizeStatsTypeTagValue}},
+		SessionCountStatsScope:                                          {operation: "SessionStats", tags: map[string]string{StatsTypeTagName: CountStatsTypeTagValue}},
+		WorkflowCompletionStatsScope:                                    {operation: "CompletionStats", tags: map[string]string{StatsTypeTagName: CountStatsTypeTagValue}},
+		ArchiverClientScope:                                             {operation: "ArchiverClient"},
+		ReplicationTaskFetcherScope:                                     {operation: "ReplicationTaskFetcher"},
+		ReplicationTaskCleanupScope:                                     {operation: "ReplicationTaskCleanup"},
+		ReplicationDLQStatsScope:                                        {operation: "ReplicationDLQStats"},
+		FailoverMarkerScope:                                             {operation: "FailoverMarker"},
+		HistoryReplicationV2TaskScope:                                   {operation: "HistoryReplicationV2Task"},
+		SyncActivityTaskScope:                                           {operation: "SyncActivityTask"},
+		LargeExecutionSizeShardScope:                                    {operation: "LargeExecutionSizeShard"},
+		LargeExecutionCountShardScope:                                   {operation: "LargeExecutionCountShard"},
+		LargeExecutionBlobShardScope:                                    {operation: "LargeExecutionBlobShard"},
 	},
 	// Matching Scope Names
 	Matching: {
@@ -1543,12 +1768,14 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		MatchingPollForActivityTaskScope:       {operation: "PollForActivityTask"},
 		MatchingAddActivityTaskScope:           {operation: "AddActivityTask"},
 		MatchingAddDecisionTaskScope:           {operation: "AddDecisionTask"},
+		MatchingAddTaskScope:                   {operation: "AddTask"},
 		MatchingTaskListMgrScope:               {operation: "TaskListMgr"},
 		MatchingQueryWorkflowScope:             {operation: "QueryWorkflow"},
 		MatchingRespondQueryTaskCompletedScope: {operation: "RespondQueryTaskCompleted"},
 		MatchingCancelOutstandingPollScope:     {operation: "CancelOutstandingPoll"},
 		MatchingDescribeTaskListScope:          {operation: "DescribeTaskList"},
 		MatchingListTaskListPartitionsScope:    {operation: "ListTaskListPartitions"},
+		MatchingGetTaskListsByDomainScope:      {operation: "GetTaskListsByDomain"},
 	},
 	// Worker Scope Names
 	Worker: {
@@ -1565,10 +1792,13 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		TaskListScavengerScope:                 {operation: "tasklistscavenger"},
 		ExecutionsScannerScope:                 {operation: "ExecutionsScanner"},
 		ShardScannerScope:                      {operation: "ShardScanner"},
+		CheckDataCorruptionWorkflowScope:       {operation: "CheckDataCorruptionWorkflow"},
 		ExecutionsFixerScope:                   {operation: "ExecutionsFixer"},
 		HistoryScavengerScope:                  {operation: "historyscavenger"},
 		BatcherScope:                           {operation: "batcher"},
 		ParentClosePolicyProcessorScope:        {operation: "ParentClosePolicyProcessor"},
+		ESAnalyzerScope:                        {operation: "ESAnalyzer"},
+		WatchDogScope:                          {operation: "WatchDog"},
 	},
 }
 
@@ -1597,10 +1827,21 @@ const (
 	CadenceErrUnauthorizedCounter
 	CadenceErrAuthorizeFailedCounter
 	CadenceErrRemoteSyncMatchFailedCounter
-	CadenceErrIDLengthExceededWarnLimit
+	CadenceErrDomainNameExceededWarnLimit
+	CadenceErrIdentityExceededWarnLimit
+	CadenceErrWorkflowIDExceededWarnLimit
+	CadenceErrSignalNameExceededWarnLimit
+	CadenceErrWorkflowTypeExceededWarnLimit
+	CadenceErrRequestIDExceededWarnLimit
+	CadenceErrTaskListNameExceededWarnLimit
+	CadenceErrActivityIDExceededWarnLimit
+	CadenceErrActivityTypeExceededWarnLimit
+	CadenceErrMarkerNameExceededWarnLimit
+	CadenceErrTimerIDExceededWarnLimit
 	PersistenceRequests
 	PersistenceFailures
 	PersistenceLatency
+	PersistenceLatencyHistogram
 	PersistenceErrShardExistsCounter
 	PersistenceErrShardOwnershipLostCounter
 	PersistenceErrConditionFailedCounter
@@ -1611,11 +1852,34 @@ const (
 	PersistenceErrExecutionAlreadyStartedCounter
 	PersistenceErrDomainAlreadyExistsCounter
 	PersistenceErrBadRequestCounter
+	PersistenceErrDBUnavailableCounter
 	PersistenceSampledCounter
+	PersistenceEmptyResponseCounter
+
+	PersistenceRequestsPerDomain
+	PersistenceRequestsPerShard
+	PersistenceFailuresPerDomain
+	PersistenceLatencyPerDomain
+	PersistenceLatencyPerShard
+	PersistenceErrShardExistsCounterPerDomain
+	PersistenceErrShardOwnershipLostCounterPerDomain
+	PersistenceErrConditionFailedCounterPerDomain
+	PersistenceErrCurrentWorkflowConditionFailedCounterPerDomain
+	PersistenceErrTimeoutCounterPerDomain
+	PersistenceErrBusyCounterPerDomain
+	PersistenceErrEntityNotExistsCounterPerDomain
+	PersistenceErrExecutionAlreadyStartedCounterPerDomain
+	PersistenceErrDomainAlreadyExistsCounterPerDomain
+	PersistenceErrBadRequestCounterPerDomain
+	PersistenceErrDBUnavailableCounterPerDomain
+	PersistenceSampledCounterPerDomain
+	PersistenceEmptyResponseCounterPerDomain
 
 	CadenceClientRequests
 	CadenceClientFailures
 	CadenceClientLatency
+
+	CadenceTasklistRequests
 
 	CadenceDcRedirectionClientRequests
 	CadenceDcRedirectionClientFailures
@@ -1625,10 +1889,13 @@ const (
 
 	DomainCachePrepareCallbacksLatency
 	DomainCacheCallbacksLatency
+	DomainCacheCallbacksCount
 
 	HistorySize
 	HistoryCount
 	EventBlobSize
+
+	DecisionResultCount
 
 	ArchivalConfigFailures
 	ActiveClusterGauge
@@ -1638,6 +1905,11 @@ const (
 	ElasticsearchLatency
 	ElasticsearchErrBadRequestCounter
 	ElasticsearchErrBusyCounter
+	ElasticsearchRequestsPerDomain
+	ElasticsearchFailuresPerDomain
+	ElasticsearchLatencyPerDomain
+	ElasticsearchErrBadRequestCounterPerDomain
+	ElasticsearchErrBusyCounterPerDomain
 
 	SequentialTaskSubmitRequest
 	SequentialTaskSubmitRequestTaskQueueExist
@@ -1660,12 +1932,16 @@ const (
 	KafkaConsumerMessageNackDlqErr
 	KafkaConsumerSessionStart
 
+	GracefulFailoverLatency
+	GracefulFailoverFailure
+
 	HistoryArchiverArchiveNonRetryableErrorCount
 	HistoryArchiverArchiveTransientErrorCount
 	HistoryArchiverArchiveSuccessCount
 	HistoryArchiverHistoryMutatedCount
 	HistoryArchiverTotalUploadSize
 	HistoryArchiverHistorySize
+	HistoryArchiverDuplicateArchivalsCount
 
 	// The following metrics are only used by internal history archiver implemention.
 	// TODO: move them to internal repo once cadence plugin model is in place.
@@ -1675,7 +1951,6 @@ const (
 	HistoryArchiverDeterministicConstructionCheckFailedCount
 	HistoryArchiverRunningBlobIntegrityCheckCount
 	HistoryArchiverBlobIntegrityCheckFailedCount
-	HistoryArchiverDuplicateArchivalsCount
 
 	VisibilityArchiverArchiveNonRetryableErrorCount
 	VisibilityArchiverArchiveTransientErrorCount
@@ -1706,6 +1981,7 @@ const (
 	CadenceErrUnauthorizedPerTaskListCounter
 	CadenceErrAuthorizeFailedPerTaskListCounter
 	CadenceErrRemoteSyncMatchFailedPerTaskListCounter
+	CadenceErrStickyWorkerUnavailablePerTaskListCounter
 
 	CadenceShardSuccessGauge
 	CadenceShardFailureGauge
@@ -1730,6 +2006,7 @@ const (
 	TaskNotActiveCounter
 	TaskLimitExceededCounter
 	TaskBatchCompleteCounter
+	TaskBatchCompleteFailure
 	TaskProcessingLatency
 	TaskQueueLatency
 
@@ -1743,15 +2020,18 @@ const (
 	TaskStandbyRetryCounterPerDomain
 	TaskPendingActiveCounterPerDomain
 	TaskNotActiveCounterPerDomain
+	TaskTargetNotActiveCounterPerDomain
 	TaskLimitExceededCounterPerDomain
 	TaskProcessingLatencyPerDomain
 	TaskQueueLatencyPerDomain
 	TransferTaskMissingEventCounterPerDomain
+	ReplicationTasksAppliedPerDomain
 
 	TaskRedispatchQueuePendingTasksTimer
 
 	TransferTaskThrottledCounter
 	TimerTaskThrottledCounter
+	CrossClusterTaskThrottledCounter
 
 	TransferTaskMissingEventCounter
 
@@ -1767,12 +2047,31 @@ const (
 	QueueValidatorDropTaskCounter
 	QueueValidatorInvalidLoadCounter
 	QueueValidatorValidationCounter
+	QueueValidatorValidationFailure
+
+	CrossClusterFetchLatency
+	CrossClusterFetchRequests
+	CrossClusterFetchFailures
+	CrossClusterFetchServiceBusyFailures
+	CrossClusterTaskRespondLatency
+	CrossClusterTaskRespondRequests
+	CrossClusterTaskRespondFailures
+	CrossClusterTaskFetchedTimer
+	CrossClusterTaskPendingTimer
+
+	ClusterMetadataFailureToResolveCounter
+	ClusterMetadataGettingMinFailoverVersionCounter
+	ClusterMetadataGettingFailoverVersionCounter
+	ClusterMetadataResolvingFailoverVersionCounter
+	ClusterMetadataResolvingMinFailoverVersionCounter
 
 	ActivityE2ELatency
 	ActivityLostCounter
 	AckLevelUpdateCounter
 	AckLevelUpdateFailedCounter
 	DecisionTypeScheduleActivityCounter
+	DecisionTypeScheduleActivityDispatchSucceedCounter
+	DecisionTypeScheduleActivityDispatchCounter
 	DecisionTypeCompleteWorkflowCounter
 	DecisionTypeFailWorkflowCounter
 	DecisionTypeCancelWorkflowCounter
@@ -1789,8 +2088,11 @@ const (
 	MultipleCompletionDecisionsCounter
 	FailedDecisionsCounter
 	DecisionAttemptTimer
+	DecisionRetriesExceededCounter
 	StaleMutableStateCounter
 	DataInconsistentCounter
+	TimerResurrectionCounter
+	ActivityResurrectionCounter
 	AutoResetPointsLimitExceededCounter
 	AutoResetPointCorruptionCounter
 	ConcurrencyUpdateFailureCounter
@@ -1813,9 +2115,11 @@ const (
 	ShardInfoTransferStandbyPendingTasksTimer
 	ShardInfoTimerActivePendingTasksTimer
 	ShardInfoTimerStandbyPendingTasksTimer
+	ShardInfoCrossClusterPendingTasksTimer
 	ShardInfoReplicationLagTimer
 	ShardInfoTransferLagTimer
 	ShardInfoTimerLagTimer
+	ShardInfoCrossClusterLagTimer
 	ShardInfoTransferDiffTimer
 	ShardInfoTimerDiffTimer
 	ShardInfoTransferFailoverInProgressTimer
@@ -1844,10 +2148,13 @@ const (
 	UnbufferReplicationTaskTimer
 	HistoryConflictsCounter
 	CompleteTaskFailedCounter
+	CacheSize
 	CacheRequests
 	CacheFailures
 	CacheLatency
+	CacheHitCounter
 	CacheMissCounter
+	CacheFullCounter
 	AcquireLockFailedCounter
 	WorkflowContextCleared
 	MutableStateSize
@@ -1865,6 +2172,7 @@ const (
 	BufferedEventsCount
 	TransferTasksCount
 	TimerTasksCount
+	CrossClusterTasksCount
 	ReplicationTasksCount
 	DeleteActivityInfoCount
 	DeleteTimerInfoCount
@@ -1882,16 +2190,31 @@ const (
 	WorkflowFailedCount
 	WorkflowTimeoutCount
 	WorkflowTerminateCount
+	WorkflowContinuedAsNew
+	WorkflowCompletedUnknownType
 	ArchiverClientSendSignalCount
 	ArchiverClientSendSignalFailureCount
 	ArchiverClientHistoryRequestCount
 	ArchiverClientHistoryInlineArchiveAttemptCount
 	ArchiverClientHistoryInlineArchiveFailureCount
+	ArchiverClientHistoryInlineArchiveThrottledCount
 	ArchiverClientVisibilityRequestCount
 	ArchiverClientVisibilityInlineArchiveAttemptCount
 	ArchiverClientVisibilityInlineArchiveFailureCount
+	ArchiverClientVisibilityInlineArchiveThrottledCount
+	ArchiverClientSendSignalCountPerDomain
+	ArchiverClientSendSignalFailureCountPerDomain
+	ArchiverClientHistoryRequestCountPerDomain
+	ArchiverClientHistoryInlineArchiveAttemptCountPerDomain
+	ArchiverClientHistoryInlineArchiveFailureCountPerDomain
+	ArchiverClientHistoryInlineArchiveThrottledCountPerDomain
+	ArchiverClientVisibilityRequestCountPerDomain
+	ArchiverClientVisibilityInlineArchiveAttemptCountPerDomain
+	ArchiverClientVisibilityInlineArchiveFailureCountPerDomain
+	ArchiverClientVisibilityInlineArchiveThrottledCountPerDomain
 	LastRetrievedMessageID
 	LastProcessedMessageID
+	ReplicationLatency
 	ReplicationTasksApplied
 	ReplicationTasksFailed
 	ReplicationTasksLag
@@ -1904,6 +2227,7 @@ const (
 	ReplicationDLQAckLevelGauge
 	ReplicationDLQProbeFailed
 	ReplicationDLQSize
+	ReplicationDLQValidationFailed
 	GetReplicationMessagesForShardLatency
 	GetDLQReplicationMessagesLatency
 	EventReapplySkippedCount
@@ -1916,6 +2240,7 @@ const (
 	DirectQueryDispatchClearStickinessSuccessCount
 	DirectQueryDispatchTimeoutBeforeNonStickyCount
 	DecisionTaskQueryLatency
+	ConsistentQueryPerShard
 	ConsistentQueryTimeoutCount
 	QueryBeforeFirstDecisionCount
 	QueryBufferExceededCount
@@ -1927,13 +2252,18 @@ const (
 	ReplicationTaskLatency
 	MutableStateChecksumMismatch
 	MutableStateChecksumInvalidated
-	GracefulFailoverLatency
-	GracefulFailoverFailure
 	FailoverMarkerCount
 	FailoverMarkerReplicationLatency
 	FailoverMarkerInsertFailure
 	FailoverMarkerNotificationFailure
 	FailoverMarkerUpdateShardFailure
+	FailoverMarkerCallbackCount
+	HistoryFailoverCallbackCount
+	WorkflowVersionCount
+	WorkflowTypeCount
+	LargeHistoryBlobCount
+	LargeHistoryEventCount
+	LargeHistorySizeCount
 
 	NumHistoryMetrics
 )
@@ -1969,6 +2299,7 @@ const (
 	PollerPerTaskListCounter
 	TaskListManagersGauge
 	TaskLagPerTaskListGauge
+	TaskBacklogPerTaskListGauge
 
 	NumMatchingMetrics
 )
@@ -2041,6 +2372,19 @@ const (
 	ScannerShardSizeSeventyFiveGauge
 	ScannerShardSizeTwentyFiveGauge
 	ScannerShardSizeTenGauge
+	ShardScannerScan
+	ShardScannerFix
+	DataCorruptionWorkflowCount
+	DataCorruptionWorkflowFailure
+	DataCorruptionWorkflowSuccessCount
+	DataCorruptionWorkflowSkipCount
+	ESAnalyzerNumStuckWorkflowsDiscovered
+	ESAnalyzerNumStuckWorkflowsRefreshed
+	ESAnalyzerNumStuckWorkflowsFailedToRefresh
+	ESAnalyzerNumLongRunningWorkflows
+	WatchDogNumDeletedCorruptWorkflows
+	WatchDogNumFailedToDeleteCorruptWorkflows
+	WatchDogNumCorruptWorkflowProcessed
 
 	NumWorkerMetrics
 )
@@ -2048,80 +2392,121 @@ const (
 // MetricDefs record the metrics for all services
 var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 	Common: {
-		CadenceRequests:                                     {metricName: "cadence_requests", metricType: Counter},
-		CadenceFailures:                                     {metricName: "cadence_errors", metricType: Counter},
-		CadenceCriticalFailures:                             {metricName: "cadence_errors_critical", metricType: Counter},
-		CadenceLatency:                                      {metricName: "cadence_latency", metricType: Timer},
-		CadenceErrBadRequestCounter:                         {metricName: "cadence_errors_bad_request", metricType: Counter},
-		CadenceErrDomainNotActiveCounter:                    {metricName: "cadence_errors_domain_not_active", metricType: Counter},
-		CadenceErrServiceBusyCounter:                        {metricName: "cadence_errors_service_busy", metricType: Counter},
-		CadenceErrEntityNotExistsCounter:                    {metricName: "cadence_errors_entity_not_exists", metricType: Counter},
-		CadenceErrWorkflowExecutionAlreadyCompletedCounter:  {metricName: "cadence_errors_workflow_execution_already_completed", metricType: Counter},
-		CadenceErrExecutionAlreadyStartedCounter:            {metricName: "cadence_errors_execution_already_started", metricType: Counter},
-		CadenceErrDomainAlreadyExistsCounter:                {metricName: "cadence_errors_domain_already_exists", metricType: Counter},
-		CadenceErrCancellationAlreadyRequestedCounter:       {metricName: "cadence_errors_cancellation_already_requested", metricType: Counter},
-		CadenceErrQueryFailedCounter:                        {metricName: "cadence_errors_query_failed", metricType: Counter},
-		CadenceErrLimitExceededCounter:                      {metricName: "cadence_errors_limit_exceeded", metricType: Counter},
-		CadenceErrContextTimeoutCounter:                     {metricName: "cadence_errors_context_timeout", metricType: Counter},
-		CadenceErrRetryTaskCounter:                          {metricName: "cadence_errors_retry_task", metricType: Counter},
-		CadenceErrBadBinaryCounter:                          {metricName: "cadence_errors_bad_binary", metricType: Counter},
-		CadenceErrClientVersionNotSupportedCounter:          {metricName: "cadence_errors_client_version_not_supported", metricType: Counter},
-		CadenceErrIncompleteHistoryCounter:                  {metricName: "cadence_errors_incomplete_history", metricType: Counter},
-		CadenceErrNonDeterministicCounter:                   {metricName: "cadence_errors_nondeterministic", metricType: Counter},
-		CadenceErrUnauthorizedCounter:                       {metricName: "cadence_errors_unauthorized", metricType: Counter},
-		CadenceErrAuthorizeFailedCounter:                    {metricName: "cadence_errors_authorize_failed", metricType: Counter},
-		CadenceErrRemoteSyncMatchFailedCounter:              {metricName: "cadence_errors_remote_syncmatch_failed", metricType: Counter},
-		CadenceErrIDLengthExceededWarnLimit:                 {metricName: "cadence_errors_id_length_exceeded_warn_limit", metricType: Counter},
-		PersistenceRequests:                                 {metricName: "persistence_requests", metricType: Counter},
-		PersistenceFailures:                                 {metricName: "persistence_errors", metricType: Counter},
-		PersistenceLatency:                                  {metricName: "persistence_latency", metricType: Timer},
-		PersistenceErrShardExistsCounter:                    {metricName: "persistence_errors_shard_exists", metricType: Counter},
-		PersistenceErrShardOwnershipLostCounter:             {metricName: "persistence_errors_shard_ownership_lost", metricType: Counter},
-		PersistenceErrConditionFailedCounter:                {metricName: "persistence_errors_condition_failed", metricType: Counter},
-		PersistenceErrCurrentWorkflowConditionFailedCounter: {metricName: "persistence_errors_current_workflow_condition_failed", metricType: Counter},
-		PersistenceErrTimeoutCounter:                        {metricName: "persistence_errors_timeout", metricType: Counter},
-		PersistenceErrBusyCounter:                           {metricName: "persistence_errors_busy", metricType: Counter},
-		PersistenceErrEntityNotExistsCounter:                {metricName: "persistence_errors_entity_not_exists", metricType: Counter},
-		PersistenceErrExecutionAlreadyStartedCounter:        {metricName: "persistence_errors_execution_already_started", metricType: Counter},
-		PersistenceErrDomainAlreadyExistsCounter:            {metricName: "persistence_errors_domain_already_exists", metricType: Counter},
-		PersistenceErrBadRequestCounter:                     {metricName: "persistence_errors_bad_request", metricType: Counter},
-		PersistenceSampledCounter:                           {metricName: "persistence_sampled", metricType: Counter},
-		CadenceClientRequests:                               {metricName: "cadence_client_requests", metricType: Counter},
-		CadenceClientFailures:                               {metricName: "cadence_client_errors", metricType: Counter},
-		CadenceClientLatency:                                {metricName: "cadence_client_latency", metricType: Timer},
-		CadenceDcRedirectionClientRequests:                  {metricName: "cadence_client_requests_redirection", metricType: Counter},
-		CadenceDcRedirectionClientFailures:                  {metricName: "cadence_client_errors_redirection", metricType: Counter},
-		CadenceDcRedirectionClientLatency:                   {metricName: "cadence_client_latency_redirection", metricType: Timer},
-		CadenceAuthorizationLatency:                         {metricName: "cadence_authorization_latency", metricType: Timer},
-		DomainCachePrepareCallbacksLatency:                  {metricName: "domain_cache_prepare_callbacks_latency", metricType: Timer},
-		DomainCacheCallbacksLatency:                         {metricName: "domain_cache_callbacks_latency", metricType: Timer},
-		HistorySize:                                         {metricName: "history_size", metricType: Timer},
-		HistoryCount:                                        {metricName: "history_count", metricType: Timer},
-		EventBlobSize:                                       {metricName: "event_blob_size", metricType: Timer},
-		ArchivalConfigFailures:                              {metricName: "archivalconfig_failures", metricType: Counter},
-		ActiveClusterGauge:                                  {metricName: "active_cluster", metricType: Gauge},
-		ElasticsearchRequests:                               {metricName: "elasticsearch_requests", metricType: Counter},
-		ElasticsearchFailures:                               {metricName: "elasticsearch_errors", metricType: Counter},
-		ElasticsearchLatency:                                {metricName: "elasticsearch_latency", metricType: Timer},
-		ElasticsearchErrBadRequestCounter:                   {metricName: "elasticsearch_errors_bad_request", metricType: Counter},
-		ElasticsearchErrBusyCounter:                         {metricName: "elasticsearch_errors_busy", metricType: Counter},
-		SequentialTaskSubmitRequest:                         {metricName: "sequentialtask_submit_request", metricType: Counter},
-		SequentialTaskSubmitRequestTaskQueueExist:           {metricName: "sequentialtask_submit_request_taskqueue_exist", metricType: Counter},
-		SequentialTaskSubmitRequestTaskQueueMissing:         {metricName: "sequentialtask_submit_request_taskqueue_missing", metricType: Counter},
-		SequentialTaskSubmitLatency:                         {metricName: "sequentialtask_submit_latency", metricType: Timer},
-		SequentialTaskQueueSize:                             {metricName: "sequentialtask_queue_size", metricType: Timer},
-		SequentialTaskQueueProcessingLatency:                {metricName: "sequentialtask_queue_processing_latency", metricType: Timer},
-		SequentialTaskTaskProcessingLatency:                 {metricName: "sequentialtask_task_processing_latency", metricType: Timer},
-		ParallelTaskSubmitRequest:                           {metricName: "paralleltask_submit_request", metricType: Counter},
-		ParallelTaskSubmitLatency:                           {metricName: "paralleltask_submit_latency", metricType: Timer},
-		ParallelTaskTaskProcessingLatency:                   {metricName: "paralleltask_task_processing_latency", metricType: Timer},
-		PriorityTaskSubmitRequest:                           {metricName: "prioritytask_submit_request", metricType: Counter},
-		PriorityTaskSubmitLatency:                           {metricName: "prioritytask_submit_latency", metricType: Timer},
-		KafkaConsumerMessageIn:                              {metricName: "kafka_consumer_message_in", metricType: Counter},
-		KafkaConsumerMessageAck:                             {metricName: "kafka_consumer_message_ack", metricType: Counter},
-		KafkaConsumerMessageNack:                            {metricName: "kafka_consumer_message_nack", metricType: Counter},
-		KafkaConsumerMessageNackDlqErr:                      {metricName: "kafka_consumer_message_nack_dlq_err", metricType: Counter},
-		KafkaConsumerSessionStart:                           {metricName: "kafka_consumer_session_start", metricType: Counter},
+		CadenceRequests:                                              {metricName: "cadence_requests", metricType: Counter},
+		CadenceFailures:                                              {metricName: "cadence_errors", metricType: Counter},
+		CadenceCriticalFailures:                                      {metricName: "cadence_errors_critical", metricType: Counter},
+		CadenceLatency:                                               {metricName: "cadence_latency", metricType: Timer},
+		CadenceErrBadRequestCounter:                                  {metricName: "cadence_errors_bad_request", metricType: Counter},
+		CadenceErrDomainNotActiveCounter:                             {metricName: "cadence_errors_domain_not_active", metricType: Counter},
+		CadenceErrServiceBusyCounter:                                 {metricName: "cadence_errors_service_busy", metricType: Counter},
+		CadenceErrEntityNotExistsCounter:                             {metricName: "cadence_errors_entity_not_exists", metricType: Counter},
+		CadenceErrWorkflowExecutionAlreadyCompletedCounter:           {metricName: "cadence_errors_workflow_execution_already_completed", metricType: Counter},
+		CadenceErrExecutionAlreadyStartedCounter:                     {metricName: "cadence_errors_execution_already_started", metricType: Counter},
+		CadenceErrDomainAlreadyExistsCounter:                         {metricName: "cadence_errors_domain_already_exists", metricType: Counter},
+		CadenceErrCancellationAlreadyRequestedCounter:                {metricName: "cadence_errors_cancellation_already_requested", metricType: Counter},
+		CadenceErrQueryFailedCounter:                                 {metricName: "cadence_errors_query_failed", metricType: Counter},
+		CadenceErrLimitExceededCounter:                               {metricName: "cadence_errors_limit_exceeded", metricType: Counter},
+		CadenceErrContextTimeoutCounter:                              {metricName: "cadence_errors_context_timeout", metricType: Counter},
+		CadenceErrRetryTaskCounter:                                   {metricName: "cadence_errors_retry_task", metricType: Counter},
+		CadenceErrBadBinaryCounter:                                   {metricName: "cadence_errors_bad_binary", metricType: Counter},
+		CadenceErrClientVersionNotSupportedCounter:                   {metricName: "cadence_errors_client_version_not_supported", metricType: Counter},
+		CadenceErrIncompleteHistoryCounter:                           {metricName: "cadence_errors_incomplete_history", metricType: Counter},
+		CadenceErrNonDeterministicCounter:                            {metricName: "cadence_errors_nondeterministic", metricType: Counter},
+		CadenceErrUnauthorizedCounter:                                {metricName: "cadence_errors_unauthorized", metricType: Counter},
+		CadenceErrAuthorizeFailedCounter:                             {metricName: "cadence_errors_authorize_failed", metricType: Counter},
+		CadenceErrRemoteSyncMatchFailedCounter:                       {metricName: "cadence_errors_remote_syncmatch_failed", metricType: Counter},
+		CadenceErrDomainNameExceededWarnLimit:                        {metricName: "cadence_errors_domain_name_exceeded_warn_limit", metricType: Counter},
+		CadenceErrIdentityExceededWarnLimit:                          {metricName: "cadence_errors_identity_exceeded_warn_limit", metricType: Counter},
+		CadenceErrWorkflowIDExceededWarnLimit:                        {metricName: "cadence_errors_workflow_id_exceeded_warn_limit", metricType: Counter},
+		CadenceErrSignalNameExceededWarnLimit:                        {metricName: "cadence_errors_signal_name_exceeded_warn_limit", metricType: Counter},
+		CadenceErrWorkflowTypeExceededWarnLimit:                      {metricName: "cadence_errors_workflow_type_exceeded_warn_limit", metricType: Counter},
+		CadenceErrRequestIDExceededWarnLimit:                         {metricName: "cadence_errors_request_id_exceeded_warn_limit", metricType: Counter},
+		CadenceErrTaskListNameExceededWarnLimit:                      {metricName: "cadence_errors_task_list_name_exceeded_warn_limit", metricType: Counter},
+		CadenceErrActivityIDExceededWarnLimit:                        {metricName: "cadence_errors_activity_id_exceeded_warn_limit", metricType: Counter},
+		CadenceErrActivityTypeExceededWarnLimit:                      {metricName: "cadence_errors_activity_type_exceeded_warn_limit", metricType: Counter},
+		CadenceErrMarkerNameExceededWarnLimit:                        {metricName: "cadence_errors_marker_name_exceeded_warn_limit", metricType: Counter},
+		CadenceErrTimerIDExceededWarnLimit:                           {metricName: "cadence_errors_timer_id_exceeded_warn_limit", metricType: Counter},
+		PersistenceRequests:                                          {metricName: "persistence_requests", metricType: Counter},
+		PersistenceFailures:                                          {metricName: "persistence_errors", metricType: Counter},
+		PersistenceLatency:                                           {metricName: "persistence_latency", metricType: Timer},
+		PersistenceLatencyHistogram:                                  {metricName: "persistence_latency_histogram", metricType: Histogram, buckets: PersistenceLatencyBuckets},
+		PersistenceErrShardExistsCounter:                             {metricName: "persistence_errors_shard_exists", metricType: Counter},
+		PersistenceErrShardOwnershipLostCounter:                      {metricName: "persistence_errors_shard_ownership_lost", metricType: Counter},
+		PersistenceErrConditionFailedCounter:                         {metricName: "persistence_errors_condition_failed", metricType: Counter},
+		PersistenceErrCurrentWorkflowConditionFailedCounter:          {metricName: "persistence_errors_current_workflow_condition_failed", metricType: Counter},
+		PersistenceErrTimeoutCounter:                                 {metricName: "persistence_errors_timeout", metricType: Counter},
+		PersistenceErrBusyCounter:                                    {metricName: "persistence_errors_busy", metricType: Counter},
+		PersistenceErrEntityNotExistsCounter:                         {metricName: "persistence_errors_entity_not_exists", metricType: Counter},
+		PersistenceErrExecutionAlreadyStartedCounter:                 {metricName: "persistence_errors_execution_already_started", metricType: Counter},
+		PersistenceErrDomainAlreadyExistsCounter:                     {metricName: "persistence_errors_domain_already_exists", metricType: Counter},
+		PersistenceErrBadRequestCounter:                              {metricName: "persistence_errors_bad_request", metricType: Counter},
+		PersistenceErrDBUnavailableCounter:                           {metricName: "persistence_errors_db_unavailable", metricType: Counter},
+		PersistenceSampledCounter:                                    {metricName: "persistence_sampled", metricType: Counter},
+		PersistenceEmptyResponseCounter:                              {metricName: "persistence_empty_response", metricType: Counter},
+		PersistenceRequestsPerDomain:                                 {metricName: "persistence_requests_per_domain", metricRollupName: "persistence_requests", metricType: Counter},
+		PersistenceRequestsPerShard:                                  {metricName: "persistence_requests_per_shard", metricType: Counter},
+		PersistenceFailuresPerDomain:                                 {metricName: "persistence_errors_per_domain", metricRollupName: "persistence_errors", metricType: Counter},
+		PersistenceLatencyPerDomain:                                  {metricName: "persistence_latency_per_domain", metricRollupName: "persistence_latency", metricType: Timer},
+		PersistenceLatencyPerShard:                                   {metricName: "persistence_latency_per_shard", metricType: Timer},
+		PersistenceErrShardExistsCounterPerDomain:                    {metricName: "persistence_errors_shard_exists_per_domain", metricRollupName: "persistence_errors_shard_exists", metricType: Counter},
+		PersistenceErrShardOwnershipLostCounterPerDomain:             {metricName: "persistence_errors_shard_ownership_lost_per_domain", metricRollupName: "persistence_errors_shard_ownership_lost", metricType: Counter},
+		PersistenceErrConditionFailedCounterPerDomain:                {metricName: "persistence_errors_condition_failed_per_domain", metricRollupName: "persistence_errors_condition_failed", metricType: Counter},
+		PersistenceErrCurrentWorkflowConditionFailedCounterPerDomain: {metricName: "persistence_errors_current_workflow_condition_failed_per_domain", metricRollupName: "persistence_errors_current_workflow_condition_failed", metricType: Counter},
+		PersistenceErrTimeoutCounterPerDomain:                        {metricName: "persistence_errors_timeout_per_domain", metricRollupName: "persistence_errors_timeout", metricType: Counter},
+		PersistenceErrBusyCounterPerDomain:                           {metricName: "persistence_errors_busy_per_domain", metricRollupName: "persistence_errors_busy", metricType: Counter},
+		PersistenceErrEntityNotExistsCounterPerDomain:                {metricName: "persistence_errors_entity_not_exists_per_domain", metricRollupName: "persistence_errors_entity_not_exists", metricType: Counter},
+		PersistenceErrExecutionAlreadyStartedCounterPerDomain:        {metricName: "persistence_errors_execution_already_started_per_domain", metricRollupName: "persistence_errors_execution_already_started", metricType: Counter},
+		PersistenceErrDomainAlreadyExistsCounterPerDomain:            {metricName: "persistence_errors_domain_already_exists_per_domain", metricRollupName: "persistence_errors_domain_already_exists", metricType: Counter},
+		PersistenceErrBadRequestCounterPerDomain:                     {metricName: "persistence_errors_bad_request_per_domain", metricRollupName: "persistence_errors_bad_request", metricType: Counter},
+		PersistenceErrDBUnavailableCounterPerDomain:                  {metricName: "persistence_errors_db_unavailable_per_domain", metricRollupName: "persistence_errors_db_unavailable", metricType: Counter},
+		PersistenceSampledCounterPerDomain:                           {metricName: "persistence_sampled_per_domain", metricRollupName: "persistence_sampled", metricType: Counter},
+		PersistenceEmptyResponseCounterPerDomain:                     {metricName: "persistence_empty_response_per_domain", metricRollupName: "persistence_empty_response", metricType: Counter},
+		CadenceClientRequests:                                        {metricName: "cadence_client_requests", metricType: Counter},
+		CadenceClientFailures:                                        {metricName: "cadence_client_errors", metricType: Counter},
+		CadenceClientLatency:                                         {metricName: "cadence_client_latency", metricType: Timer},
+		CadenceTasklistRequests:                                      {metricName: "cadence_tasklist_request", metricType: Counter},
+		CadenceDcRedirectionClientRequests:                           {metricName: "cadence_client_requests_redirection", metricType: Counter},
+		CadenceDcRedirectionClientFailures:                           {metricName: "cadence_client_errors_redirection", metricType: Counter},
+		CadenceDcRedirectionClientLatency:                            {metricName: "cadence_client_latency_redirection", metricType: Timer},
+		CadenceAuthorizationLatency:                                  {metricName: "cadence_authorization_latency", metricType: Timer},
+		DomainCachePrepareCallbacksLatency:                           {metricName: "domain_cache_prepare_callbacks_latency", metricType: Timer},
+		DomainCacheCallbacksLatency:                                  {metricName: "domain_cache_callbacks_latency", metricType: Timer},
+		DomainCacheCallbacksCount:                                    {metricName: "domain_cache_callbacks_count", metricType: Counter},
+		HistorySize:                                                  {metricName: "history_size", metricType: Timer},
+		HistoryCount:                                                 {metricName: "history_count", metricType: Timer},
+		EventBlobSize:                                                {metricName: "event_blob_size", metricType: Timer},
+		DecisionResultCount:                                          {metricName: "decision_result_count", metricType: Timer},
+		ArchivalConfigFailures:                                       {metricName: "archivalconfig_failures", metricType: Counter},
+		ActiveClusterGauge:                                           {metricName: "active_cluster", metricType: Gauge},
+		ElasticsearchRequests:                                        {metricName: "elasticsearch_requests", metricType: Counter},
+		ElasticsearchFailures:                                        {metricName: "elasticsearch_errors", metricType: Counter},
+		ElasticsearchLatency:                                         {metricName: "elasticsearch_latency", metricType: Timer},
+		ElasticsearchErrBadRequestCounter:                            {metricName: "elasticsearch_errors_bad_request", metricType: Counter},
+		ElasticsearchErrBusyCounter:                                  {metricName: "elasticsearch_errors_busy", metricType: Counter},
+		ElasticsearchRequestsPerDomain:                               {metricName: "elasticsearch_requests_per_domain", metricRollupName: "elasticsearch_requests", metricType: Counter},
+		ElasticsearchFailuresPerDomain:                               {metricName: "elasticsearch_errors_per_domain", metricRollupName: "elasticsearch_errors", metricType: Counter},
+		ElasticsearchLatencyPerDomain:                                {metricName: "elasticsearch_latency_per_domain", metricRollupName: "elasticsearch_latency", metricType: Timer},
+		ElasticsearchErrBadRequestCounterPerDomain:                   {metricName: "elasticsearch_errors_bad_request_per_domain", metricRollupName: "elasticsearch_errors_bad_request", metricType: Counter},
+		ElasticsearchErrBusyCounterPerDomain:                         {metricName: "elasticsearch_errors_busy_per_domain", metricRollupName: "elasticsearch_errors_busy", metricType: Counter},
+		SequentialTaskSubmitRequest:                                  {metricName: "sequentialtask_submit_request", metricType: Counter},
+		SequentialTaskSubmitRequestTaskQueueExist:                    {metricName: "sequentialtask_submit_request_taskqueue_exist", metricType: Counter},
+		SequentialTaskSubmitRequestTaskQueueMissing:                  {metricName: "sequentialtask_submit_request_taskqueue_missing", metricType: Counter},
+		SequentialTaskSubmitLatency:                                  {metricName: "sequentialtask_submit_latency", metricType: Timer},
+		SequentialTaskQueueSize:                                      {metricName: "sequentialtask_queue_size", metricType: Timer},
+		SequentialTaskQueueProcessingLatency:                         {metricName: "sequentialtask_queue_processing_latency", metricType: Timer},
+		SequentialTaskTaskProcessingLatency:                          {metricName: "sequentialtask_task_processing_latency", metricType: Timer},
+		ParallelTaskSubmitRequest:                                    {metricName: "paralleltask_submit_request", metricType: Counter},
+		ParallelTaskSubmitLatency:                                    {metricName: "paralleltask_submit_latency", metricType: Timer},
+		ParallelTaskTaskProcessingLatency:                            {metricName: "paralleltask_task_processing_latency", metricType: Timer},
+		PriorityTaskSubmitRequest:                                    {metricName: "prioritytask_submit_request", metricType: Counter},
+		PriorityTaskSubmitLatency:                                    {metricName: "prioritytask_submit_latency", metricType: Timer},
+		KafkaConsumerMessageIn:                                       {metricName: "kafka_consumer_message_in", metricType: Counter},
+		KafkaConsumerMessageAck:                                      {metricName: "kafka_consumer_message_ack", metricType: Counter},
+		KafkaConsumerMessageNack:                                     {metricName: "kafka_consumer_message_nack", metricType: Counter},
+		KafkaConsumerMessageNackDlqErr:                               {metricName: "kafka_consumer_message_nack_dlq_err", metricType: Counter},
+		KafkaConsumerSessionStart:                                    {metricName: "kafka_consumer_session_start", metricType: Counter},
+		GracefulFailoverLatency:                                      {metricName: "graceful_failover_latency", metricType: Timer},
+		GracefulFailoverFailure:                                      {metricName: "graceful_failover_failures", metricType: Counter},
 
 		HistoryArchiverArchiveNonRetryableErrorCount:              {metricName: "history_archiver_archive_non_retryable_error", metricType: Counter},
 		HistoryArchiverArchiveTransientErrorCount:                 {metricName: "history_archiver_archive_transient_error", metricType: Counter},
@@ -2129,13 +2514,13 @@ var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 		HistoryArchiverHistoryMutatedCount:                        {metricName: "history_archiver_history_mutated", metricType: Counter},
 		HistoryArchiverTotalUploadSize:                            {metricName: "history_archiver_total_upload_size", metricType: Timer},
 		HistoryArchiverHistorySize:                                {metricName: "history_archiver_history_size", metricType: Timer},
+		HistoryArchiverDuplicateArchivalsCount:                    {metricName: "history_archiver_duplicate_archivals", metricType: Counter},
 		HistoryArchiverBlobExistsCount:                            {metricName: "history_archiver_blob_exists", metricType: Counter},
 		HistoryArchiverBlobSize:                                   {metricName: "history_archiver_blob_size", metricType: Timer},
 		HistoryArchiverRunningDeterministicConstructionCheckCount: {metricName: "history_archiver_running_deterministic_construction_check", metricType: Counter},
 		HistoryArchiverDeterministicConstructionCheckFailedCount:  {metricName: "history_archiver_deterministic_construction_check_failed", metricType: Counter},
 		HistoryArchiverRunningBlobIntegrityCheckCount:             {metricName: "history_archiver_running_blob_integrity_check", metricType: Counter},
 		HistoryArchiverBlobIntegrityCheckFailedCount:              {metricName: "history_archiver_blob_integrity_check_failed", metricType: Counter},
-		HistoryArchiverDuplicateArchivalsCount:                    {metricName: "history_archiver_duplicate_archivals", metricType: Counter},
 		VisibilityArchiverArchiveNonRetryableErrorCount:           {metricName: "visibility_archiver_archive_non_retryable_error", metricType: Counter},
 		VisibilityArchiverArchiveTransientErrorCount:              {metricName: "visibility_archiver_archive_transient_error", metricType: Counter},
 		VisibilityArchiveSuccessCount:                             {metricName: "visibility_archiver_archive_success", metricType: Counter},
@@ -2207,6 +2592,9 @@ var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 		CadenceErrRemoteSyncMatchFailedPerTaskListCounter: {
 			metricName: "cadence_errors_remote_syncmatch_failed_per_tl", metricRollupName: "cadence_errors_remote_syncmatch_failed", metricType: Counter,
 		},
+		CadenceErrStickyWorkerUnavailablePerTaskListCounter: {
+			metricName: "cadence_errors_sticky_worker_unavailable_per_tl", metricRollupName: "cadence_errors_sticky_worker_unavailable_per_tl", metricType: Counter,
+		},
 		CadenceShardSuccessGauge:             {metricName: "cadence_shard_success", metricType: Gauge},
 		CadenceShardFailureGauge:             {metricName: "cadence_shard_failure", metricType: Gauge},
 		DomainReplicationQueueSizeGauge:      {metricName: "domain_replication_queue_size", metricType: Gauge},
@@ -2238,193 +2626,245 @@ var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 		TaskStandbyRetryCounterPerDomain:         {metricName: "task_errors_standby_retry_counter_per_domain", metricRollupName: "task_errors_standby_retry_counter", metricType: Counter},
 		TaskPendingActiveCounterPerDomain:        {metricName: "task_errors_pending_active_counter_per_domain", metricRollupName: "task_errors_pending_active_counter", metricType: Counter},
 		TaskNotActiveCounterPerDomain:            {metricName: "task_errors_not_active_counter_per_domain", metricRollupName: "task_errors_not_active_counter", metricType: Counter},
+		TaskTargetNotActiveCounterPerDomain:      {metricName: "task_errors_target_not_active_counter_per_domain", metricRollupName: "task_errors_target_not_active_counter", metricType: Counter},
 		TaskLimitExceededCounterPerDomain:        {metricName: "task_errors_limit_exceeded_counter_per_domain", metricRollupName: "task_errors_limit_exceeded_counter", metricType: Counter},
 		TaskProcessingLatencyPerDomain:           {metricName: "task_latency_processing_per_domain", metricRollupName: "task_latency_processing", metricType: Timer},
 		TaskQueueLatencyPerDomain:                {metricName: "task_latency_queue_per_domain", metricRollupName: "task_latency_queue", metricType: Timer},
 		TransferTaskMissingEventCounterPerDomain: {metricName: "transfer_task_missing_event_counter_per_domain", metricRollupName: "transfer_task_missing_event_counter", metricType: Counter},
+		ReplicationTasksAppliedPerDomain:         {metricName: "replication_tasks_applied_per_domain", metricRollupName: "replication_tasks_applied", metricType: Counter},
 
-		TaskBatchCompleteCounter:                          {metricName: "task_batch_complete_counter", metricType: Counter},
-		TaskRedispatchQueuePendingTasksTimer:              {metricName: "task_redispatch_queue_pending_tasks", metricType: Timer},
-		TransferTaskThrottledCounter:                      {metricName: "transfer_task_throttled_counter", metricType: Counter},
-		TimerTaskThrottledCounter:                         {metricName: "timer_task_throttled_counter", metricType: Counter},
-		TransferTaskMissingEventCounter:                   {metricName: "transfer_task_missing_event_counter", metricType: Counter},
-		ProcessingQueueNumTimer:                           {metricName: "processing_queue_num", metricType: Timer},
-		ProcessingQueueMaxLevelTimer:                      {metricName: "processing_queue_max_level", metricType: Timer},
-		ProcessingQueuePendingTaskSplitCounter:            {metricName: "processing_queue_pending_task_split_counter", metricType: Counter},
-		ProcessingQueueStuckTaskSplitCounter:              {metricName: "processing_queue_stuck_task_split_counter", metricType: Counter},
-		ProcessingQueueSelectedDomainSplitCounter:         {metricName: "processing_queue_selected_domain_split_counter", metricType: Counter},
-		ProcessingQueueRandomSplitCounter:                 {metricName: "processing_queue_random_split_counter", metricType: Counter},
-		ProcessingQueueThrottledCounter:                   {metricName: "processing_queue_throttled_counter", metricType: Counter},
-		QueueValidatorLostTaskCounter:                     {metricName: "queue_validator_lost_task_counter", metricType: Counter},
-		QueueValidatorDropTaskCounter:                     {metricName: "queue_validator_drop_task_counter", metricType: Counter},
-		QueueValidatorInvalidLoadCounter:                  {metricName: "queue_validator_invalid_load_counter", metricType: Counter},
-		QueueValidatorValidationCounter:                   {metricName: "queue_validator_validation_counter", metricType: Counter},
-		ActivityE2ELatency:                                {metricName: "activity_end_to_end_latency", metricType: Timer},
-		ActivityLostCounter:                               {metricName: "activity_lost", metricType: Counter},
-		AckLevelUpdateCounter:                             {metricName: "ack_level_update", metricType: Counter},
-		AckLevelUpdateFailedCounter:                       {metricName: "ack_level_update_failed", metricType: Counter},
-		DecisionTypeScheduleActivityCounter:               {metricName: "schedule_activity_decision", metricType: Counter},
-		DecisionTypeCompleteWorkflowCounter:               {metricName: "complete_workflow_decision", metricType: Counter},
-		DecisionTypeFailWorkflowCounter:                   {metricName: "fail_workflow_decision", metricType: Counter},
-		DecisionTypeCancelWorkflowCounter:                 {metricName: "cancel_workflow_decision", metricType: Counter},
-		DecisionTypeStartTimerCounter:                     {metricName: "start_timer_decision", metricType: Counter},
-		DecisionTypeCancelActivityCounter:                 {metricName: "cancel_activity_decision", metricType: Counter},
-		DecisionTypeCancelTimerCounter:                    {metricName: "cancel_timer_decision", metricType: Counter},
-		DecisionTypeRecordMarkerCounter:                   {metricName: "record_marker_decision", metricType: Counter},
-		DecisionTypeCancelExternalWorkflowCounter:         {metricName: "cancel_external_workflow_decision", metricType: Counter},
-		DecisionTypeContinueAsNewCounter:                  {metricName: "continue_as_new_decision", metricType: Counter},
-		DecisionTypeSignalExternalWorkflowCounter:         {metricName: "signal_external_workflow_decision", metricType: Counter},
-		DecisionTypeUpsertWorkflowSearchAttributesCounter: {metricName: "upsert_workflow_search_attributes_decision", metricType: Counter},
-		DecisionTypeChildWorkflowCounter:                  {metricName: "child_workflow_decision", metricType: Counter},
-		EmptyCompletionDecisionsCounter:                   {metricName: "empty_completion_decisions", metricType: Counter},
-		MultipleCompletionDecisionsCounter:                {metricName: "multiple_completion_decisions", metricType: Counter},
-		FailedDecisionsCounter:                            {metricName: "failed_decisions", metricType: Counter},
-		DecisionAttemptTimer:                              {metricName: "decision_attempt", metricType: Timer},
-		StaleMutableStateCounter:                          {metricName: "stale_mutable_state", metricType: Counter},
-		DataInconsistentCounter:                           {metricName: "data_inconsistent", metricType: Counter},
-		AutoResetPointsLimitExceededCounter:               {metricName: "auto_reset_points_exceed_limit", metricType: Counter},
-		AutoResetPointCorruptionCounter:                   {metricName: "auto_reset_point_corruption", metricType: Counter},
-		ConcurrencyUpdateFailureCounter:                   {metricName: "concurrency_update_failure", metricType: Counter},
-		CadenceErrShardOwnershipLostCounter:               {metricName: "cadence_errors_shard_ownership_lost", metricType: Counter},
-		CadenceErrEventAlreadyStartedCounter:              {metricName: "cadence_errors_event_already_started", metricType: Counter},
-		HeartbeatTimeoutCounter:                           {metricName: "heartbeat_timeout", metricType: Counter},
-		ScheduleToStartTimeoutCounter:                     {metricName: "schedule_to_start_timeout", metricType: Counter},
-		StartToCloseTimeoutCounter:                        {metricName: "start_to_close_timeout", metricType: Counter},
-		ScheduleToCloseTimeoutCounter:                     {metricName: "schedule_to_close_timeout", metricType: Counter},
-		NewTimerCounter:                                   {metricName: "new_timer", metricType: Counter},
-		NewTimerNotifyCounter:                             {metricName: "new_timer_notifications", metricType: Counter},
-		AcquireShardsCounter:                              {metricName: "acquire_shards_count", metricType: Counter},
-		AcquireShardsLatency:                              {metricName: "acquire_shards_latency", metricType: Timer},
-		ShardClosedCounter:                                {metricName: "shard_closed_count", metricType: Counter},
-		ShardItemCreatedCounter:                           {metricName: "sharditem_created_count", metricType: Counter},
-		ShardItemRemovedCounter:                           {metricName: "sharditem_removed_count", metricType: Counter},
-		ShardItemAcquisitionLatency:                       {metricName: "sharditem_acquisition_latency", metricType: Timer},
-		ShardInfoReplicationPendingTasksTimer:             {metricName: "shardinfo_replication_pending_task", metricType: Timer},
-		ShardInfoTransferActivePendingTasksTimer:          {metricName: "shardinfo_transfer_active_pending_task", metricType: Timer},
-		ShardInfoTransferStandbyPendingTasksTimer:         {metricName: "shardinfo_transfer_standby_pending_task", metricType: Timer},
-		ShardInfoTimerActivePendingTasksTimer:             {metricName: "shardinfo_timer_active_pending_task", metricType: Timer},
-		ShardInfoTimerStandbyPendingTasksTimer:            {metricName: "shardinfo_timer_standby_pending_task", metricType: Timer},
-		ShardInfoReplicationLagTimer:                      {metricName: "shardinfo_replication_lag", metricType: Timer},
-		ShardInfoTransferLagTimer:                         {metricName: "shardinfo_transfer_lag", metricType: Timer},
-		ShardInfoTimerLagTimer:                            {metricName: "shardinfo_timer_lag", metricType: Timer},
-		ShardInfoTransferDiffTimer:                        {metricName: "shardinfo_transfer_diff", metricType: Timer},
-		ShardInfoTimerDiffTimer:                           {metricName: "shardinfo_timer_diff", metricType: Timer},
-		ShardInfoTransferFailoverInProgressTimer:          {metricName: "shardinfo_transfer_failover_in_progress", metricType: Timer},
-		ShardInfoTimerFailoverInProgressTimer:             {metricName: "shardinfo_timer_failover_in_progress", metricType: Timer},
-		ShardInfoTransferFailoverLatencyTimer:             {metricName: "shardinfo_transfer_failover_latency", metricType: Timer},
-		ShardInfoTimerFailoverLatencyTimer:                {metricName: "shardinfo_timer_failover_latency", metricType: Timer},
-		SyncShardFromRemoteCounter:                        {metricName: "syncshard_remote_count", metricType: Counter},
-		SyncShardFromRemoteFailure:                        {metricName: "syncshard_remote_failed", metricType: Counter},
-		MembershipChangedCounter:                          {metricName: "membership_changed_count", metricType: Counter},
-		NumShardsGauge:                                    {metricName: "numshards_gauge", metricType: Gauge},
-		GetEngineForShardErrorCounter:                     {metricName: "get_engine_for_shard_errors", metricType: Counter},
-		GetEngineForShardLatency:                          {metricName: "get_engine_for_shard_latency", metricType: Timer},
-		RemoveEngineForShardLatency:                       {metricName: "remove_engine_for_shard_latency", metricType: Timer},
-		CompleteDecisionWithStickyEnabledCounter:          {metricName: "complete_decision_sticky_enabled_count", metricType: Counter},
-		CompleteDecisionWithStickyDisabledCounter:         {metricName: "complete_decision_sticky_disabled_count", metricType: Counter},
-		DecisionHeartbeatTimeoutCounter:                   {metricName: "decision_heartbeat_timeout_count", metricType: Counter},
-		HistoryEventNotificationQueueingLatency:           {metricName: "history_event_notification_queueing_latency", metricType: Timer},
-		HistoryEventNotificationFanoutLatency:             {metricName: "history_event_notification_fanout_latency", metricType: Timer},
-		HistoryEventNotificationInFlightMessageGauge:      {metricName: "history_event_notification_inflight_message_gauge", metricType: Gauge},
-		HistoryEventNotificationFailDeliveryCount:         {metricName: "history_event_notification_fail_delivery_count", metricType: Counter},
-		EmptyReplicationEventsCounter:                     {metricName: "empty_replication_events", metricType: Counter},
-		DuplicateReplicationEventsCounter:                 {metricName: "duplicate_replication_events", metricType: Counter},
-		StaleReplicationEventsCounter:                     {metricName: "stale_replication_events", metricType: Counter},
-		ReplicationEventsSizeTimer:                        {metricName: "replication_events_size", metricType: Timer},
-		BufferReplicationTaskTimer:                        {metricName: "buffer_replication_tasks", metricType: Timer},
-		UnbufferReplicationTaskTimer:                      {metricName: "unbuffer_replication_tasks", metricType: Timer},
-		HistoryConflictsCounter:                           {metricName: "history_conflicts", metricType: Counter},
-		CompleteTaskFailedCounter:                         {metricName: "complete_task_fail_count", metricType: Counter},
-		CacheRequests:                                     {metricName: "cache_requests", metricType: Counter},
-		CacheFailures:                                     {metricName: "cache_errors", metricType: Counter},
-		CacheLatency:                                      {metricName: "cache_latency", metricType: Timer},
-		CacheMissCounter:                                  {metricName: "cache_miss", metricType: Counter},
-		AcquireLockFailedCounter:                          {metricName: "acquire_lock_failed", metricType: Counter},
-		WorkflowContextCleared:                            {metricName: "workflow_context_cleared", metricType: Counter},
-		MutableStateSize:                                  {metricName: "mutable_state_size", metricType: Timer},
-		ExecutionInfoSize:                                 {metricName: "execution_info_size", metricType: Timer},
-		ActivityInfoSize:                                  {metricName: "activity_info_size", metricType: Timer},
-		TimerInfoSize:                                     {metricName: "timer_info_size", metricType: Timer},
-		ChildInfoSize:                                     {metricName: "child_info_size", metricType: Timer},
-		SignalInfoSize:                                    {metricName: "signal_info_size", metricType: Timer},
-		BufferedEventsSize:                                {metricName: "buffered_events_size", metricType: Timer},
-		ActivityInfoCount:                                 {metricName: "activity_info_count", metricType: Timer},
-		TimerInfoCount:                                    {metricName: "timer_info_count", metricType: Timer},
-		ChildInfoCount:                                    {metricName: "child_info_count", metricType: Timer},
-		SignalInfoCount:                                   {metricName: "signal_info_count", metricType: Timer},
-		RequestCancelInfoCount:                            {metricName: "request_cancel_info_count", metricType: Timer},
-		BufferedEventsCount:                               {metricName: "buffered_events_count", metricType: Timer},
-		DeleteActivityInfoCount:                           {metricName: "delete_activity_info", metricType: Timer},
-		DeleteTimerInfoCount:                              {metricName: "delete_timer_info", metricType: Timer},
-		DeleteChildInfoCount:                              {metricName: "delete_child_info", metricType: Timer},
-		DeleteSignalInfoCount:                             {metricName: "delete_signal_info", metricType: Timer},
-		DeleteRequestCancelInfoCount:                      {metricName: "delete_request_cancel_info", metricType: Timer},
-		WorkflowRetryBackoffTimerCount:                    {metricName: "workflow_retry_backoff_timer", metricType: Counter},
-		WorkflowCronBackoffTimerCount:                     {metricName: "workflow_cron_backoff_timer", metricType: Counter},
-		WorkflowCleanupDeleteCount:                        {metricName: "workflow_cleanup_delete", metricType: Counter},
-		WorkflowCleanupArchiveCount:                       {metricName: "workflow_cleanup_archive", metricType: Counter},
-		WorkflowCleanupNopCount:                           {metricName: "workflow_cleanup_nop", metricType: Counter},
-		WorkflowCleanupDeleteHistoryInlineCount:           {metricName: "workflow_cleanup_delete_history_inline", metricType: Counter},
-		WorkflowSuccessCount:                              {metricName: "workflow_success", metricType: Counter},
-		WorkflowCancelCount:                               {metricName: "workflow_cancel", metricType: Counter},
-		WorkflowFailedCount:                               {metricName: "workflow_failed", metricType: Counter},
-		WorkflowTimeoutCount:                              {metricName: "workflow_timeout", metricType: Counter},
-		WorkflowTerminateCount:                            {metricName: "workflow_terminate", metricType: Counter},
-		ArchiverClientSendSignalCount:                     {metricName: "archiver_client_sent_signal", metricType: Counter},
-		ArchiverClientSendSignalFailureCount:              {metricName: "archiver_client_send_signal_error", metricType: Counter},
-		ArchiverClientHistoryRequestCount:                 {metricName: "archiver_client_history_request", metricType: Counter},
-		ArchiverClientHistoryInlineArchiveAttemptCount:    {metricName: "archiver_client_history_inline_archive_attempt", metricType: Counter},
-		ArchiverClientHistoryInlineArchiveFailureCount:    {metricName: "archiver_client_history_inline_archive_failure", metricType: Counter},
-		ArchiverClientVisibilityRequestCount:              {metricName: "archiver_client_visibility_request", metricType: Counter},
-		ArchiverClientVisibilityInlineArchiveAttemptCount: {metricName: "archiver_client_visibility_inline_archive_attempt", metricType: Counter},
-		ArchiverClientVisibilityInlineArchiveFailureCount: {metricName: "archiver_client_visibility_inline_archive_failure", metricType: Counter},
-		LastRetrievedMessageID:                            {metricName: "last_retrieved_message_id", metricType: Gauge},
-		LastProcessedMessageID:                            {metricName: "last_processed_message_id", metricType: Gauge},
-		ReplicationTasksApplied:                           {metricName: "replication_tasks_applied", metricType: Counter},
-		ReplicationTasksFailed:                            {metricName: "replication_tasks_failed", metricType: Counter},
-		ReplicationTasksLag:                               {metricName: "replication_tasks_lag", metricType: Timer},
-		ReplicationTasksFetched:                           {metricName: "replication_tasks_fetched", metricType: Timer},
-		ReplicationTasksReturned:                          {metricName: "replication_tasks_returned", metricType: Timer},
-		ReplicationTasksReturnedDiff:                      {metricName: "replication_tasks_returned_diff", metricType: Timer},
-		ReplicationTasksAppliedLatency:                    {metricName: "replication_tasks_applied_latency", metricType: Timer},
-		ReplicationDLQFailed:                              {metricName: "replication_dlq_enqueue_failed", metricType: Counter},
-		ReplicationDLQMaxLevelGauge:                       {metricName: "replication_dlq_max_level", metricType: Gauge},
-		ReplicationDLQAckLevelGauge:                       {metricName: "replication_dlq_ack_level", metricType: Gauge},
-		ReplicationDLQProbeFailed:                         {metricName: "replication_dlq_probe_failed", metricType: Counter},
-		ReplicationDLQSize:                                {metricName: "replication_dlq_size", metricType: Gauge},
-		GetReplicationMessagesForShardLatency:             {metricName: "get_replication_messages_for_shard", metricType: Timer},
-		GetDLQReplicationMessagesLatency:                  {metricName: "get_dlq_replication_messages", metricType: Timer},
-		EventReapplySkippedCount:                          {metricName: "event_reapply_skipped_count", metricType: Counter},
-		DirectQueryDispatchLatency:                        {metricName: "direct_query_dispatch_latency", metricType: Timer},
-		DirectQueryDispatchStickyLatency:                  {metricName: "direct_query_dispatch_sticky_latency", metricType: Timer},
-		DirectQueryDispatchNonStickyLatency:               {metricName: "direct_query_dispatch_non_sticky_latency", metricType: Timer},
-		DirectQueryDispatchStickySuccessCount:             {metricName: "direct_query_dispatch_sticky_success", metricType: Counter},
-		DirectQueryDispatchNonStickySuccessCount:          {metricName: "direct_query_dispatch_non_sticky_success", metricType: Counter},
-		DirectQueryDispatchClearStickinessLatency:         {metricName: "direct_query_dispatch_clear_stickiness_latency", metricType: Timer},
-		DirectQueryDispatchClearStickinessSuccessCount:    {metricName: "direct_query_dispatch_clear_stickiness_success", metricType: Counter},
-		DirectQueryDispatchTimeoutBeforeNonStickyCount:    {metricName: "direct_query_dispatch_timeout_before_non_sticky", metricType: Counter},
-		DecisionTaskQueryLatency:                          {metricName: "decision_task_query_latency", metricType: Timer},
-		ConsistentQueryTimeoutCount:                       {metricName: "consistent_query_timeout", metricType: Counter},
-		QueryBeforeFirstDecisionCount:                     {metricName: "query_before_first_decision", metricType: Counter},
-		QueryBufferExceededCount:                          {metricName: "query_buffer_exceeded", metricType: Counter},
-		QueryRegistryInvalidStateCount:                    {metricName: "query_registry_invalid_state", metricType: Counter},
-		WorkerNotSupportsConsistentQueryCount:             {metricName: "worker_not_supports_consistent_query", metricType: Counter},
-		DecisionStartToCloseTimeoutOverrideCount:          {metricName: "decision_start_to_close_timeout_overrides", metricType: Counter},
-		ReplicationTaskCleanupCount:                       {metricName: "replication_task_cleanup_count", metricType: Counter},
-		ReplicationTaskCleanupFailure:                     {metricName: "replication_task_cleanup_failed", metricType: Counter},
-		ReplicationTaskLatency:                            {metricName: "replication_task_latency", metricType: Timer},
-		MutableStateChecksumMismatch:                      {metricName: "mutable_state_checksum_mismatch", metricType: Counter},
-		MutableStateChecksumInvalidated:                   {metricName: "mutable_state_checksum_invalidated", metricType: Counter},
-		GracefulFailoverLatency:                           {metricName: "graceful_failover_latency", metricType: Timer},
-		GracefulFailoverFailure:                           {metricName: "graceful_failover_failures", metricType: Counter},
-		FailoverMarkerCount:                               {metricName: "failover_marker_count", metricType: Counter},
-		FailoverMarkerReplicationLatency:                  {metricName: "failover_marker_replication_latency", metricType: Timer},
-		FailoverMarkerInsertFailure:                       {metricName: "failover_marker_insert_failures", metricType: Counter},
-		FailoverMarkerNotificationFailure:                 {metricName: "failover_marker_notification_failures", metricType: Counter},
-		FailoverMarkerUpdateShardFailure:                  {metricName: "failover_marker_update_shard_failures", metricType: Counter},
-		TransferTasksCount:                                {metricName: "transfer_tasks_count", metricType: Timer},
-		TimerTasksCount:                                   {metricName: "timer_tasks_count", metricType: Timer},
-		ReplicationTasksCount:                             {metricName: "replication_tasks_count", metricType: Timer},
+		TaskBatchCompleteCounter:                                     {metricName: "task_batch_complete_counter", metricType: Counter},
+		TaskBatchCompleteFailure:                                     {metricName: "task_batch_complete_error", metricType: Counter},
+		TaskRedispatchQueuePendingTasksTimer:                         {metricName: "task_redispatch_queue_pending_tasks", metricType: Timer},
+		TransferTaskThrottledCounter:                                 {metricName: "transfer_task_throttled_counter", metricType: Counter},
+		TimerTaskThrottledCounter:                                    {metricName: "timer_task_throttled_counter", metricType: Counter},
+		CrossClusterTaskThrottledCounter:                             {metricName: "cross_cluster_task_throttled_counter", metricType: Counter},
+		TransferTaskMissingEventCounter:                              {metricName: "transfer_task_missing_event_counter", metricType: Counter},
+		ProcessingQueueNumTimer:                                      {metricName: "processing_queue_num", metricType: Timer},
+		ProcessingQueueMaxLevelTimer:                                 {metricName: "processing_queue_max_level", metricType: Timer},
+		ProcessingQueuePendingTaskSplitCounter:                       {metricName: "processing_queue_pending_task_split_counter", metricType: Counter},
+		ProcessingQueueStuckTaskSplitCounter:                         {metricName: "processing_queue_stuck_task_split_counter", metricType: Counter},
+		ProcessingQueueSelectedDomainSplitCounter:                    {metricName: "processing_queue_selected_domain_split_counter", metricType: Counter},
+		ProcessingQueueRandomSplitCounter:                            {metricName: "processing_queue_random_split_counter", metricType: Counter},
+		ProcessingQueueThrottledCounter:                              {metricName: "processing_queue_throttled_counter", metricType: Counter},
+		QueueValidatorLostTaskCounter:                                {metricName: "queue_validator_lost_task_counter", metricType: Counter},
+		QueueValidatorDropTaskCounter:                                {metricName: "queue_validator_drop_task_counter", metricType: Counter},
+		QueueValidatorInvalidLoadCounter:                             {metricName: "queue_validator_invalid_load_counter", metricType: Counter},
+		QueueValidatorValidationCounter:                              {metricName: "queue_validator_validation_counter", metricType: Counter},
+		QueueValidatorValidationFailure:                              {metricName: "queue_validator_validation_error", metricType: Counter},
+		CrossClusterFetchLatency:                                     {metricName: "cross_cluster_fetch_latency", metricType: Timer},
+		CrossClusterFetchRequests:                                    {metricName: "cross_cluster_fetch_requests", metricType: Counter},
+		CrossClusterFetchFailures:                                    {metricName: "cross_cluster_fetch_errors", metricType: Counter},
+		CrossClusterFetchServiceBusyFailures:                         {metricName: "cross_cluster_fetch_errors_service_busy", metricType: Counter},
+		CrossClusterTaskRespondLatency:                               {metricName: "cross_cluster_respond_latency", metricType: Timer},
+		CrossClusterTaskRespondRequests:                              {metricName: "cross_cluster_respond_requests", metricType: Counter},
+		CrossClusterTaskRespondFailures:                              {metricName: "cross_cluster_fetch_errors", metricType: Counter},
+		CrossClusterTaskFetchedTimer:                                 {metricName: "cross_cluster_task_fetched", metricType: Timer},
+		CrossClusterTaskPendingTimer:                                 {metricName: "cross_cluster_task_pending", metricType: Timer},
+		ClusterMetadataFailureToResolveCounter:                       {metricName: "failed_to_resolve_failover_version", metricType: Counter},
+		ClusterMetadataGettingMinFailoverVersionCounter:              {metricName: "getting_min_failover_version_counter", metricType: Counter},
+		ClusterMetadataGettingFailoverVersionCounter:                 {metricName: "getting_failover_version_counter", metricType: Counter},
+		ClusterMetadataResolvingFailoverVersionCounter:               {metricName: "resolving_failover_version_counter", metricType: Counter},
+		ClusterMetadataResolvingMinFailoverVersionCounter:            {metricName: "resolving_min_failover_version_counter", metricType: Counter},
+		ActivityE2ELatency:                                           {metricName: "activity_end_to_end_latency", metricType: Timer},
+		ActivityLostCounter:                                          {metricName: "activity_lost", metricType: Counter},
+		AckLevelUpdateCounter:                                        {metricName: "ack_level_update", metricType: Counter},
+		AckLevelUpdateFailedCounter:                                  {metricName: "ack_level_update_failed", metricType: Counter},
+		DecisionTypeScheduleActivityCounter:                          {metricName: "schedule_activity_decision", metricType: Counter},
+		DecisionTypeScheduleActivityDispatchSucceedCounter:           {metricName: "schedule_activity_decision_sync_match_succeed", metricType: Counter},
+		DecisionTypeScheduleActivityDispatchCounter:                  {metricName: "schedule_activity_decision_try_sync_match", metricType: Counter},
+		DecisionTypeCompleteWorkflowCounter:                          {metricName: "complete_workflow_decision", metricType: Counter},
+		DecisionTypeFailWorkflowCounter:                              {metricName: "fail_workflow_decision", metricType: Counter},
+		DecisionTypeCancelWorkflowCounter:                            {metricName: "cancel_workflow_decision", metricType: Counter},
+		DecisionTypeStartTimerCounter:                                {metricName: "start_timer_decision", metricType: Counter},
+		DecisionTypeCancelActivityCounter:                            {metricName: "cancel_activity_decision", metricType: Counter},
+		DecisionTypeCancelTimerCounter:                               {metricName: "cancel_timer_decision", metricType: Counter},
+		DecisionTypeRecordMarkerCounter:                              {metricName: "record_marker_decision", metricType: Counter},
+		DecisionTypeCancelExternalWorkflowCounter:                    {metricName: "cancel_external_workflow_decision", metricType: Counter},
+		DecisionTypeContinueAsNewCounter:                             {metricName: "continue_as_new_decision", metricType: Counter},
+		DecisionTypeSignalExternalWorkflowCounter:                    {metricName: "signal_external_workflow_decision", metricType: Counter},
+		DecisionTypeUpsertWorkflowSearchAttributesCounter:            {metricName: "upsert_workflow_search_attributes_decision", metricType: Counter},
+		DecisionTypeChildWorkflowCounter:                             {metricName: "child_workflow_decision", metricType: Counter},
+		EmptyCompletionDecisionsCounter:                              {metricName: "empty_completion_decisions", metricType: Counter},
+		MultipleCompletionDecisionsCounter:                           {metricName: "multiple_completion_decisions", metricType: Counter},
+		FailedDecisionsCounter:                                       {metricName: "failed_decisions", metricType: Counter},
+		DecisionAttemptTimer:                                         {metricName: "decision_attempt", metricType: Timer},
+		DecisionRetriesExceededCounter:                               {metricName: "decision_retries_exceeded", metricType: Counter},
+		StaleMutableStateCounter:                                     {metricName: "stale_mutable_state", metricType: Counter},
+		DataInconsistentCounter:                                      {metricName: "data_inconsistent", metricType: Counter},
+		TimerResurrectionCounter:                                     {metricName: "timer_resurrection", metricType: Counter},
+		ActivityResurrectionCounter:                                  {metricName: "activity_resurrection", metricType: Counter},
+		AutoResetPointsLimitExceededCounter:                          {metricName: "auto_reset_points_exceed_limit", metricType: Counter},
+		AutoResetPointCorruptionCounter:                              {metricName: "auto_reset_point_corruption", metricType: Counter},
+		ConcurrencyUpdateFailureCounter:                              {metricName: "concurrency_update_failure", metricType: Counter},
+		CadenceErrShardOwnershipLostCounter:                          {metricName: "cadence_errors_shard_ownership_lost", metricType: Counter},
+		CadenceErrEventAlreadyStartedCounter:                         {metricName: "cadence_errors_event_already_started", metricType: Counter},
+		HeartbeatTimeoutCounter:                                      {metricName: "heartbeat_timeout", metricType: Counter},
+		ScheduleToStartTimeoutCounter:                                {metricName: "schedule_to_start_timeout", metricType: Counter},
+		StartToCloseTimeoutCounter:                                   {metricName: "start_to_close_timeout", metricType: Counter},
+		ScheduleToCloseTimeoutCounter:                                {metricName: "schedule_to_close_timeout", metricType: Counter},
+		NewTimerCounter:                                              {metricName: "new_timer", metricType: Counter},
+		NewTimerNotifyCounter:                                        {metricName: "new_timer_notifications", metricType: Counter},
+		AcquireShardsCounter:                                         {metricName: "acquire_shards_count", metricType: Counter},
+		AcquireShardsLatency:                                         {metricName: "acquire_shards_latency", metricType: Timer},
+		ShardClosedCounter:                                           {metricName: "shard_closed_count", metricType: Counter},
+		ShardItemCreatedCounter:                                      {metricName: "sharditem_created_count", metricType: Counter},
+		ShardItemRemovedCounter:                                      {metricName: "sharditem_removed_count", metricType: Counter},
+		ShardItemAcquisitionLatency:                                  {metricName: "sharditem_acquisition_latency", metricType: Timer},
+		ShardInfoReplicationPendingTasksTimer:                        {metricName: "shardinfo_replication_pending_task", metricType: Timer},
+		ShardInfoTransferActivePendingTasksTimer:                     {metricName: "shardinfo_transfer_active_pending_task", metricType: Timer},
+		ShardInfoTransferStandbyPendingTasksTimer:                    {metricName: "shardinfo_transfer_standby_pending_task", metricType: Timer},
+		ShardInfoTimerActivePendingTasksTimer:                        {metricName: "shardinfo_timer_active_pending_task", metricType: Timer},
+		ShardInfoTimerStandbyPendingTasksTimer:                       {metricName: "shardinfo_timer_standby_pending_task", metricType: Timer},
+		ShardInfoCrossClusterPendingTasksTimer:                       {metricName: "shardinfo_cross_cluster_pending_task", metricType: Timer},
+		ShardInfoReplicationLagTimer:                                 {metricName: "shardinfo_replication_lag", metricType: Timer},
+		ShardInfoTransferLagTimer:                                    {metricName: "shardinfo_transfer_lag", metricType: Timer},
+		ShardInfoTimerLagTimer:                                       {metricName: "shardinfo_timer_lag", metricType: Timer},
+		ShardInfoCrossClusterLagTimer:                                {metricName: "shardinfo_cross_cluster_lag", metricType: Timer},
+		ShardInfoTransferDiffTimer:                                   {metricName: "shardinfo_transfer_diff", metricType: Timer},
+		ShardInfoTimerDiffTimer:                                      {metricName: "shardinfo_timer_diff", metricType: Timer},
+		ShardInfoTransferFailoverInProgressTimer:                     {metricName: "shardinfo_transfer_failover_in_progress", metricType: Timer},
+		ShardInfoTimerFailoverInProgressTimer:                        {metricName: "shardinfo_timer_failover_in_progress", metricType: Timer},
+		ShardInfoTransferFailoverLatencyTimer:                        {metricName: "shardinfo_transfer_failover_latency", metricType: Timer},
+		ShardInfoTimerFailoverLatencyTimer:                           {metricName: "shardinfo_timer_failover_latency", metricType: Timer},
+		SyncShardFromRemoteCounter:                                   {metricName: "syncshard_remote_count", metricType: Counter},
+		SyncShardFromRemoteFailure:                                   {metricName: "syncshard_remote_failed", metricType: Counter},
+		MembershipChangedCounter:                                     {metricName: "membership_changed_count", metricType: Counter},
+		NumShardsGauge:                                               {metricName: "numshards_gauge", metricType: Gauge},
+		GetEngineForShardErrorCounter:                                {metricName: "get_engine_for_shard_errors", metricType: Counter},
+		GetEngineForShardLatency:                                     {metricName: "get_engine_for_shard_latency", metricType: Timer},
+		RemoveEngineForShardLatency:                                  {metricName: "remove_engine_for_shard_latency", metricType: Timer},
+		CompleteDecisionWithStickyEnabledCounter:                     {metricName: "complete_decision_sticky_enabled_count", metricType: Counter},
+		CompleteDecisionWithStickyDisabledCounter:                    {metricName: "complete_decision_sticky_disabled_count", metricType: Counter},
+		DecisionHeartbeatTimeoutCounter:                              {metricName: "decision_heartbeat_timeout_count", metricType: Counter},
+		HistoryEventNotificationQueueingLatency:                      {metricName: "history_event_notification_queueing_latency", metricType: Timer},
+		HistoryEventNotificationFanoutLatency:                        {metricName: "history_event_notification_fanout_latency", metricType: Timer},
+		HistoryEventNotificationInFlightMessageGauge:                 {metricName: "history_event_notification_inflight_message_gauge", metricType: Gauge},
+		HistoryEventNotificationFailDeliveryCount:                    {metricName: "history_event_notification_fail_delivery_count", metricType: Counter},
+		EmptyReplicationEventsCounter:                                {metricName: "empty_replication_events", metricType: Counter},
+		DuplicateReplicationEventsCounter:                            {metricName: "duplicate_replication_events", metricType: Counter},
+		StaleReplicationEventsCounter:                                {metricName: "stale_replication_events", metricType: Counter},
+		ReplicationEventsSizeTimer:                                   {metricName: "replication_events_size", metricType: Timer},
+		BufferReplicationTaskTimer:                                   {metricName: "buffer_replication_tasks", metricType: Timer},
+		UnbufferReplicationTaskTimer:                                 {metricName: "unbuffer_replication_tasks", metricType: Timer},
+		HistoryConflictsCounter:                                      {metricName: "history_conflicts", metricType: Counter},
+		CompleteTaskFailedCounter:                                    {metricName: "complete_task_fail_count", metricType: Counter},
+		CacheSize:                                                    {metricName: "cache_size", metricType: Timer},
+		CacheRequests:                                                {metricName: "cache_requests", metricType: Counter},
+		CacheFailures:                                                {metricName: "cache_errors", metricType: Counter},
+		CacheLatency:                                                 {metricName: "cache_latency", metricType: Timer},
+		CacheHitCounter:                                              {metricName: "cache_hit", metricType: Counter},
+		CacheMissCounter:                                             {metricName: "cache_miss", metricType: Counter},
+		CacheFullCounter:                                             {metricName: "cache_full", metricType: Counter},
+		AcquireLockFailedCounter:                                     {metricName: "acquire_lock_failed", metricType: Counter},
+		WorkflowContextCleared:                                       {metricName: "workflow_context_cleared", metricType: Counter},
+		MutableStateSize:                                             {metricName: "mutable_state_size", metricType: Timer},
+		ExecutionInfoSize:                                            {metricName: "execution_info_size", metricType: Timer},
+		ActivityInfoSize:                                             {metricName: "activity_info_size", metricType: Timer},
+		TimerInfoSize:                                                {metricName: "timer_info_size", metricType: Timer},
+		ChildInfoSize:                                                {metricName: "child_info_size", metricType: Timer},
+		SignalInfoSize:                                               {metricName: "signal_info_size", metricType: Timer},
+		BufferedEventsSize:                                           {metricName: "buffered_events_size", metricType: Timer},
+		ActivityInfoCount:                                            {metricName: "activity_info_count", metricType: Timer},
+		TimerInfoCount:                                               {metricName: "timer_info_count", metricType: Timer},
+		ChildInfoCount:                                               {metricName: "child_info_count", metricType: Timer},
+		SignalInfoCount:                                              {metricName: "signal_info_count", metricType: Timer},
+		RequestCancelInfoCount:                                       {metricName: "request_cancel_info_count", metricType: Timer},
+		BufferedEventsCount:                                          {metricName: "buffered_events_count", metricType: Timer},
+		DeleteActivityInfoCount:                                      {metricName: "delete_activity_info", metricType: Timer},
+		DeleteTimerInfoCount:                                         {metricName: "delete_timer_info", metricType: Timer},
+		DeleteChildInfoCount:                                         {metricName: "delete_child_info", metricType: Timer},
+		DeleteSignalInfoCount:                                        {metricName: "delete_signal_info", metricType: Timer},
+		DeleteRequestCancelInfoCount:                                 {metricName: "delete_request_cancel_info", metricType: Timer},
+		WorkflowRetryBackoffTimerCount:                               {metricName: "workflow_retry_backoff_timer", metricType: Counter},
+		WorkflowCronBackoffTimerCount:                                {metricName: "workflow_cron_backoff_timer", metricType: Counter},
+		WorkflowCleanupDeleteCount:                                   {metricName: "workflow_cleanup_delete", metricType: Counter},
+		WorkflowCleanupArchiveCount:                                  {metricName: "workflow_cleanup_archive", metricType: Counter},
+		WorkflowCleanupNopCount:                                      {metricName: "workflow_cleanup_nop", metricType: Counter},
+		WorkflowCleanupDeleteHistoryInlineCount:                      {metricName: "workflow_cleanup_delete_history_inline", metricType: Counter},
+		WorkflowSuccessCount:                                         {metricName: "workflow_success", metricType: Counter},
+		WorkflowCancelCount:                                          {metricName: "workflow_cancel", metricType: Counter},
+		WorkflowFailedCount:                                          {metricName: "workflow_failed", metricType: Counter},
+		WorkflowTimeoutCount:                                         {metricName: "workflow_timeout", metricType: Counter},
+		WorkflowTerminateCount:                                       {metricName: "workflow_terminate", metricType: Counter},
+		WorkflowContinuedAsNew:                                       {metricName: "workflow_continued_as_new", metricType: Counter},
+		WorkflowCompletedUnknownType:                                 {metricName: "workflow_completed_unknown_type", metricType: Counter},
+		ArchiverClientSendSignalCount:                                {metricName: "archiver_client_sent_signal", metricType: Counter},
+		ArchiverClientSendSignalFailureCount:                         {metricName: "archiver_client_send_signal_error", metricType: Counter},
+		ArchiverClientHistoryRequestCount:                            {metricName: "archiver_client_history_request", metricType: Counter},
+		ArchiverClientHistoryInlineArchiveAttemptCount:               {metricName: "archiver_client_history_inline_archive_attempt", metricType: Counter},
+		ArchiverClientHistoryInlineArchiveFailureCount:               {metricName: "archiver_client_history_inline_archive_failure", metricType: Counter},
+		ArchiverClientHistoryInlineArchiveThrottledCount:             {metricName: "archiver_client_history_inline_archive_throttled", metricType: Counter},
+		ArchiverClientVisibilityRequestCount:                         {metricName: "archiver_client_visibility_request", metricType: Counter},
+		ArchiverClientVisibilityInlineArchiveAttemptCount:            {metricName: "archiver_client_visibility_inline_archive_attempt", metricType: Counter},
+		ArchiverClientVisibilityInlineArchiveFailureCount:            {metricName: "archiver_client_visibility_inline_archive_failure", metricType: Counter},
+		ArchiverClientVisibilityInlineArchiveThrottledCount:          {metricName: "archiver_client_visibility_inline_archive_throttled", metricType: Counter},
+		ArchiverClientSendSignalCountPerDomain:                       {metricName: "archiver_client_sent_signal_per_domain", metricRollupName: "archiver_client_sent_signal", metricType: Counter},
+		ArchiverClientSendSignalFailureCountPerDomain:                {metricName: "archiver_client_send_signal_error_per_domain", metricRollupName: "archiver_client_send_signal_error", metricType: Counter},
+		ArchiverClientHistoryRequestCountPerDomain:                   {metricName: "archiver_client_history_request_per_domain", metricRollupName: "archiver_client_history_request", metricType: Counter},
+		ArchiverClientHistoryInlineArchiveAttemptCountPerDomain:      {metricName: "archiver_client_history_inline_archive_attempt_per_domain", metricRollupName: "archiver_client_history_inline_archive_attempt", metricType: Counter},
+		ArchiverClientHistoryInlineArchiveFailureCountPerDomain:      {metricName: "archiver_client_history_inline_archive_failure_per_domain", metricRollupName: "archiver_client_history_inline_archive_failure", metricType: Counter},
+		ArchiverClientHistoryInlineArchiveThrottledCountPerDomain:    {metricName: "archiver_client_history_inline_archive_throttled_per_domain", metricRollupName: "archiver_client_history_inline_archive_throttled", metricType: Counter},
+		ArchiverClientVisibilityRequestCountPerDomain:                {metricName: "archiver_client_visibility_request_per_domain", metricRollupName: "archiver_client_visibility_request", metricType: Counter},
+		ArchiverClientVisibilityInlineArchiveAttemptCountPerDomain:   {metricName: "archiver_client_visibility_inline_archive_attempt_per_domain", metricRollupName: "archiver_client_visibility_inline_archive_attempt", metricType: Counter},
+		ArchiverClientVisibilityInlineArchiveFailureCountPerDomain:   {metricName: "archiver_client_visibility_inline_archive_failure_per_domain", metricRollupName: "archiver_client_visibility_inline_archive_failure", metricType: Counter},
+		ArchiverClientVisibilityInlineArchiveThrottledCountPerDomain: {metricName: "archiver_client_visibility_inline_archive_throttled_per_domain", metricRollupName: "archiver_client_visibility_inline_archive_throttled", metricType: Counter},
+		LastRetrievedMessageID:                                       {metricName: "last_retrieved_message_id", metricType: Gauge},
+		LastProcessedMessageID:                                       {metricName: "last_processed_message_id", metricType: Gauge},
+		ReplicationLatency:                                           {metricName: "replication_latency", metricType: Gauge},
+		ReplicationTasksApplied:                                      {metricName: "replication_tasks_applied", metricType: Counter},
+		ReplicationTasksFailed:                                       {metricName: "replication_tasks_failed", metricType: Counter},
+		ReplicationTasksLag:                                          {metricName: "replication_tasks_lag", metricType: Timer},
+		ReplicationTasksFetched:                                      {metricName: "replication_tasks_fetched", metricType: Timer},
+		ReplicationTasksReturned:                                     {metricName: "replication_tasks_returned", metricType: Timer},
+		ReplicationTasksReturnedDiff:                                 {metricName: "replication_tasks_returned_diff", metricType: Timer},
+		ReplicationTasksAppliedLatency:                               {metricName: "replication_tasks_applied_latency", metricType: Timer},
+		ReplicationDLQFailed:                                         {metricName: "replication_dlq_enqueue_failed", metricType: Counter},
+		ReplicationDLQMaxLevelGauge:                                  {metricName: "replication_dlq_max_level", metricType: Gauge},
+		ReplicationDLQAckLevelGauge:                                  {metricName: "replication_dlq_ack_level", metricType: Gauge},
+		ReplicationDLQProbeFailed:                                    {metricName: "replication_dlq_probe_failed", metricType: Counter},
+		ReplicationDLQSize:                                           {metricName: "replication_dlq_size", metricType: Gauge},
+		ReplicationDLQValidationFailed:                               {metricName: "replication_dlq_validation_failed", metricType: Counter},
+		GetReplicationMessagesForShardLatency:                        {metricName: "get_replication_messages_for_shard", metricType: Timer},
+		GetDLQReplicationMessagesLatency:                             {metricName: "get_dlq_replication_messages", metricType: Timer},
+		EventReapplySkippedCount:                                     {metricName: "event_reapply_skipped_count", metricType: Counter},
+		DirectQueryDispatchLatency:                                   {metricName: "direct_query_dispatch_latency", metricType: Timer},
+		DirectQueryDispatchStickyLatency:                             {metricName: "direct_query_dispatch_sticky_latency", metricType: Timer},
+		DirectQueryDispatchNonStickyLatency:                          {metricName: "direct_query_dispatch_non_sticky_latency", metricType: Timer},
+		DirectQueryDispatchStickySuccessCount:                        {metricName: "direct_query_dispatch_sticky_success", metricType: Counter},
+		DirectQueryDispatchNonStickySuccessCount:                     {metricName: "direct_query_dispatch_non_sticky_success", metricType: Counter},
+		DirectQueryDispatchClearStickinessLatency:                    {metricName: "direct_query_dispatch_clear_stickiness_latency", metricType: Timer},
+		DirectQueryDispatchClearStickinessSuccessCount:               {metricName: "direct_query_dispatch_clear_stickiness_success", metricType: Counter},
+		DirectQueryDispatchTimeoutBeforeNonStickyCount:               {metricName: "direct_query_dispatch_timeout_before_non_sticky", metricType: Counter},
+		DecisionTaskQueryLatency:                                     {metricName: "decision_task_query_latency", metricType: Timer},
+		ConsistentQueryPerShard:                                      {metricName: "consistent_query_per_shard", metricType: Counter},
+		ConsistentQueryTimeoutCount:                                  {metricName: "consistent_query_timeout", metricType: Counter},
+		QueryBeforeFirstDecisionCount:                                {metricName: "query_before_first_decision", metricType: Counter},
+		QueryBufferExceededCount:                                     {metricName: "query_buffer_exceeded", metricType: Counter},
+		QueryRegistryInvalidStateCount:                               {metricName: "query_registry_invalid_state", metricType: Counter},
+		WorkerNotSupportsConsistentQueryCount:                        {metricName: "worker_not_supports_consistent_query", metricType: Counter},
+		DecisionStartToCloseTimeoutOverrideCount:                     {metricName: "decision_start_to_close_timeout_overrides", metricType: Counter},
+		ReplicationTaskCleanupCount:                                  {metricName: "replication_task_cleanup_count", metricType: Counter},
+		ReplicationTaskCleanupFailure:                                {metricName: "replication_task_cleanup_failed", metricType: Counter},
+		ReplicationTaskLatency:                                       {metricName: "replication_task_latency", metricType: Timer},
+		MutableStateChecksumMismatch:                                 {metricName: "mutable_state_checksum_mismatch", metricType: Counter},
+		MutableStateChecksumInvalidated:                              {metricName: "mutable_state_checksum_invalidated", metricType: Counter},
+		FailoverMarkerCount:                                          {metricName: "failover_marker_count", metricType: Counter},
+		FailoverMarkerReplicationLatency:                             {metricName: "failover_marker_replication_latency", metricType: Timer},
+		FailoverMarkerInsertFailure:                                  {metricName: "failover_marker_insert_failures", metricType: Counter},
+		FailoverMarkerNotificationFailure:                            {metricName: "failover_marker_notification_failures", metricType: Counter},
+		FailoverMarkerUpdateShardFailure:                             {metricName: "failover_marker_update_shard_failures", metricType: Counter},
+		FailoverMarkerCallbackCount:                                  {metricName: "failover_marker_callback_count", metricType: Counter},
+		HistoryFailoverCallbackCount:                                 {metricName: "failover_callback_handler_count", metricType: Counter},
+		TransferTasksCount:                                           {metricName: "transfer_tasks_count", metricType: Timer},
+		TimerTasksCount:                                              {metricName: "timer_tasks_count", metricType: Timer},
+		CrossClusterTasksCount:                                       {metricName: "cross_cluster_tasks_count", metricType: Timer},
+		ReplicationTasksCount:                                        {metricName: "replication_tasks_count", metricType: Timer},
+		WorkflowVersionCount:                                         {metricName: "workflow_version_count", metricType: Gauge},
+		WorkflowTypeCount:                                            {metricName: "workflow_type_count", metricType: Gauge},
+		LargeHistoryBlobCount:                                        {metricName: "large_history_blob_count", metricType: Counter},
+		LargeHistoryEventCount:                                       {metricName: "large_history_event_count", metricType: Counter},
+		LargeHistorySizeCount:                                        {metricName: "large_history_size_count", metricType: Counter},
 	},
 	Matching: {
 		PollSuccessPerTaskListCounter:            {metricName: "poll_success_per_tl", metricRollupName: "poll_success"},
@@ -2456,6 +2896,7 @@ var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 		PollerPerTaskListCounter:                 {metricName: "poller_count_per_tl", metricRollupName: "poller_count"},
 		TaskListManagersGauge:                    {metricName: "tasklist_managers", metricType: Gauge},
 		TaskLagPerTaskListGauge:                  {metricName: "task_lag_per_tl", metricType: Gauge},
+		TaskBacklogPerTaskListGauge:              {metricName: "task_backlog_per_tl", metricType: Gauge},
 	},
 	Worker: {
 		ReplicatorMessages:                            {metricName: "replicator_messages"},
@@ -2524,8 +2965,80 @@ var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 		ScannerShardSizeSeventyFiveGauge:              {metricName: "scanner_shard_size_seventy_five", metricType: Gauge},
 		ScannerShardSizeTwentyFiveGauge:               {metricName: "scanner_shard_size_twenty_five", metricType: Gauge},
 		ScannerShardSizeTenGauge:                      {metricName: "scanner_shard_size_ten", metricType: Gauge},
+		ShardScannerScan:                              {metricName: "shardscanner_scan", metricType: Counter},
+		ShardScannerFix:                               {metricName: "shardscanner_fix", metricType: Counter},
+		DataCorruptionWorkflowFailure:                 {metricName: "data_corruption_workflow_failure", metricType: Counter},
+		DataCorruptionWorkflowSuccessCount:            {metricName: "data_corruption_workflow_success", metricType: Counter},
+		DataCorruptionWorkflowCount:                   {metricName: "data_corruption_workflow_count", metricType: Counter},
+		DataCorruptionWorkflowSkipCount:               {metricName: "data_corruption_workflow_skips", metricType: Counter},
+		ESAnalyzerNumStuckWorkflowsDiscovered:         {metricName: "es_analyzer_num_stuck_workflows_discovered", metricType: Counter},
+		ESAnalyzerNumStuckWorkflowsRefreshed:          {metricName: "es_analyzer_num_stuck_workflows_refreshed", metricType: Counter},
+		ESAnalyzerNumStuckWorkflowsFailedToRefresh:    {metricName: "es_analyzer_num_stuck_workflows_failed_to_refresh", metricType: Counter},
+		ESAnalyzerNumLongRunningWorkflows:             {metricName: "es_analyzer_num_long_running_workflows", metricType: Counter},
+		WatchDogNumDeletedCorruptWorkflows:            {metricName: "watchdog_num_deleted_corrupt_workflows", metricType: Counter},
+		WatchDogNumFailedToDeleteCorruptWorkflows:     {metricName: "watchdog_num_failed_to_delete_corrupt_workflows", metricType: Counter},
+		WatchDogNumCorruptWorkflowProcessed:           {metricName: "watchdog_num_corrupt_workflows_processed", metricType: Counter},
 	},
 }
+
+// PersistenceLatencyBuckets contains duration buckets for measuring persistence latency
+var PersistenceLatencyBuckets = tally.DurationBuckets([]time.Duration{
+	1 * time.Millisecond,
+	2 * time.Millisecond,
+	3 * time.Millisecond,
+	4 * time.Millisecond,
+	5 * time.Millisecond,
+	6 * time.Millisecond,
+	7 * time.Millisecond,
+	8 * time.Millisecond,
+	9 * time.Millisecond,
+	10 * time.Millisecond,
+	12 * time.Millisecond,
+	15 * time.Millisecond,
+	17 * time.Millisecond,
+	20 * time.Millisecond,
+	25 * time.Millisecond,
+	30 * time.Millisecond,
+	35 * time.Millisecond,
+	40 * time.Millisecond,
+	50 * time.Millisecond,
+	60 * time.Millisecond,
+	70 * time.Millisecond,
+	80 * time.Millisecond,
+	90 * time.Millisecond,
+	100 * time.Millisecond,
+	120 * time.Millisecond,
+	150 * time.Millisecond,
+	170 * time.Millisecond,
+	200 * time.Millisecond,
+	250 * time.Millisecond,
+	300 * time.Millisecond,
+	400 * time.Millisecond,
+	500 * time.Millisecond,
+	600 * time.Millisecond,
+	700 * time.Millisecond,
+	800 * time.Millisecond,
+	900 * time.Millisecond,
+	1 * time.Second,
+	2 * time.Second,
+	3 * time.Second,
+	4 * time.Second,
+	5 * time.Second,
+	6 * time.Second,
+	7 * time.Second,
+	8 * time.Second,
+	9 * time.Second,
+	10 * time.Second,
+	12 * time.Second,
+	15 * time.Second,
+	20 * time.Second,
+	25 * time.Second,
+	30 * time.Second,
+	35 * time.Second,
+	40 * time.Second,
+	50 * time.Second,
+	60 * time.Second,
+})
 
 // ErrorClass is an enum to help with classifying SLA vs. non-SLA errors (SLA = "service level agreement")
 type ErrorClass uint8

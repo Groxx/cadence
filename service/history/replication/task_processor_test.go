@@ -21,8 +21,12 @@
 package replication
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 	"time"
+
+	"go.uber.org/yarpc"
 
 	"github.com/golang/mock/gomock"
 	"github.com/pborman/uuid"
@@ -33,14 +37,16 @@ import (
 
 	"github.com/uber/cadence/client"
 	"github.com/uber/cadence/client/admin"
+	"github.com/uber/cadence/client/frontend"
 	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/cache"
-	"github.com/uber/cadence/common/cluster"
 	"github.com/uber/cadence/common/dynamicconfig"
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/mocks"
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/quotas"
+	"github.com/uber/cadence/common/reconciliation"
+	"github.com/uber/cadence/common/reconciliation/entity"
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/service/history/config"
 	"github.com/uber/cadence/service/history/engine"
@@ -53,17 +59,15 @@ type (
 		*require.Assertions
 		controller *gomock.Controller
 
-		mockShard        *shard.TestContext
-		mockEngine       *engine.MockEngine
-		config           *config.Config
-		taskFetcher      *MockTaskFetcher
-		mockDomainCache  *cache.MockDomainCache
-		mockClientBean   *client.MockBean
-		adminClient      *admin.MockClient
-		clusterMetadata  *cluster.MockMetadata
-		executionManager *mocks.ExecutionManager
-		requestChan      chan *request
-		taskExecutor     *MockTaskExecutor
+		mockShard          *shard.TestContext
+		mockEngine         *engine.MockEngine
+		config             *config.Config
+		mockDomainCache    *cache.MockDomainCache
+		mockClientBean     *client.MockBean
+		mockFrontendClient *frontend.MockClient
+		adminClient        *admin.MockClient
+		executionManager   *mocks.ExecutionManager
+		requestChan        chan *request
 
 		taskProcessor *taskProcessorImpl
 	}
@@ -98,33 +102,29 @@ func (s *taskProcessorSuite) SetupTest() {
 
 	s.mockDomainCache = s.mockShard.Resource.DomainCache
 	s.mockClientBean = s.mockShard.Resource.ClientBean
+	s.mockFrontendClient = s.mockShard.Resource.RemoteFrontendClient
 	s.adminClient = s.mockShard.Resource.RemoteAdminClient
-	s.clusterMetadata = s.mockShard.Resource.ClusterMetadata
 	s.executionManager = s.mockShard.Resource.ExecutionMgr
-	s.taskExecutor = NewMockTaskExecutor(s.controller)
 
 	s.mockEngine = engine.NewMockEngine(s.controller)
 	s.config = config.NewForTest()
-	s.config.ReplicationTaskProcessorNoTaskRetryWait = dynamicconfig.GetDurationPropertyFnFilteredByTShardID(1 * time.Millisecond)
+	s.config.ReplicationTaskProcessorNoTaskRetryWait = dynamicconfig.GetDurationPropertyFnFilteredByShardID(1 * time.Millisecond)
 	metricsClient := metrics.NewClient(tally.NoopScope, metrics.History)
 	s.requestChan = make(chan *request, 10)
 
-	s.taskFetcher = NewMockTaskFetcher(s.controller)
-	rateLimiter := quotas.NewDynamicRateLimiter(func() float64 {
-		return 100
-	})
-	s.taskFetcher.EXPECT().GetSourceCluster().Return("standby").AnyTimes()
-	s.taskFetcher.EXPECT().GetRequestChan().Return(s.requestChan).AnyTimes()
-	s.taskFetcher.EXPECT().GetRateLimiter().Return(rateLimiter).AnyTimes()
-	s.clusterMetadata.EXPECT().GetCurrentClusterName().Return("active").AnyTimes()
+	taskFetcher := &fakeTaskFetcher{
+		sourceCluster: "standby",
+		requestChan:   s.requestChan,
+		rateLimiter:   quotas.NewDynamicRateLimiter(func() float64 { return 100 }),
+	}
 
 	s.taskProcessor = NewTaskProcessor(
 		s.mockShard,
 		s.mockEngine,
 		s.config,
 		metricsClient,
-		s.taskFetcher,
-		s.taskExecutor,
+		taskFetcher,
+		nil,
 	).(*taskProcessorImpl)
 }
 
@@ -167,70 +167,37 @@ func (s *taskProcessorSuite) TestHandleSyncShardStatus() {
 }
 
 func (s *taskProcessorSuite) TestPutReplicationTaskToDLQ_SyncActivityReplicationTask() {
-	domainID := uuid.New()
-	workflowID := uuid.New()
-	runID := uuid.New()
-	task := &types.ReplicationTask{
-		TaskType: types.ReplicationTaskTypeSyncActivity.Ptr(),
-		SyncActivityTaskAttributes: &types.SyncActivityTaskAttributes{
-			DomainID:   domainID,
-			WorkflowID: workflowID,
-			RunID:      runID,
-		},
-	}
 	request := &persistence.PutReplicationTaskToDLQRequest{
 		SourceClusterName: "standby",
 		TaskInfo: &persistence.ReplicationTaskInfo{
-			DomainID:   domainID,
-			WorkflowID: workflowID,
-			RunID:      runID,
+			DomainID:   uuid.New(),
+			WorkflowID: uuid.New(),
+			RunID:      uuid.New(),
 			TaskType:   persistence.ReplicationTaskTypeSyncActivity,
 		},
+		DomainName: uuid.New(),
 	}
 	s.executionManager.On("PutReplicationTaskToDLQ", mock.Anything, request).Return(nil)
-	err := s.taskProcessor.putReplicationTaskToDLQ(task)
+	err := s.taskProcessor.putReplicationTaskToDLQ(request)
 	s.NoError(err)
 }
 
 func (s *taskProcessorSuite) TestPutReplicationTaskToDLQ_HistoryV2ReplicationTask() {
-	domainID := uuid.New()
-	workflowID := uuid.New()
-	runID := uuid.New()
-	events := []*types.HistoryEvent{
-		{
-			EventID: 1,
-			Version: 1,
-		},
-	}
-	serializer := s.mockShard.GetPayloadSerializer()
-	data, err := serializer.SerializeBatchEvents(events, common.EncodingTypeThriftRW)
-	s.NoError(err)
-	task := &types.ReplicationTask{
-		TaskType: types.ReplicationTaskTypeHistoryV2.Ptr(),
-		HistoryTaskV2Attributes: &types.HistoryTaskV2Attributes{
-			DomainID:   domainID,
-			WorkflowID: workflowID,
-			RunID:      runID,
-			Events: &types.DataBlob{
-				EncodingType: types.EncodingTypeThriftRW.Ptr(),
-				Data:         data.Data,
-			},
-		},
-	}
 	request := &persistence.PutReplicationTaskToDLQRequest{
 		SourceClusterName: "standby",
 		TaskInfo: &persistence.ReplicationTaskInfo{
-			DomainID:     domainID,
-			WorkflowID:   workflowID,
-			RunID:        runID,
+			DomainID:     uuid.New(),
+			WorkflowID:   uuid.New(),
+			RunID:        uuid.New(),
 			TaskType:     persistence.ReplicationTaskTypeHistory,
 			FirstEventID: 1,
 			NextEventID:  2,
 			Version:      1,
 		},
+		DomainName: uuid.New(),
 	}
 	s.executionManager.On("PutReplicationTaskToDLQ", mock.Anything, request).Return(nil)
-	err = s.taskProcessor.putReplicationTaskToDLQ(task)
+	err := s.taskProcessor.putReplicationTaskToDLQ(request)
 	s.NoError(err)
 }
 
@@ -240,7 +207,7 @@ func (s *taskProcessorSuite) TestGenerateDLQRequest_ReplicationTaskTypeHistoryV2
 	runID := uuid.New()
 	events := []*types.HistoryEvent{
 		{
-			EventID: 1,
+			ID:      1,
 			Version: 1,
 		},
 	}
@@ -259,6 +226,7 @@ func (s *taskProcessorSuite) TestGenerateDLQRequest_ReplicationTaskTypeHistoryV2
 			},
 		},
 	}
+	s.mockDomainCache.EXPECT().GetDomainName(gomock.Any()).Return("test_domain_name", nil).AnyTimes()
 	request, err := s.taskProcessor.generateDLQRequest(task)
 	s.NoError(err)
 	s.Equal("standby", request.SourceClusterName)
@@ -275,6 +243,7 @@ func (s *taskProcessorSuite) TestGenerateDLQRequest_ReplicationTaskTypeSyncActiv
 	domainID := uuid.New()
 	workflowID := uuid.New()
 	runID := uuid.New()
+	domainName := uuid.New()
 	task := &types.ReplicationTask{
 		TaskType: types.ReplicationTaskTypeSyncActivity.Ptr(),
 		SyncActivityTaskAttributes: &types.SyncActivityTaskAttributes{
@@ -284,6 +253,7 @@ func (s *taskProcessorSuite) TestGenerateDLQRequest_ReplicationTaskTypeSyncActiv
 			ScheduledID: 1,
 		},
 	}
+	s.mockDomainCache.EXPECT().GetDomainName(domainID).Return(domainName, nil).AnyTimes()
 	request, err := s.taskProcessor.generateDLQRequest(task)
 	s.NoError(err)
 	s.Equal("standby", request.SourceClusterName)
@@ -292,4 +262,59 @@ func (s *taskProcessorSuite) TestGenerateDLQRequest_ReplicationTaskTypeSyncActiv
 	s.Equal(workflowID, request.TaskInfo.GetWorkflowID())
 	s.Equal(runID, request.TaskInfo.GetRunID())
 	s.Equal(persistence.ReplicationTaskTypeSyncActivity, request.TaskInfo.GetTaskType())
+}
+
+func (s *taskProcessorSuite) TestTriggerDataInconsistencyScan_Success() {
+	domainID := uuid.New()
+	workflowID := uuid.New()
+	runID := uuid.New()
+	task := &types.ReplicationTask{
+		TaskType: types.ReplicationTaskTypeSyncActivity.Ptr(),
+		SyncActivityTaskAttributes: &types.SyncActivityTaskAttributes{
+			DomainID:    domainID,
+			WorkflowID:  workflowID,
+			RunID:       runID,
+			ScheduledID: 1,
+			Version:     100,
+		},
+	}
+	fixExecution := entity.Execution{
+		DomainID:   domainID,
+		WorkflowID: workflowID,
+		RunID:      runID,
+		ShardID:    s.mockShard.GetShardID(),
+	}
+	jsArray, err := json.Marshal(fixExecution)
+	s.NoError(err)
+	s.mockFrontendClient.EXPECT().SignalWithStartWorkflowExecution(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, request *types.SignalWithStartWorkflowExecutionRequest, option ...yarpc.CallOption) {
+			s.Equal(common.SystemLocalDomainName, request.GetDomain())
+			s.Equal(reconciliation.CheckDataCorruptionWorkflowID, request.GetWorkflowID())
+			s.Equal(reconciliation.CheckDataCorruptionWorkflowType, request.GetWorkflowType().GetName())
+			s.Equal(reconciliation.CheckDataCorruptionWorkflowTaskList, request.GetTaskList().GetName())
+			s.Equal(types.WorkflowIDReusePolicyAllowDuplicate.String(), request.GetWorkflowIDReusePolicy().String())
+			s.Equal(reconciliation.CheckDataCorruptionWorkflowSignalName, request.GetSignalName())
+			s.Equal(jsArray, request.GetSignalInput())
+		}).Return(&types.StartWorkflowExecutionResponse{}, nil)
+
+	err = s.taskProcessor.triggerDataInconsistencyScan(task)
+	s.NoError(err)
+}
+
+type fakeTaskFetcher struct {
+	sourceCluster string
+	requestChan   chan<- *request
+	rateLimiter   *quotas.DynamicRateLimiter
+}
+
+func (f fakeTaskFetcher) Start() {}
+func (f fakeTaskFetcher) Stop()  {}
+func (f fakeTaskFetcher) GetSourceCluster() string {
+	return f.sourceCluster
+}
+func (f fakeTaskFetcher) GetRequestChan() chan<- *request {
+	return f.requestChan
+}
+func (f fakeTaskFetcher) GetRateLimiter() *quotas.DynamicRateLimiter {
+	return f.rateLimiter
 }

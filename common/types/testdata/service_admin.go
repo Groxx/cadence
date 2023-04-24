@@ -111,6 +111,11 @@ var (
 		HistoryBatches: DataBlobArray,
 		VersionHistory: &VersionHistory,
 	}
+	AdminCountDLQMessagesRequest  = types.CountDLQMessagesRequest{ForceFetch: true}
+	AdminCountDLQMessagesResponse = types.CountDLQMessagesResponse{
+		History: HistoryCountDLQMessagesResponse.Entries,
+		Domain:  123456,
+	}
 	AdminMergeDLQMessagesRequest = types.MergeDLQMessagesRequest{
 		Type:                  types.DLQTypeDomain.Ptr(),
 		ShardID:               ShardID,
@@ -156,6 +161,7 @@ var (
 		Type:                common.Int32Ptr(QueueType),
 		TaskID:              TaskID,
 		VisibilityTimestamp: &Timestamp1,
+		ClusterName:         ClusterName1,
 	}
 	AdminResendReplicationTasksRequest = types.ResendReplicationTasksRequest{
 		DomainID:      DomainID,
@@ -172,4 +178,8 @@ var (
 		ClusterName: ClusterName1,
 		Type:        common.Int32Ptr(QueueType),
 	}
+	AdminGetCrossClusterTasksRequest               = GetCrossClusterTasksRequest
+	AdminGetCrossClusterTasksResponse              = GetCrossClusterTasksResponse
+	AdminRespondCrossClusterTasksCompletedRequest  = RespondCrossClusterTasksCompletedRequest
+	AdminRespondCrossClusterTasksCompletedResponse = RespondCrossClusterTasksCompletedResponse
 )

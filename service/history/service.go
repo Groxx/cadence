@@ -25,13 +25,9 @@ import (
 	"time"
 
 	"github.com/uber/cadence/common"
-	sconfig "github.com/uber/cadence/common/config"
 	"github.com/uber/cadence/common/dynamicconfig"
-	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/log/tag"
-	"github.com/uber/cadence/common/persistence"
-	persistenceClient "github.com/uber/cadence/common/persistence/client"
-	espersistence "github.com/uber/cadence/common/persistence/elasticsearch"
+	commonResource "github.com/uber/cadence/common/resource"
 	"github.com/uber/cadence/common/service"
 	"github.com/uber/cadence/service/history/config"
 	"github.com/uber/cadence/service/history/resource"
@@ -42,15 +38,15 @@ type Service struct {
 	resource.Resource
 
 	status  int32
-	handler *handlerImpl
+	handler Handler
 	stopC   chan struct{}
-	params  *service.BootstrapParams
+	params  *commonResource.Params
 	config  *config.Config
 }
 
 // NewService builds a new cadence-history service
 func NewService(
-	params *service.BootstrapParams,
+	params *commonResource.Params,
 ) (resource.Resource, error) {
 	serviceConfig := config.New(
 		dynamicconfig.NewCollection(
@@ -59,45 +55,16 @@ func NewService(
 			dynamicconfig.ClusterNameFilter(params.ClusterMetadata.GetCurrentClusterName()),
 		),
 		params.PersistenceConfig.NumHistoryShards,
+		params.RPCFactory.GetMaxMessageSize(),
 		params.PersistenceConfig.DefaultStoreType(),
 		params.PersistenceConfig.IsAdvancedVisibilityConfigExist())
 
 	params.PersistenceConfig.HistoryMaxConns = serviceConfig.HistoryMgrNumConns()
-	params.PersistenceConfig.VisibilityConfig = &sconfig.VisibilityConfig{
-		VisibilityOpenMaxQPS:            serviceConfig.VisibilityOpenMaxQPS,
-		VisibilityClosedMaxQPS:          serviceConfig.VisibilityClosedMaxQPS,
-		EnableSampling:                  serviceConfig.EnableVisibilitySampling,
-		EnableReadFromClosedExecutionV2: serviceConfig.EnableReadFromClosedExecutionV2,
-	}
-
-	visibilityManagerInitializer := func(
-		persistenceBean persistenceClient.Bean,
-		logger log.Logger,
-	) (persistence.VisibilityManager, error) {
-		visibilityFromDB := persistenceBean.GetVisibilityManager()
-
-		var visibilityFromES persistence.VisibilityManager
-		if params.ESConfig != nil {
-			visibilityProducer, err := params.MessagingClient.NewProducer(common.VisibilityAppName)
-			if err != nil {
-				logger.Fatal("Creating visibility producer failed", tag.Error(err))
-			}
-			visibilityFromES = espersistence.NewESVisibilityManager("", nil, nil, visibilityProducer,
-				params.MetricsClient, logger)
-		}
-		return persistence.NewVisibilityManagerWrapper(
-			visibilityFromDB,
-			visibilityFromES,
-			dynamicconfig.GetBoolPropertyFnFilteredByDomain(false), // history visibility never read
-			serviceConfig.AdvancedVisibilityWritingMode,
-		), nil
-	}
 
 	serviceResource, err := resource.New(
 		params,
-		common.HistoryServiceName,
+		service.History,
 		serviceConfig,
-		visibilityManagerInitializer,
 	)
 	if err != nil {
 		return nil, err
@@ -157,25 +124,18 @@ func (s *Service) Stop() {
 	// 7. force stop the whole world and return
 
 	const gossipPropagationDelay = 400 * time.Millisecond
-	const shardOwnershipTransferDelay = 5 * time.Second
 	const gracePeriod = 2 * time.Second
 
 	remainingTime := s.config.ShutdownDrainDuration()
 
 	s.GetLogger().Info("ShutdownHandler: Evicting self from membership ring")
-	s.GetMembershipMonitor().EvictSelf()
+	s.GetMembershipResolver().EvictSelf()
 
 	s.GetLogger().Info("ShutdownHandler: Waiting for others to discover I am unhealthy")
-	remainingTime = s.sleep(gossipPropagationDelay, remainingTime)
+	remainingTime = common.SleepWithMinDuration(gossipPropagationDelay, remainingTime)
 
-	s.GetLogger().Info("ShutdownHandler: Initiating shardController shutdown")
-	s.handler.controller.PrepareToStop()
-	s.GetLogger().Info("ShutdownHandler: Waiting for traffic to drain")
-	remainingTime = s.sleep(shardOwnershipTransferDelay, remainingTime)
-
-	s.GetLogger().Info("ShutdownHandler: No longer taking rpc requests")
-	s.handler.PrepareToStop()
-	remainingTime = s.sleep(gracePeriod, remainingTime)
+	remainingTime = s.handler.PrepareToStop(remainingTime)
+	_ = common.SleepWithMinDuration(gracePeriod, remainingTime)
 
 	close(s.stopC)
 
@@ -183,14 +143,4 @@ func (s *Service) Stop() {
 	s.Resource.Stop()
 
 	s.GetLogger().Info("history stopped")
-}
-
-// sleep sleeps for the minimum of desired and available duration
-// returns the remaining available time duration
-func (s *Service) sleep(desired time.Duration, available time.Duration) time.Duration {
-	d := common.MinDuration(desired, available)
-	if d > 0 {
-		time.Sleep(d)
-	}
-	return available - d
 }

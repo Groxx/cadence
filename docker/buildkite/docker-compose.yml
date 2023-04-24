@@ -11,10 +11,7 @@ services:
   mysql:
     image: mysql:5.7
     environment:
-      MYSQL_DATABASE: db
-      MYSQL_ROOT_PASSWORD: uber
-    volumes:
-      - ./mysql-init:/docker-entrypoint-initdb.d
+      - "MYSQL_ROOT_PASSWORD=cadence"
     networks:
       services-network:
         aliases:
@@ -52,7 +49,7 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.5.1
+    image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.22
     networks:
       services-network:
         aliases:
@@ -60,14 +57,30 @@ services:
     environment:
       - discovery.type=single-node
 
+  mongo:
+    image: mongo:5
+    restart: always
+    networks:
+      services-network:
+        aliases:
+          - mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: cadence
+
   unit-test:
     build:
       context: ../../
       dockerfile: ./docker/buildkite/Dockerfile
     environment:
+      - "CASSANDRA=1"
+      - "MYSQL=1"
+      - "POSTGRES=1"
+      - "MONGODB=1"
       - "CASSANDRA_SEEDS=cassandra"
       - "MYSQL_SEEDS=mysql"
       - "POSTGRES_SEEDS=postgres"
+      - "MONGO_SEEDS=mongo"
       - BUILDKITE_AGENT_ACCESS_TOKEN
       - BUILDKITE_JOB_ID
       - BUILDKITE_BUILD_ID
@@ -76,6 +89,7 @@ services:
       - cassandra
       - mysql
       - postgres
+      - mongo
     volumes:
       - ../../:/cadence
       - /usr/bin/buildkite-agent:/usr/bin/buildkite-agent
@@ -89,6 +103,7 @@ services:
       context: ../../
       dockerfile: ./docker/buildkite/Dockerfile
     environment:
+      - "CASSANDRA=1"
       - "CASSANDRA_SEEDS=cassandra"
       - "ES_SEEDS=elasticsearch"
       - "KAFKA_SEEDS=kafka"
@@ -114,6 +129,7 @@ services:
       context: ../../
       dockerfile: ./docker/buildkite/Dockerfile
     environment:
+      - "MYSQL=1"
       - "MYSQL_SEEDS=mysql"
       - "ES_SEEDS=elasticsearch"
       - "KAFKA_SEEDS=kafka"
@@ -141,6 +157,7 @@ services:
       context: ../../
       dockerfile: ./docker/buildkite/Dockerfile
     environment:
+      - "POSTGRES=1"
       - "POSTGRES_SEEDS=postgres"
       - "PERSISTENCE_PLUGIN=postgres"
       - "ES_SEEDS=elasticsearch"
@@ -168,11 +185,11 @@ services:
       context: ../../
       dockerfile: ./docker/buildkite/Dockerfile
     environment:
+      - "CASSANDRA=1"
       - "CASSANDRA_SEEDS=cassandra"
       - "ES_SEEDS=elasticsearch"
       - "KAFKA_SEEDS=kafka"
       - "TEST_TAG=esintegration"
-      - "TEST_RUN_COUNT=10"
       - BUILDKITE_AGENT_ACCESS_TOKEN
       - BUILDKITE_JOB_ID
       - BUILDKITE_BUILD_ID
@@ -194,13 +211,13 @@ services:
       context: ../../
       dockerfile: ./docker/buildkite/Dockerfile
     environment:
+      - "MYSQL=1"
       - "MYSQL_SEEDS=mysql"
       - "ES_SEEDS=elasticsearch"
       - "KAFKA_SEEDS=kafka"
       - "PERSISTENCE_TYPE=sql"
       - "PERSISTENCE_PLUGIN=mysql"
       - "TEST_TAG=esintegration"
-      - "TEST_RUN_COUNT=10"
       - BUILDKITE_AGENT_ACCESS_TOKEN
       - BUILDKITE_JOB_ID
       - BUILDKITE_BUILD_ID
@@ -222,13 +239,13 @@ services:
       context: ../../
       dockerfile: ./docker/buildkite/Dockerfile
     environment:
+      - "POSTGRES=1"
       - "POSTGRES_SEEDS=postgres"
       - "ES_SEEDS=elasticsearch"
       - "KAFKA_SEEDS=kafka"
       - "PERSISTENCE_TYPE=sql"
       - "PERSISTENCE_PLUGIN=postgres"
       - "TEST_TAG=esintegration"
-      - "TEST_RUN_COUNT=10"
       - BUILDKITE_AGENT_ACCESS_TOKEN
       - BUILDKITE_JOB_ID
       - BUILDKITE_BUILD_ID

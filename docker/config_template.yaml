@@ -14,17 +14,21 @@ persistence:
         {{- $db := default .Env.DB "cassandra" | lower -}}
         {{- if or (eq $db "cassandra") (eq $db "scylla") }}
         default:
-            cassandra:
+            nosql:
+                pluginName: "cassandra"
                 hosts: {{ default .Env.CASSANDRA_SEEDS "" }}
                 keyspace: {{ default .Env.KEYSPACE "cadence" }}
                 user: {{ default .Env.CASSANDRA_USER "" }}
                 password: {{ default .Env.CASSANDRA_PASSWORD "" }}
+                protoVersion: {{ default .Env.CASSANDRA_PROTO_VERSION "4" }}
         visibility:
-            cassandra:
+            nosql:
+                pluginName: "cassandra"
                 hosts: {{ default .Env.CASSANDRA_SEEDS "" }}
                 keyspace: {{ default .Env.VISIBILITY_KEYSPACE "cadence_visibility" }}
                 user: {{ default .Env.CASSANDRA_USER "" }}
                 password: {{ default .Env.CASSANDRA_PASSWORD "" }}
+                protoVersion: {{ default .Env.CASSANDRA_PROTO_VERSION "4" }}
         {{- else if eq $db "mysql" }}
         default:
             sql:
@@ -196,33 +200,39 @@ services:
                 listenAddress: {{ .Env.PROMETHEUS_ENDPOINT_3 }}
         {{- end }}
 
-clusterMetadata:
-    enableGlobalDomain: {{ default .Env.ENABLE_GLOBAL_DOMAIN "false" }}
+clusterGroupMetadata:
+    clusterRedirectionPolicy:
+        policy: {{ default .Env.CLUSTER_REDIRECT_POLICY "all-domain-apis-forwarding" }}
     failoverVersionIncrement: 10
-    masterClusterName: "primary"
+    primaryClusterName: "cluster0"
     {{- if .Env.IS_NOT_PRIMARY }}
-    currentClusterName: "secondary"
+    currentClusterName: "cluster1"
     {{- else }}
-    currentClusterName: "primary"
+    currentClusterName: "cluster0"
     {{- end }}
-    clusterInformation:
-        primary:
+    clusterGroup:
+        cluster0:
             enabled: true
             initialFailoverVersion: 0
             rpcName: "cadence-frontend"
-            rpcAddress: {{ default .Env.PRIMARY_FRONTEND_SERVICE "cadence" }}:{{ default .Env.FRONTEND_PORT "7933" }}
+            rpcAddress: {{ default .Env.PRIMARY_FRONTEND_SERVICE "cadence" }}:{{ default .Env.FRONTEND_PORT "7833" }}
+            rpcTransport: "grpc"
+            authorizationProvider:
+                enable: {{ default .Env.ENABLE_OAUTH "false" }}
+                type: "OAuthAuthorization"
+                privateKey: {{ default .Env.OAUTH_PRIVATE_KEY "" }}
         {{- if .Env.ENABLE_GLOBAL_DOMAIN }}
-        secondary:
+        cluster1:
             enabled: true
             initialFailoverVersion: 2
             rpcName: "cadence-frontend"
-            rpcAddress: {{ default .Env.SECONDARY_FRONTEND_SERVICE "cadence-secondary" }}:{{ default .Env.FRONTEND_PORT "7933" }}
+            rpcAddress: {{ default .Env.SECONDARY_FRONTEND_SERVICE "cadence-secondary" }}:{{ default .Env.FRONTEND_PORT "7833" }}
+            rpcTransport: "grpc"
+            authorizationProvider:
+                enable: {{ default .Env.ENABLE_OAUTH "false" }}
+                type: "OAuthAuthorization"
+                privateKey: {{ default .Env.OAUTH_PRIVATE_KEY "" }}
         {{- end }}
-
-
-dcRedirectionPolicy:
-    policy: {{ default .Env.DC_REDIRECT_POLICY "selected-apis-forwarding" }}
-    toDC: ""
 
 archival:
   history:
@@ -269,10 +279,20 @@ kafka:
 publicClient:
     hostPort: {{ default .Env.FRONTEND_SERVICE "cadence" }}:{{ default .Env.FRONTEND_PORT "7933" }}
 
-dynamicConfigClient:
+dynamicconfig:
+  client: filebased
+  filebased:
     filepath: {{ default .Env.DYNAMIC_CONFIG_FILE_PATH "/etc/cadence/config/dynamicconfig/development.yaml" }}
     pollInterval: "60s"
 
 blobstore:
   filestore:
     outputDirectory: {{ default .Env.FILE_BLOB_STORE_OUTPUT_DIRECTYORY "" }}
+
+authorization:
+    oauthAuthorizer:
+        enable: {{ default .Env.ENABLE_OAUTH "false" }}
+        maxJwtTTL: {{ default .Env.OAUTH_MAX_JWT_TTL "86400" }}
+        jwtCredentials:
+            algorithm: "RS256"
+            publicKey: {{ default .Env.OAUTH_PUBLIC_KEY "" }}

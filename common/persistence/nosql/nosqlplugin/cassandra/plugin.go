@@ -20,7 +20,85 @@
 
 package cassandra
 
+import (
+	"time"
+
+	"github.com/uber/cadence/common/config"
+	"github.com/uber/cadence/common/log"
+	"github.com/uber/cadence/common/persistence"
+	"github.com/uber/cadence/common/persistence/nosql"
+	"github.com/uber/cadence/common/persistence/nosql/nosqlplugin"
+	"github.com/uber/cadence/common/persistence/nosql/nosqlplugin/cassandra/gocql"
+	"github.com/uber/cadence/environment"
+)
+
 const (
 	// PluginName is the name of the plugin
-	PluginName = "cassandra"
+	PluginName            = "cassandra"
+	defaultSessionTimeout = 10 * time.Second
+	defaultConnectTimeout = 2 * time.Second
 )
+
+type plugin struct{}
+
+var _ nosqlplugin.Plugin = (*plugin)(nil)
+
+func init() {
+	nosql.RegisterPlugin(PluginName, &plugin{})
+}
+
+// CreateDB initialize the db object
+func (p *plugin) CreateDB(cfg *config.NoSQL, logger log.Logger, dc *persistence.DynamicConfiguration) (nosqlplugin.DB, error) {
+	return p.doCreateDB(cfg, logger, dc)
+}
+
+// CreateAdminDB initialize the AdminDB object
+func (p *plugin) CreateAdminDB(cfg *config.NoSQL, logger log.Logger, dc *persistence.DynamicConfiguration) (nosqlplugin.AdminDB, error) {
+	// the keyspace is not created yet, so use empty and let the Cassandra connect
+	keyspace := cfg.Keyspace
+	cfg.Keyspace = ""
+	// change it back
+	defer func() {
+		cfg.Keyspace = keyspace
+	}()
+
+	return p.doCreateDB(cfg, logger, dc)
+}
+
+func (p *plugin) doCreateDB(cfg *config.NoSQL, logger log.Logger, dc *persistence.DynamicConfiguration) (*cdb, error) {
+	session, err := gocql.GetRegisteredClient().CreateSession(toGoCqlConfig(cfg))
+	if err != nil {
+		return nil, err
+	}
+	db := newCassandraDBFromSession(cfg, session, logger, dc)
+	return db, nil
+}
+
+func toGoCqlConfig(cfg *config.NoSQL) gocql.ClusterConfig {
+	if cfg.Port == 0 {
+		cfg.Port = environment.GetCassandraPort()
+	}
+	if cfg.Hosts == "" {
+		cfg.Hosts = environment.GetCassandraAddress()
+	}
+	if cfg.ProtoVersion == 0 {
+		cfg.ProtoVersion = environment.GetCassandraProtoVersion()
+	}
+	return gocql.ClusterConfig{
+		Hosts:                 cfg.Hosts,
+		Port:                  cfg.Port,
+		User:                  cfg.User,
+		Password:              cfg.Password,
+		AllowedAuthenticators: cfg.AllowedAuthenticators,
+		Keyspace:              cfg.Keyspace,
+		Region:                cfg.Region,
+		Datacenter:            cfg.Datacenter,
+		MaxConns:              cfg.MaxConns,
+		TLS:                   cfg.TLS,
+		ProtoVersion:          cfg.ProtoVersion,
+		Consistency:           cassandraDefaultConsLevel,
+		SerialConsistency:     cassandraDefaultSerialConsLevel,
+		Timeout:               defaultSessionTimeout,
+		ConnectTimeout:        defaultConnectTimeout,
+	}
+}

@@ -69,7 +69,6 @@ var (
 		OwnerEmail:                             common.StringPtr(DomainOwnerEmail),
 		Data:                                   DomainData,
 		WorkflowExecutionRetentionPeriodInDays: common.Int32Ptr(DomainRetention),
-		EmitMetric:                             common.BoolPtr(DomainEmitMetric),
 		BadBinaries:                            &BadBinaries,
 		HistoryArchivalStatus:                  &ArchivalStatus,
 		HistoryArchivalURI:                     common.StringPtr(HistoryArchivalURI),
@@ -186,6 +185,7 @@ var (
 		ScheduledTimestamp:        &Timestamp1,
 		StartedTimestamp:          &Timestamp2,
 		Queries:                   WorkflowQueryMap,
+		NextEventID:               EventID3,
 	}
 	RespondDecisionTaskCompletedRequest = types.RespondDecisionTaskCompletedRequest{
 		TaskToken:                  TaskToken,
@@ -298,10 +298,11 @@ var (
 		WorkerVersionInfo: &WorkerVersionInfo,
 	}
 	RequestCancelWorkflowExecutionRequest = types.RequestCancelWorkflowExecutionRequest{
-		Domain:            DomainName,
-		WorkflowExecution: &WorkflowExecution,
-		Identity:          Identity,
-		RequestID:         RequestID,
+		Domain:              DomainName,
+		WorkflowExecution:   &WorkflowExecution,
+		Identity:            Identity,
+		RequestID:           RequestID,
+		FirstExecutionRunID: RunID,
 	}
 	StartWorkflowExecutionRequest = types.StartWorkflowExecutionRequest{
 		Domain:                              DomainName,
@@ -364,11 +365,12 @@ var (
 		RunID: RunID,
 	}
 	TerminateWorkflowExecutionRequest = types.TerminateWorkflowExecutionRequest{
-		Domain:            DomainName,
-		WorkflowExecution: &WorkflowExecution,
-		Reason:            Reason,
-		Details:           Payload1,
-		Identity:          Identity,
+		Domain:              DomainName,
+		WorkflowExecution:   &WorkflowExecution,
+		Reason:              Reason,
+		Details:             Payload1,
+		Identity:            Identity,
+		FirstExecutionRunID: RunID,
 	}
 	DescribeWorkflowExecutionRequest = types.DescribeWorkflowExecutionRequest{
 		Domain:    DomainName,

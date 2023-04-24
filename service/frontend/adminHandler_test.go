@@ -22,6 +22,7 @@ package frontend
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -32,18 +33,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/uber/cadence/client/frontend"
 	"github.com/uber/cadence/client/history"
 	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/cache"
 	"github.com/uber/cadence/common/config"
-	"github.com/uber/cadence/common/definition"
 	"github.com/uber/cadence/common/dynamicconfig"
 	esmock "github.com/uber/cadence/common/elasticsearch/mocks"
+	"github.com/uber/cadence/common/membership"
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/mocks"
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/resource"
-	"github.com/uber/cadence/common/service"
 	"github.com/uber/cadence/common/types"
 )
 
@@ -56,6 +57,8 @@ type (
 		mockResource      *resource.Test
 		mockHistoryClient *history.MockClient
 		mockDomainCache   *cache.MockDomainCache
+		frontendClient    *frontend.MockClient
+		mockResolver      *membership.MockResolver
 
 		mockHistoryV2Mgr *mocks.HistoryV2Manager
 
@@ -82,8 +85,10 @@ func (s *adminHandlerSuite) SetupTest() {
 	s.mockDomainCache = s.mockResource.DomainCache
 	s.mockHistoryClient = s.mockResource.HistoryClient
 	s.mockHistoryV2Mgr = s.mockResource.HistoryMgr
+	s.frontendClient = s.mockResource.FrontendClient
+	s.mockResolver = s.mockResource.MembershipResolver
 
-	params := &service.BootstrapParams{
+	params := &resource.Params{
 		PersistenceConfig: config.Persistence{
 			NumHistoryShards: 1,
 		},
@@ -92,7 +97,7 @@ func (s *adminHandlerSuite) SetupTest() {
 		EnableAdminProtection:  dynamicconfig.GetBoolPropertyFn(false),
 		EnableGracefulFailover: dynamicconfig.GetBoolPropertyFn(false),
 	}
-	s.handler = NewAdminHandler(s.mockResource, params, config)
+	s.handler = NewAdminHandler(s.mockResource, params, config).(*adminHandlerImpl)
 	s.handler.Start()
 }
 
@@ -100,6 +105,93 @@ func (s *adminHandlerSuite) TearDownTest() {
 	s.controller.Finish()
 	s.mockResource.Finish(s.T())
 	s.handler.Stop()
+}
+
+func (s *adminHandlerSuite) TestMaintainCorruptWorkflow_NormalWorkflow() {
+	s.testMaintainCorruptWorkflow(nil, nil, false)
+}
+
+func (s *adminHandlerSuite) TestMaintainCorruptWorkflow_WorkflowDoesNotExist() {
+	err := &types.EntityNotExistsError{Message: "Workflow does not exist"}
+	s.testMaintainCorruptWorkflow(err, nil, false)
+}
+
+func (s *adminHandlerSuite) TestMaintainCorruptWorkflow_NoStartEvent() {
+	s.mockDomainCache.EXPECT().GetDomainName(gomock.Any()).Return(s.domainName, nil).AnyTimes()
+	err := &types.InternalServiceError{Message: "unable to get workflow start event"}
+	s.testMaintainCorruptWorkflow(err, nil, true)
+}
+func (s *adminHandlerSuite) TestMaintainCorruptWorkflow_NoStartEventHistory() {
+	s.mockDomainCache.EXPECT().GetDomainName(gomock.Any()).Return(s.domainName, nil).AnyTimes()
+	err := &types.InternalServiceError{Message: "unable to get workflow start event"}
+	s.testMaintainCorruptWorkflow(nil, err, true)
+}
+
+func (s *adminHandlerSuite) TestMaintainCorruptWorkflow_UnableToGetScheduledEvent() {
+	s.mockDomainCache.EXPECT().GetDomainName(gomock.Any()).Return(s.domainName, nil).AnyTimes()
+	err := &types.InternalServiceError{Message: "unable to get activity scheduled event"}
+	s.testMaintainCorruptWorkflow(err, nil, true)
+}
+func (s *adminHandlerSuite) TestMaintainCorruptWorkflow_UnableToGetScheduledEventHistory() {
+	s.mockDomainCache.EXPECT().GetDomainName(gomock.Any()).Return(s.domainName, nil).AnyTimes()
+	err := &types.InternalServiceError{Message: "unable to get activity scheduled event"}
+	s.testMaintainCorruptWorkflow(nil, err, true)
+}
+
+func (s *adminHandlerSuite) TestMaintainCorruptWorkflow_CorruptedHistory() {
+	s.mockDomainCache.EXPECT().GetDomainName(gomock.Any()).Return(s.domainName, nil).AnyTimes()
+	err := &types.InternalDataInconsistencyError{
+		Message: "corrupted history event batch, eventID is not continouous",
+	}
+	s.testMaintainCorruptWorkflow(err, nil, true)
+}
+
+func (s *adminHandlerSuite) testMaintainCorruptWorkflow(
+	describeWorkflowError error,
+	getHistoryError error,
+	expectDeletion bool,
+) {
+	handler := s.handler
+	handler.params = &resource.Params{}
+	ctx := context.Background()
+
+	request := &types.AdminMaintainWorkflowRequest{
+		Domain: s.domainName,
+		Execution: &types.WorkflowExecution{
+			WorkflowID: "someWorkflowID",
+			RunID:      uuid.New(),
+		},
+		SkipErrors: true,
+	}
+
+	// need to reeturn error here to start deleting
+	describeResp := &types.DescribeWorkflowExecutionResponse{}
+	s.frontendClient.EXPECT().DescribeWorkflowExecution(gomock.Any(), gomock.Any()).
+		Return(describeResp, describeWorkflowError)
+
+	// need to reeturn error here to start deleting
+	historyResponse := &types.GetWorkflowExecutionHistoryResponse{}
+	s.frontendClient.EXPECT().GetWorkflowExecutionHistory(gomock.Any(), gomock.Any()).
+		Return(historyResponse, getHistoryError).AnyTimes()
+
+	if expectDeletion {
+		hostInfo := membership.NewHostInfo("taskListA:thriftPort")
+		s.mockResolver.EXPECT().Lookup(gomock.Any(), gomock.Any()).Return(hostInfo, nil)
+		s.mockDomainCache.EXPECT().GetDomainID(s.domainName).Return(s.domainID, nil)
+
+		testMutableState := &types.DescribeMutableStateResponse{
+			MutableStateInDatabase: "{\"ExecutionInfo\":{\"BranchToken\":\"WQsACgAAACQ2MzI5YzEzMi1mMGI0LTQwZmUtYWYxMS1hODVmMDA3MzAzODQLABQAAAAkOWM5OWI1MjItMGEyZi00NTdmLWEyNDgtMWU0OTA0ZDg4YzVhDwAeDAAAAAAA\"}}",
+		}
+		s.mockHistoryClient.EXPECT().DescribeMutableState(gomock.Any(), gomock.Any()).Return(testMutableState, nil)
+
+		s.mockHistoryV2Mgr.On("DeleteHistoryBranch", mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockResource.ExecutionMgr.On("DeleteWorkflowExecution", mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockResource.ExecutionMgr.On("DeleteCurrentWorkflowExecution", mock.Anything, mock.Anything).Return(nil).Once()
+		s.mockResource.VisibilityMgr.On("DeleteWorkflowExecution", mock.Anything, mock.Anything).Return(nil).Once()
+	}
+
+	_, err := handler.MaintainCorruptWorkflow(ctx, request)
+	s.Nil(err)
 }
 
 func (s *adminHandlerSuite) Test_ConvertIndexedValueTypeToESDataType() {
@@ -429,7 +521,7 @@ func (s *adminHandlerSuite) Test_SetRequestDefaultValueAndGetTargetVersionHistor
 
 func (s *adminHandlerSuite) Test_AddSearchAttribute_Validate() {
 	handler := s.handler
-	handler.params = &service.BootstrapParams{}
+	handler.params = &resource.Params{}
 	ctx := context.Background()
 
 	type test struct {
@@ -449,15 +541,6 @@ func (s *adminHandlerSuite) Test_AddSearchAttribute_Validate() {
 			Request:  &types.AddSearchAttributeRequest{},
 			Expected: &types.BadRequestError{Message: "SearchAttributes are not provided"},
 		},
-		{
-			Name: "no advanced config",
-			Request: &types.AddSearchAttributeRequest{
-				SearchAttribute: map[string]types.IndexedValueType{
-					"CustomKeywordField": 1,
-				},
-			},
-			Expected: &types.BadRequestError{Message: "AdvancedVisibilityStore is not configured for this Cadence Cluster"},
-		},
 	}
 	for _, testCase := range testCases1 {
 		s.Equal(testCase.Expected, handler.AddSearchAttribute(ctx, testCase.Request))
@@ -475,7 +558,7 @@ func (s *adminHandlerSuite) Test_AddSearchAttribute_Validate() {
 	mockValidAttr := map[string]interface{}{
 		"testkey": types.IndexedValueTypeKeyword,
 	}
-	dynamicConfig.EXPECT().GetMapValue(dynamicconfig.ValidSearchAttributes, nil, definition.GetDefaultIndexedKeys()).
+	dynamicConfig.EXPECT().GetMapValue(dynamicconfig.ValidSearchAttributes, nil).
 		Return(mockValidAttr, nil).AnyTimes()
 
 	testCases2 := []test{
@@ -495,7 +578,7 @@ func (s *adminHandlerSuite) Test_AddSearchAttribute_Validate() {
 					"testkey": 1,
 				},
 			},
-			Expected: &types.BadRequestError{Message: "Key [testkey] is already whitelist"},
+			Expected: &types.BadRequestError{Message: "Key [testkey] is already whitelisted as a different type"},
 		},
 	}
 	for _, testCase := range testCases2 {
@@ -506,16 +589,17 @@ func (s *adminHandlerSuite) Test_AddSearchAttribute_Validate() {
 		Name: "dynamic config update failed",
 		Request: &types.AddSearchAttributeRequest{
 			SearchAttribute: map[string]types.IndexedValueType{
-				"testkey2": 1,
+				"testkey2": -1,
 			},
 		},
-		Expected: &types.InternalServiceError{Message: "Failed to update dynamic config, err: error"},
+		Expected: &types.BadRequestError{Message: "Unknown value type, IndexedValueType(-1)"},
 	}
 	dynamicConfig.EXPECT().UpdateValue(dynamicconfig.ValidSearchAttributes, map[string]interface{}{
 		"testkey":  types.IndexedValueTypeKeyword,
-		"testkey2": 1,
+		"testkey2": -1,
 	}).Return(errors.New("error"))
-	s.Equal(dcUpdateTest.Expected, handler.AddSearchAttribute(ctx, dcUpdateTest.Request))
+	err := handler.AddSearchAttribute(ctx, dcUpdateTest.Request)
+	s.Equal(dcUpdateTest.Expected, err)
 
 	// ES operations tests
 	dynamicConfig.EXPECT().UpdateValue(gomock.Any(), gomock.Any()).Return(nil).Times(2)
@@ -551,7 +635,7 @@ func (s *adminHandlerSuite) Test_AddSearchAttribute_Permission() {
 	handler := s.handler
 	handler.config = &Config{
 		EnableAdminProtection: dynamicconfig.GetBoolPropertyFn(true),
-		AdminOperationToken:   dynamicconfig.GetStringPropertyFn(common.DefaultAdminOperationToken),
+		AdminOperationToken:   dynamicconfig.GetStringPropertyFn(dynamicconfig.AdminOperationToken.DefaultString()),
 	}
 
 	type test struct {
@@ -570,7 +654,7 @@ func (s *adminHandlerSuite) Test_AddSearchAttribute_Permission() {
 		{
 			Name: "correct token",
 			Request: &types.AddSearchAttributeRequest{
-				SecurityToken: common.DefaultAdminOperationToken,
+				SecurityToken: dynamicconfig.AdminOperationToken.DefaultString(),
 			},
 			Expected: &types.BadRequestError{Message: "SearchAttributes are not provided"},
 		},
@@ -578,4 +662,96 @@ func (s *adminHandlerSuite) Test_AddSearchAttribute_Permission() {
 	for _, testCase := range testCases {
 		s.Equal(testCase.Expected, handler.AddSearchAttribute(ctx, testCase.Request))
 	}
+}
+
+func (s *adminHandlerSuite) Test_ConfigStore_NilRequest() {
+	ctx := context.Background()
+	handler := s.handler
+
+	_, err := handler.GetDynamicConfig(ctx, nil)
+	s.Error(err)
+
+	err = handler.UpdateDynamicConfig(ctx, nil)
+	s.Error(err)
+
+	err = handler.RestoreDynamicConfig(ctx, nil)
+	s.Error(err)
+}
+
+func (s *adminHandlerSuite) Test_ConfigStore_InvalidKey() {
+	ctx := context.Background()
+	handler := s.handler
+
+	_, err := handler.GetDynamicConfig(ctx, &types.GetDynamicConfigRequest{
+		ConfigName: "invalid key",
+		Filters:    nil,
+	})
+	s.Error(err)
+
+	err = handler.UpdateDynamicConfig(ctx, &types.UpdateDynamicConfigRequest{
+		ConfigName:   "invalid key",
+		ConfigValues: nil,
+	})
+	s.Error(err)
+
+	err = handler.RestoreDynamicConfig(ctx, &types.RestoreDynamicConfigRequest{
+		ConfigName: "invalid key",
+		Filters:    nil,
+	})
+	s.Error(err)
+}
+
+func (s *adminHandlerSuite) Test_GetDynamicConfig_NoFilter() {
+	ctx := context.Background()
+	handler := s.handler
+	dynamicConfig := dynamicconfig.NewMockClient(s.controller)
+	handler.params.DynamicConfig = dynamicConfig
+
+	dynamicConfig.EXPECT().
+		GetValue(dynamicconfig.TestGetBoolPropertyKey).
+		Return(true, nil).AnyTimes()
+
+	resp, err := handler.GetDynamicConfig(ctx, &types.GetDynamicConfigRequest{
+		ConfigName: dynamicconfig.TestGetBoolPropertyKey.String(),
+		Filters:    nil,
+	})
+	s.NoError(err)
+
+	encTrue, err := json.Marshal(true)
+	s.NoError(err)
+	s.Equal(resp.Value.Data, encTrue)
+}
+
+func (s *adminHandlerSuite) Test_GetDynamicConfig_FilterMatch() {
+	ctx := context.Background()
+	handler := s.handler
+	dynamicConfig := dynamicconfig.NewMockClient(s.controller)
+	handler.params.DynamicConfig = dynamicConfig
+
+	dynamicConfig.EXPECT().
+		GetValueWithFilters(dynamicconfig.TestGetBoolPropertyKey, map[dynamicconfig.Filter]interface{}{
+			dynamicconfig.DomainName: "samples_domain",
+		}).
+		Return(true, nil).AnyTimes()
+
+	encDomainName, err := json.Marshal("samples_domain")
+	s.NoError(err)
+
+	resp, err := handler.GetDynamicConfig(ctx, &types.GetDynamicConfigRequest{
+		ConfigName: dynamicconfig.TestGetBoolPropertyKey.String(),
+		Filters: []*types.DynamicConfigFilter{
+			{
+				Name: dynamicconfig.DomainName.String(),
+				Value: &types.DataBlob{
+					EncodingType: types.EncodingTypeJSON.Ptr(),
+					Data:         encDomainName,
+				},
+			},
+		},
+	})
+	s.NoError(err)
+
+	encTrue, err := json.Marshal(true)
+	s.NoError(err)
+	s.Equal(resp.Value.Data, encTrue)
 }

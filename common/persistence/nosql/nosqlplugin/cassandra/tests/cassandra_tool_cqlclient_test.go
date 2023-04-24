@@ -23,6 +23,8 @@ package tests
 import (
 	"testing"
 
+	"github.com/uber/cadence/testflags"
+
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -38,9 +40,10 @@ type (
 	}
 )
 
-var _ test.DB = (*cassandra.CqlClient)(nil)
+var _ test.DB = (cassandra.CqlClient)(nil)
 
 func TestCQLClientTestSuite(t *testing.T) {
+	testflags.RequireCassandra(t)
 	suite.Run(t, new(CQLClientTestSuite))
 }
 

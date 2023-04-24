@@ -21,22 +21,23 @@
 package proto
 
 import (
+	adminv1 "github.com/uber/cadence-idl/go/proto/admin/v1"
 	sharedv1 "github.com/uber/cadence/.gen/proto/shared/v1"
 	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/types"
 )
 
-func FromHostInfo(t *types.HostInfo) *sharedv1.HostInfo {
+func FromHostInfo(t *types.HostInfo) *adminv1.HostInfo {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.HostInfo{
+	return &adminv1.HostInfo{
 		Identity: t.Identity,
 	}
 }
 
-func ToHostInfo(t *sharedv1.HostInfo) *types.HostInfo {
+func ToHostInfo(t *adminv1.HostInfo) *types.HostInfo {
 	if t == nil {
 		return nil
 	}
@@ -45,64 +46,64 @@ func ToHostInfo(t *sharedv1.HostInfo) *types.HostInfo {
 	}
 }
 
-func FromMembershipInfo(t *types.MembershipInfo) *sharedv1.MembershipInfo {
+func FromMembershipInfo(t *types.MembershipInfo) *adminv1.MembershipInfo {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.MembershipInfo{
+	return &adminv1.MembershipInfo{
 		CurrentHost:      FromHostInfo(t.CurrentHost),
 		ReachableMembers: t.ReachableMembers,
 		Rings:            FromRingInfoArray(t.Rings),
 	}
 }
 
-func FromPersistenceSettings(t []*types.PersistenceSetting) []*sharedv1.PersistenceSetting {
+func FromPersistenceSettings(t []*types.PersistenceSetting) []*adminv1.PersistenceSetting {
 	if t == nil {
 		return nil
 	}
-	v := make([]*sharedv1.PersistenceSetting, len(t))
+	v := make([]*adminv1.PersistenceSetting, len(t))
 	for i := range t {
 		v[i] = FromPersistenceSetting(t[i])
 	}
 	return v
 }
 
-func FromPersistenceSetting(t *types.PersistenceSetting) *sharedv1.PersistenceSetting {
+func FromPersistenceSetting(t *types.PersistenceSetting) *adminv1.PersistenceSetting {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.PersistenceSetting{
+	return &adminv1.PersistenceSetting{
 		Key:   t.Key,
 		Value: t.Value,
 	}
 }
 
-func FromPersistenceFeatures(t []*types.PersistenceFeature) []*sharedv1.PersistenceFeature {
+func FromPersistenceFeatures(t []*types.PersistenceFeature) []*adminv1.PersistenceFeature {
 	if t == nil {
 		return nil
 	}
-	v := make([]*sharedv1.PersistenceFeature, len(t))
+	v := make([]*adminv1.PersistenceFeature, len(t))
 	for i := range t {
 		v[i] = FromPersistenceFeature(t[i])
 	}
 	return v
 }
 
-func FromPersistenceFeature(t *types.PersistenceFeature) *sharedv1.PersistenceFeature {
+func FromPersistenceFeature(t *types.PersistenceFeature) *adminv1.PersistenceFeature {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.PersistenceFeature{
+	return &adminv1.PersistenceFeature{
 		Key:     t.Key,
 		Enabled: t.Enabled,
 	}
 }
 
-func FromPersistenceInfoMap(t map[string]*types.PersistenceInfo) map[string]*sharedv1.PersistenceInfo {
+func FromPersistenceInfoMap(t map[string]*types.PersistenceInfo) map[string]*adminv1.PersistenceInfo {
 	if t == nil {
 		return nil
 	}
-	v := make(map[string]*sharedv1.PersistenceInfo, len(t))
+	v := make(map[string]*adminv1.PersistenceInfo, len(t))
 	for key := range t {
 		v[key] = FromPersistenceInfo(t[key])
 	}
@@ -110,19 +111,19 @@ func FromPersistenceInfoMap(t map[string]*types.PersistenceInfo) map[string]*sha
 	return v
 }
 
-func FromPersistenceInfo(t *types.PersistenceInfo) *sharedv1.PersistenceInfo {
+func FromPersistenceInfo(t *types.PersistenceInfo) *adminv1.PersistenceInfo {
 	if t == nil {
 		return nil
 	}
 
-	return &sharedv1.PersistenceInfo{
+	return &adminv1.PersistenceInfo{
 		Backend:  t.Backend,
 		Settings: FromPersistenceSettings(t.Settings),
 		Features: FromPersistenceFeatures(t.Features),
 	}
 }
 
-func ToPersistenceSettings(t []*sharedv1.PersistenceSetting) []*types.PersistenceSetting {
+func ToPersistenceSettings(t []*adminv1.PersistenceSetting) []*types.PersistenceSetting {
 	if t == nil {
 		return nil
 	}
@@ -133,7 +134,7 @@ func ToPersistenceSettings(t []*sharedv1.PersistenceSetting) []*types.Persistenc
 	return v
 }
 
-func ToPersistenceSetting(t *sharedv1.PersistenceSetting) *types.PersistenceSetting {
+func ToPersistenceSetting(t *adminv1.PersistenceSetting) *types.PersistenceSetting {
 	if t == nil {
 		return nil
 	}
@@ -143,7 +144,7 @@ func ToPersistenceSetting(t *sharedv1.PersistenceSetting) *types.PersistenceSett
 	}
 }
 
-func ToPersistenceFeatures(t []*sharedv1.PersistenceFeature) []*types.PersistenceFeature {
+func ToPersistenceFeatures(t []*adminv1.PersistenceFeature) []*types.PersistenceFeature {
 	if t == nil {
 		return nil
 	}
@@ -154,7 +155,7 @@ func ToPersistenceFeatures(t []*sharedv1.PersistenceFeature) []*types.Persistenc
 	return v
 }
 
-func ToPersistenceFeature(t *sharedv1.PersistenceFeature) *types.PersistenceFeature {
+func ToPersistenceFeature(t *adminv1.PersistenceFeature) *types.PersistenceFeature {
 	if t == nil {
 		return nil
 	}
@@ -164,7 +165,7 @@ func ToPersistenceFeature(t *sharedv1.PersistenceFeature) *types.PersistenceFeat
 	}
 }
 
-func ToPersistenceInfoMap(t map[string]*sharedv1.PersistenceInfo) map[string]*types.PersistenceInfo {
+func ToPersistenceInfoMap(t map[string]*adminv1.PersistenceInfo) map[string]*types.PersistenceInfo {
 	if t == nil {
 		return nil
 	}
@@ -176,7 +177,7 @@ func ToPersistenceInfoMap(t map[string]*sharedv1.PersistenceInfo) map[string]*ty
 	return v
 }
 
-func ToPersistenceInfo(t *sharedv1.PersistenceInfo) *types.PersistenceInfo {
+func ToPersistenceInfo(t *adminv1.PersistenceInfo) *types.PersistenceInfo {
 	if t == nil {
 		return nil
 	}
@@ -188,7 +189,7 @@ func ToPersistenceInfo(t *sharedv1.PersistenceInfo) *types.PersistenceInfo {
 	}
 }
 
-func ToMembershipInfo(t *sharedv1.MembershipInfo) *types.MembershipInfo {
+func ToMembershipInfo(t *adminv1.MembershipInfo) *types.MembershipInfo {
 	if t == nil {
 		return nil
 	}
@@ -199,17 +200,17 @@ func ToMembershipInfo(t *sharedv1.MembershipInfo) *types.MembershipInfo {
 	}
 }
 
-func FromDomainCacheInfo(t *types.DomainCacheInfo) *sharedv1.DomainCacheInfo {
+func FromDomainCacheInfo(t *types.DomainCacheInfo) *adminv1.DomainCacheInfo {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.DomainCacheInfo{
+	return &adminv1.DomainCacheInfo{
 		NumOfItemsInCacheById:   t.NumOfItemsInCacheByID,
 		NumOfItemsInCacheByName: t.NumOfItemsInCacheByName,
 	}
 }
 
-func ToDomainCacheInfo(t *sharedv1.DomainCacheInfo) *types.DomainCacheInfo {
+func ToDomainCacheInfo(t *adminv1.DomainCacheInfo) *types.DomainCacheInfo {
 	if t == nil {
 		return nil
 	}
@@ -219,18 +220,18 @@ func ToDomainCacheInfo(t *sharedv1.DomainCacheInfo) *types.DomainCacheInfo {
 	}
 }
 
-func FromRingInfo(t *types.RingInfo) *sharedv1.RingInfo {
+func FromRingInfo(t *types.RingInfo) *adminv1.RingInfo {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.RingInfo{
+	return &adminv1.RingInfo{
 		Role:        t.Role,
 		MemberCount: t.MemberCount,
 		Members:     FromHostInfoArray(t.Members),
 	}
 }
 
-func ToRingInfo(t *sharedv1.RingInfo) *types.RingInfo {
+func ToRingInfo(t *adminv1.RingInfo) *types.RingInfo {
 	if t == nil {
 		return nil
 	}
@@ -306,17 +307,17 @@ func ToVersionHistories(t *sharedv1.VersionHistories) *types.VersionHistories {
 	}
 }
 
-func FromVersionHistory(t *types.VersionHistory) *sharedv1.VersionHistory {
+func FromVersionHistory(t *types.VersionHistory) *adminv1.VersionHistory {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.VersionHistory{
+	return &adminv1.VersionHistory{
 		BranchToken: t.BranchToken,
 		Items:       FromVersionHistoryItemArray(t.Items),
 	}
 }
 
-func ToVersionHistory(t *sharedv1.VersionHistory) *types.VersionHistory {
+func ToVersionHistory(t *adminv1.VersionHistory) *types.VersionHistory {
 	if t == nil {
 		return nil
 	}
@@ -326,17 +327,17 @@ func ToVersionHistory(t *sharedv1.VersionHistory) *types.VersionHistory {
 	}
 }
 
-func FromVersionHistoryItem(t *types.VersionHistoryItem) *sharedv1.VersionHistoryItem {
+func FromVersionHistoryItem(t *types.VersionHistoryItem) *adminv1.VersionHistoryItem {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.VersionHistoryItem{
+	return &adminv1.VersionHistoryItem{
 		EventId: t.EventID,
 		Version: t.Version,
 	}
 }
 
-func ToVersionHistoryItem(t *sharedv1.VersionHistoryItem) *types.VersionHistoryItem {
+func ToVersionHistoryItem(t *adminv1.VersionHistoryItem) *types.VersionHistoryItem {
 	if t == nil {
 		return nil
 	}
@@ -393,18 +394,18 @@ func ToWorkflowState(t sharedv1.WorkflowState) *int32 {
 	panic("unexpected enum value")
 }
 
-func FromHostInfoArray(t []*types.HostInfo) []*sharedv1.HostInfo {
+func FromHostInfoArray(t []*types.HostInfo) []*adminv1.HostInfo {
 	if t == nil {
 		return nil
 	}
-	v := make([]*sharedv1.HostInfo, len(t))
+	v := make([]*adminv1.HostInfo, len(t))
 	for i := range t {
 		v[i] = FromHostInfo(t[i])
 	}
 	return v
 }
 
-func ToHostInfoArray(t []*sharedv1.HostInfo) []*types.HostInfo {
+func ToHostInfoArray(t []*adminv1.HostInfo) []*types.HostInfo {
 	if t == nil {
 		return nil
 	}
@@ -415,18 +416,18 @@ func ToHostInfoArray(t []*sharedv1.HostInfo) []*types.HostInfo {
 	return v
 }
 
-func FromVersionHistoryArray(t []*types.VersionHistory) []*sharedv1.VersionHistory {
+func FromVersionHistoryArray(t []*types.VersionHistory) []*adminv1.VersionHistory {
 	if t == nil {
 		return nil
 	}
-	v := make([]*sharedv1.VersionHistory, len(t))
+	v := make([]*adminv1.VersionHistory, len(t))
 	for i := range t {
 		v[i] = FromVersionHistory(t[i])
 	}
 	return v
 }
 
-func ToVersionHistoryArray(t []*sharedv1.VersionHistory) []*types.VersionHistory {
+func ToVersionHistoryArray(t []*adminv1.VersionHistory) []*types.VersionHistory {
 	if t == nil {
 		return nil
 	}
@@ -437,18 +438,18 @@ func ToVersionHistoryArray(t []*sharedv1.VersionHistory) []*types.VersionHistory
 	return v
 }
 
-func FromRingInfoArray(t []*types.RingInfo) []*sharedv1.RingInfo {
+func FromRingInfoArray(t []*types.RingInfo) []*adminv1.RingInfo {
 	if t == nil {
 		return nil
 	}
-	v := make([]*sharedv1.RingInfo, len(t))
+	v := make([]*adminv1.RingInfo, len(t))
 	for i := range t {
 		v[i] = FromRingInfo(t[i])
 	}
 	return v
 }
 
-func ToRingInfoArray(t []*sharedv1.RingInfo) []*types.RingInfo {
+func ToRingInfoArray(t []*adminv1.RingInfo) []*types.RingInfo {
 	if t == nil {
 		return nil
 	}
@@ -459,61 +460,61 @@ func ToRingInfoArray(t []*sharedv1.RingInfo) []*types.RingInfo {
 	return v
 }
 
-func FromDLQType(t *types.DLQType) sharedv1.DLQType {
+func FromDLQType(t *types.DLQType) adminv1.DLQType {
 	if t == nil {
-		return sharedv1.DLQType_DLQ_TYPE_INVALID
+		return adminv1.DLQType_DLQ_TYPE_INVALID
 	}
 	switch *t {
 	case types.DLQTypeReplication:
-		return sharedv1.DLQType_DLQ_TYPE_REPLICATION
+		return adminv1.DLQType_DLQ_TYPE_REPLICATION
 	case types.DLQTypeDomain:
-		return sharedv1.DLQType_DLQ_TYPE_DOMAIN
+		return adminv1.DLQType_DLQ_TYPE_DOMAIN
 	}
 	panic("unexpected enum value")
 }
 
-func ToDLQType(t sharedv1.DLQType) *types.DLQType {
+func ToDLQType(t adminv1.DLQType) *types.DLQType {
 	switch t {
-	case sharedv1.DLQType_DLQ_TYPE_INVALID:
+	case adminv1.DLQType_DLQ_TYPE_INVALID:
 		return nil
-	case sharedv1.DLQType_DLQ_TYPE_REPLICATION:
+	case adminv1.DLQType_DLQ_TYPE_REPLICATION:
 		return types.DLQTypeReplication.Ptr()
-	case sharedv1.DLQType_DLQ_TYPE_DOMAIN:
+	case adminv1.DLQType_DLQ_TYPE_DOMAIN:
 		return types.DLQTypeDomain.Ptr()
 	}
 	panic("unexpected enum value")
 }
 
-func FromDomainOperation(t *types.DomainOperation) sharedv1.DomainOperation {
+func FromDomainOperation(t *types.DomainOperation) adminv1.DomainOperation {
 	if t == nil {
-		return sharedv1.DomainOperation_DOMAIN_OPERATION_INVALID
+		return adminv1.DomainOperation_DOMAIN_OPERATION_INVALID
 	}
 	switch *t {
 	case types.DomainOperationCreate:
-		return sharedv1.DomainOperation_DOMAIN_OPERATION_CREATE
+		return adminv1.DomainOperation_DOMAIN_OPERATION_CREATE
 	case types.DomainOperationUpdate:
-		return sharedv1.DomainOperation_DOMAIN_OPERATION_UPDATE
+		return adminv1.DomainOperation_DOMAIN_OPERATION_UPDATE
 	}
 	panic("unexpected enum value")
 }
 
-func ToDomainOperation(t sharedv1.DomainOperation) *types.DomainOperation {
+func ToDomainOperation(t adminv1.DomainOperation) *types.DomainOperation {
 	switch t {
-	case sharedv1.DomainOperation_DOMAIN_OPERATION_INVALID:
+	case adminv1.DomainOperation_DOMAIN_OPERATION_INVALID:
 		return nil
-	case sharedv1.DomainOperation_DOMAIN_OPERATION_CREATE:
+	case adminv1.DomainOperation_DOMAIN_OPERATION_CREATE:
 		return types.DomainOperationCreate.Ptr()
-	case sharedv1.DomainOperation_DOMAIN_OPERATION_UPDATE:
+	case adminv1.DomainOperation_DOMAIN_OPERATION_UPDATE:
 		return types.DomainOperationUpdate.Ptr()
 	}
 	panic("unexpected enum value")
 }
 
-func FromDomainTaskAttributes(t *types.DomainTaskAttributes) *sharedv1.DomainTaskAttributes {
+func FromDomainTaskAttributes(t *types.DomainTaskAttributes) *adminv1.DomainTaskAttributes {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.DomainTaskAttributes{
+	return &adminv1.DomainTaskAttributes{
 		DomainOperation: FromDomainOperation(t.DomainOperation),
 		Id:              t.ID,
 		Domain: FromDescribeDomainResponseDomain(&types.DescribeDomainResponse{
@@ -527,7 +528,7 @@ func FromDomainTaskAttributes(t *types.DomainTaskAttributes) *sharedv1.DomainTas
 	}
 }
 
-func ToDomainTaskAttributes(t *sharedv1.DomainTaskAttributes) *types.DomainTaskAttributes {
+func ToDomainTaskAttributes(t *adminv1.DomainTaskAttributes) *types.DomainTaskAttributes {
 	if t == nil {
 		return nil
 	}
@@ -544,18 +545,18 @@ func ToDomainTaskAttributes(t *sharedv1.DomainTaskAttributes) *types.DomainTaskA
 	}
 }
 
-func FromFailoverMarkerAttributes(t *types.FailoverMarkerAttributes) *sharedv1.FailoverMarkerAttributes {
+func FromFailoverMarkerAttributes(t *types.FailoverMarkerAttributes) *adminv1.FailoverMarkerAttributes {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.FailoverMarkerAttributes{
+	return &adminv1.FailoverMarkerAttributes{
 		DomainId:        t.DomainID,
 		FailoverVersion: t.FailoverVersion,
 		CreationTime:    unixNanoToTime(t.CreationTime),
 	}
 }
 
-func ToFailoverMarkerAttributes(t *sharedv1.FailoverMarkerAttributes) *types.FailoverMarkerAttributes {
+func ToFailoverMarkerAttributes(t *adminv1.FailoverMarkerAttributes) *types.FailoverMarkerAttributes {
 	if t == nil {
 		return nil
 	}
@@ -566,17 +567,17 @@ func ToFailoverMarkerAttributes(t *sharedv1.FailoverMarkerAttributes) *types.Fai
 	}
 }
 
-func FromFailoverMarkerToken(t *types.FailoverMarkerToken) *sharedv1.FailoverMarkerToken {
+func FromFailoverMarkerToken(t *types.FailoverMarkerToken) *adminv1.FailoverMarkerToken {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.FailoverMarkerToken{
+	return &adminv1.FailoverMarkerToken{
 		ShardIds:       t.ShardIDs,
 		FailoverMarker: FromFailoverMarkerAttributes(t.FailoverMarker),
 	}
 }
 
-func ToFailoverMarkerToken(t *sharedv1.FailoverMarkerToken) *types.FailoverMarkerToken {
+func ToFailoverMarkerToken(t *adminv1.FailoverMarkerToken) *types.FailoverMarkerToken {
 	if t == nil {
 		return nil
 	}
@@ -586,12 +587,11 @@ func ToFailoverMarkerToken(t *sharedv1.FailoverMarkerToken) *types.FailoverMarke
 	}
 }
 
-func FromHistoryTaskV2Attributes(t *types.HistoryTaskV2Attributes) *sharedv1.HistoryTaskV2Attributes {
+func FromHistoryTaskV2Attributes(t *types.HistoryTaskV2Attributes) *adminv1.HistoryTaskV2Attributes {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.HistoryTaskV2Attributes{
-		TaskId:              t.TaskID,
+	return &adminv1.HistoryTaskV2Attributes{
 		DomainId:            t.DomainID,
 		WorkflowExecution:   FromWorkflowRunPair(t.WorkflowID, t.RunID),
 		VersionHistoryItems: FromVersionHistoryItemArray(t.VersionHistoryItems),
@@ -600,12 +600,11 @@ func FromHistoryTaskV2Attributes(t *types.HistoryTaskV2Attributes) *sharedv1.His
 	}
 }
 
-func ToHistoryTaskV2Attributes(t *sharedv1.HistoryTaskV2Attributes) *types.HistoryTaskV2Attributes {
+func ToHistoryTaskV2Attributes(t *adminv1.HistoryTaskV2Attributes) *types.HistoryTaskV2Attributes {
 	if t == nil {
 		return nil
 	}
 	return &types.HistoryTaskV2Attributes{
-		TaskID:              t.TaskId,
 		DomainID:            t.DomainId,
 		WorkflowID:          ToWorkflowID(t.WorkflowExecution),
 		RunID:               ToRunID(t.WorkflowExecution),
@@ -615,11 +614,11 @@ func ToHistoryTaskV2Attributes(t *sharedv1.HistoryTaskV2Attributes) *types.Histo
 	}
 }
 
-func FromReplicationMessages(t *types.ReplicationMessages) *sharedv1.ReplicationMessages {
+func FromReplicationMessages(t *types.ReplicationMessages) *adminv1.ReplicationMessages {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.ReplicationMessages{
+	return &adminv1.ReplicationMessages{
 		ReplicationTasks:       FromReplicationTaskArray(t.ReplicationTasks),
 		LastRetrievedMessageId: t.LastRetrievedMessageID,
 		HasMore:                t.HasMore,
@@ -627,7 +626,7 @@ func FromReplicationMessages(t *types.ReplicationMessages) *sharedv1.Replication
 	}
 }
 
-func ToReplicationMessages(t *sharedv1.ReplicationMessages) *types.ReplicationMessages {
+func ToReplicationMessages(t *adminv1.ReplicationMessages) *types.ReplicationMessages {
 	if t == nil {
 		return nil
 	}
@@ -639,11 +638,11 @@ func ToReplicationMessages(t *sharedv1.ReplicationMessages) *types.ReplicationMe
 	}
 }
 
-func FromReplicationTaskInfo(t *types.ReplicationTaskInfo) *sharedv1.ReplicationTaskInfo {
+func FromReplicationTaskInfo(t *types.ReplicationTaskInfo) *adminv1.ReplicationTaskInfo {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.ReplicationTaskInfo{
+	return &adminv1.ReplicationTaskInfo{
 		DomainId:          t.DomainID,
 		WorkflowExecution: FromWorkflowRunPair(t.WorkflowID, t.RunID),
 		TaskType:          int32(t.TaskType),
@@ -655,7 +654,7 @@ func FromReplicationTaskInfo(t *types.ReplicationTaskInfo) *sharedv1.Replication
 	}
 }
 
-func ToReplicationTaskInfo(t *sharedv1.ReplicationTaskInfo) *types.ReplicationTaskInfo {
+func ToReplicationTaskInfo(t *adminv1.ReplicationTaskInfo) *types.ReplicationTaskInfo {
 	if t == nil {
 		return nil
 	}
@@ -672,63 +671,63 @@ func ToReplicationTaskInfo(t *sharedv1.ReplicationTaskInfo) *types.ReplicationTa
 	}
 }
 
-func FromReplicationTaskType(t *types.ReplicationTaskType) sharedv1.ReplicationTaskType {
+func FromReplicationTaskType(t *types.ReplicationTaskType) adminv1.ReplicationTaskType {
 	if t == nil {
-		return sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_INVALID
+		return adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_INVALID
 	}
 	switch *t {
 	case types.ReplicationTaskTypeDomain:
-		return sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_DOMAIN
+		return adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_DOMAIN
 	case types.ReplicationTaskTypeHistory:
-		return sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY
+		return adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY
 	case types.ReplicationTaskTypeSyncShardStatus:
-		return sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_SYNC_SHARD_STATUS
+		return adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_SYNC_SHARD_STATUS
 	case types.ReplicationTaskTypeSyncActivity:
-		return sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_SYNC_ACTIVITY
+		return adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_SYNC_ACTIVITY
 	case types.ReplicationTaskTypeHistoryMetadata:
-		return sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY_METADATA
+		return adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY_METADATA
 	case types.ReplicationTaskTypeHistoryV2:
-		return sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY_V2
+		return adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY_V2
 	case types.ReplicationTaskTypeFailoverMarker:
-		return sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_FAILOVER_MARKER
+		return adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_FAILOVER_MARKER
 	}
 	panic("unexpected enum value")
 }
 
-func ToReplicationTaskType(t sharedv1.ReplicationTaskType) *types.ReplicationTaskType {
+func ToReplicationTaskType(t adminv1.ReplicationTaskType) *types.ReplicationTaskType {
 	switch t {
-	case sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_INVALID:
+	case adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_INVALID:
 		return nil
-	case sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_DOMAIN:
+	case adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_DOMAIN:
 		return types.ReplicationTaskTypeDomain.Ptr()
-	case sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY:
+	case adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY:
 		return types.ReplicationTaskTypeHistory.Ptr()
-	case sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_SYNC_SHARD_STATUS:
+	case adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_SYNC_SHARD_STATUS:
 		return types.ReplicationTaskTypeSyncShardStatus.Ptr()
-	case sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_SYNC_ACTIVITY:
+	case adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_SYNC_ACTIVITY:
 		return types.ReplicationTaskTypeSyncActivity.Ptr()
-	case sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY_METADATA:
+	case adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY_METADATA:
 		return types.ReplicationTaskTypeHistoryMetadata.Ptr()
-	case sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY_V2:
+	case adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_HISTORY_V2:
 		return types.ReplicationTaskTypeHistoryV2.Ptr()
-	case sharedv1.ReplicationTaskType_REPLICATION_TASK_TYPE_FAILOVER_MARKER:
+	case adminv1.ReplicationTaskType_REPLICATION_TASK_TYPE_FAILOVER_MARKER:
 		return types.ReplicationTaskTypeFailoverMarker.Ptr()
 	}
 	panic("unexpected enum value")
 }
 
-func FromReplicationToken(t *types.ReplicationToken) *sharedv1.ReplicationToken {
+func FromReplicationToken(t *types.ReplicationToken) *adminv1.ReplicationToken {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.ReplicationToken{
+	return &adminv1.ReplicationToken{
 		ShardId:                t.ShardID,
 		LastRetrievedMessageId: t.LastRetrievedMessageID,
 		LastProcessedMessageId: t.LastProcessedMessageID,
 	}
 }
 
-func ToReplicationToken(t *sharedv1.ReplicationToken) *types.ReplicationToken {
+func ToReplicationToken(t *adminv1.ReplicationToken) *types.ReplicationToken {
 	if t == nil {
 		return nil
 	}
@@ -739,11 +738,11 @@ func ToReplicationToken(t *sharedv1.ReplicationToken) *types.ReplicationToken {
 	}
 }
 
-func FromSyncActivityTaskAttributes(t *types.SyncActivityTaskAttributes) *sharedv1.SyncActivityTaskAttributes {
+func FromSyncActivityTaskAttributes(t *types.SyncActivityTaskAttributes) *adminv1.SyncActivityTaskAttributes {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.SyncActivityTaskAttributes{
+	return &adminv1.SyncActivityTaskAttributes{
 		DomainId:           t.DomainID,
 		WorkflowExecution:  FromWorkflowRunPair(t.WorkflowID, t.RunID),
 		Version:            t.Version,
@@ -760,7 +759,7 @@ func FromSyncActivityTaskAttributes(t *types.SyncActivityTaskAttributes) *shared
 	}
 }
 
-func ToSyncActivityTaskAttributes(t *sharedv1.SyncActivityTaskAttributes) *types.SyncActivityTaskAttributes {
+func ToSyncActivityTaskAttributes(t *adminv1.SyncActivityTaskAttributes) *types.SyncActivityTaskAttributes {
 	if t == nil {
 		return nil
 	}
@@ -783,16 +782,16 @@ func ToSyncActivityTaskAttributes(t *sharedv1.SyncActivityTaskAttributes) *types
 	}
 }
 
-func FromSyncShardStatus(t *types.SyncShardStatus) *sharedv1.SyncShardStatus {
+func FromSyncShardStatus(t *types.SyncShardStatus) *adminv1.SyncShardStatus {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.SyncShardStatus{
+	return &adminv1.SyncShardStatus{
 		Timestamp: unixNanoToTime(t.Timestamp),
 	}
 }
 
-func ToSyncShardStatus(t *sharedv1.SyncShardStatus) *types.SyncShardStatus {
+func ToSyncShardStatus(t *adminv1.SyncShardStatus) *types.SyncShardStatus {
 	if t == nil {
 		return nil
 	}
@@ -801,18 +800,18 @@ func ToSyncShardStatus(t *sharedv1.SyncShardStatus) *types.SyncShardStatus {
 	}
 }
 
-func FromSyncShardStatusTaskAttributes(t *types.SyncShardStatusTaskAttributes) *sharedv1.SyncShardStatusTaskAttributes {
+func FromSyncShardStatusTaskAttributes(t *types.SyncShardStatusTaskAttributes) *adminv1.SyncShardStatusTaskAttributes {
 	if t == nil {
 		return nil
 	}
-	return &sharedv1.SyncShardStatusTaskAttributes{
+	return &adminv1.SyncShardStatusTaskAttributes{
 		SourceCluster: t.SourceCluster,
 		ShardId:       int32(t.ShardID),
 		Timestamp:     unixNanoToTime(t.Timestamp),
 	}
 }
 
-func ToSyncShardStatusTaskAttributes(t *sharedv1.SyncShardStatusTaskAttributes) *types.SyncShardStatusTaskAttributes {
+func ToSyncShardStatusTaskAttributes(t *adminv1.SyncShardStatusTaskAttributes) *types.SyncShardStatusTaskAttributes {
 	if t == nil {
 		return nil
 	}
@@ -823,18 +822,18 @@ func ToSyncShardStatusTaskAttributes(t *sharedv1.SyncShardStatusTaskAttributes) 
 	}
 }
 
-func FromReplicationTaskInfoArray(t []*types.ReplicationTaskInfo) []*sharedv1.ReplicationTaskInfo {
+func FromReplicationTaskInfoArray(t []*types.ReplicationTaskInfo) []*adminv1.ReplicationTaskInfo {
 	if t == nil {
 		return nil
 	}
-	v := make([]*sharedv1.ReplicationTaskInfo, len(t))
+	v := make([]*adminv1.ReplicationTaskInfo, len(t))
 	for i := range t {
 		v[i] = FromReplicationTaskInfo(t[i])
 	}
 	return v
 }
 
-func ToReplicationTaskInfoArray(t []*sharedv1.ReplicationTaskInfo) []*types.ReplicationTaskInfo {
+func ToReplicationTaskInfoArray(t []*adminv1.ReplicationTaskInfo) []*types.ReplicationTaskInfo {
 	if t == nil {
 		return nil
 	}
@@ -845,18 +844,18 @@ func ToReplicationTaskInfoArray(t []*sharedv1.ReplicationTaskInfo) []*types.Repl
 	return v
 }
 
-func FromReplicationTaskArray(t []*types.ReplicationTask) []*sharedv1.ReplicationTask {
+func FromReplicationTaskArray(t []*types.ReplicationTask) []*adminv1.ReplicationTask {
 	if t == nil {
 		return nil
 	}
-	v := make([]*sharedv1.ReplicationTask, len(t))
+	v := make([]*adminv1.ReplicationTask, len(t))
 	for i := range t {
 		v[i] = FromReplicationTask(t[i])
 	}
 	return v
 }
 
-func ToReplicationTaskArray(t []*sharedv1.ReplicationTask) []*types.ReplicationTask {
+func ToReplicationTaskArray(t []*adminv1.ReplicationTask) []*types.ReplicationTask {
 	if t == nil {
 		return nil
 	}
@@ -867,18 +866,18 @@ func ToReplicationTaskArray(t []*sharedv1.ReplicationTask) []*types.ReplicationT
 	return v
 }
 
-func FromReplicationTokenArray(t []*types.ReplicationToken) []*sharedv1.ReplicationToken {
+func FromReplicationTokenArray(t []*types.ReplicationToken) []*adminv1.ReplicationToken {
 	if t == nil {
 		return nil
 	}
-	v := make([]*sharedv1.ReplicationToken, len(t))
+	v := make([]*adminv1.ReplicationToken, len(t))
 	for i := range t {
 		v[i] = FromReplicationToken(t[i])
 	}
 	return v
 }
 
-func ToReplicationTokenArray(t []*sharedv1.ReplicationToken) []*types.ReplicationToken {
+func ToReplicationTokenArray(t []*adminv1.ReplicationToken) []*types.ReplicationToken {
 	if t == nil {
 		return nil
 	}
@@ -889,18 +888,18 @@ func ToReplicationTokenArray(t []*sharedv1.ReplicationToken) []*types.Replicatio
 	return v
 }
 
-func FromReplicationMessagesMap(t map[int32]*types.ReplicationMessages) map[int32]*sharedv1.ReplicationMessages {
+func FromReplicationMessagesMap(t map[int32]*types.ReplicationMessages) map[int32]*adminv1.ReplicationMessages {
 	if t == nil {
 		return nil
 	}
-	v := make(map[int32]*sharedv1.ReplicationMessages, len(t))
+	v := make(map[int32]*adminv1.ReplicationMessages, len(t))
 	for key := range t {
 		v[key] = FromReplicationMessages(t[key])
 	}
 	return v
 }
 
-func ToReplicationMessagesMap(t map[int32]*sharedv1.ReplicationMessages) map[int32]*types.ReplicationMessages {
+func ToReplicationMessagesMap(t map[int32]*adminv1.ReplicationMessages) map[int32]*types.ReplicationMessages {
 	if t == nil {
 		return nil
 	}
@@ -911,37 +910,37 @@ func ToReplicationMessagesMap(t map[int32]*sharedv1.ReplicationMessages) map[int
 	return v
 }
 
-func FromReplicationTask(t *types.ReplicationTask) *sharedv1.ReplicationTask {
+func FromReplicationTask(t *types.ReplicationTask) *adminv1.ReplicationTask {
 	if t == nil {
 		return nil
 	}
-	task := sharedv1.ReplicationTask{
+	task := adminv1.ReplicationTask{
 		TaskType:     FromReplicationTaskType(t.TaskType),
 		SourceTaskId: t.SourceTaskID,
 		CreationTime: unixNanoToTime(t.CreationTime),
 	}
 	if t.DomainTaskAttributes != nil {
-		task.Attributes = &sharedv1.ReplicationTask_DomainTaskAttributes{
+		task.Attributes = &adminv1.ReplicationTask_DomainTaskAttributes{
 			DomainTaskAttributes: FromDomainTaskAttributes(t.DomainTaskAttributes),
 		}
 	}
 	if t.SyncShardStatusTaskAttributes != nil {
-		task.Attributes = &sharedv1.ReplicationTask_SyncShardStatusTaskAttributes{
+		task.Attributes = &adminv1.ReplicationTask_SyncShardStatusTaskAttributes{
 			SyncShardStatusTaskAttributes: FromSyncShardStatusTaskAttributes(t.SyncShardStatusTaskAttributes),
 		}
 	}
 	if t.SyncActivityTaskAttributes != nil {
-		task.Attributes = &sharedv1.ReplicationTask_SyncActivityTaskAttributes{
+		task.Attributes = &adminv1.ReplicationTask_SyncActivityTaskAttributes{
 			SyncActivityTaskAttributes: FromSyncActivityTaskAttributes(t.SyncActivityTaskAttributes),
 		}
 	}
 	if t.HistoryTaskV2Attributes != nil {
-		task.Attributes = &sharedv1.ReplicationTask_HistoryTaskV2Attributes{
+		task.Attributes = &adminv1.ReplicationTask_HistoryTaskV2Attributes{
 			HistoryTaskV2Attributes: FromHistoryTaskV2Attributes(t.HistoryTaskV2Attributes),
 		}
 	}
 	if t.FailoverMarkerAttributes != nil {
-		task.Attributes = &sharedv1.ReplicationTask_FailoverMarkerAttributes{
+		task.Attributes = &adminv1.ReplicationTask_FailoverMarkerAttributes{
 			FailoverMarkerAttributes: FromFailoverMarkerAttributes(t.FailoverMarkerAttributes),
 		}
 	}
@@ -949,7 +948,7 @@ func FromReplicationTask(t *types.ReplicationTask) *sharedv1.ReplicationTask {
 	return &task
 }
 
-func ToReplicationTask(t *sharedv1.ReplicationTask) *types.ReplicationTask {
+func ToReplicationTask(t *adminv1.ReplicationTask) *types.ReplicationTask {
 	if t == nil {
 		return nil
 	}
@@ -960,61 +959,65 @@ func ToReplicationTask(t *sharedv1.ReplicationTask) *types.ReplicationTask {
 	}
 
 	switch attr := t.Attributes.(type) {
-	case *sharedv1.ReplicationTask_DomainTaskAttributes:
+	case *adminv1.ReplicationTask_DomainTaskAttributes:
 		task.DomainTaskAttributes = ToDomainTaskAttributes(attr.DomainTaskAttributes)
-	case *sharedv1.ReplicationTask_SyncShardStatusTaskAttributes:
+	case *adminv1.ReplicationTask_SyncShardStatusTaskAttributes:
 		task.SyncShardStatusTaskAttributes = ToSyncShardStatusTaskAttributes(attr.SyncShardStatusTaskAttributes)
-	case *sharedv1.ReplicationTask_SyncActivityTaskAttributes:
+	case *adminv1.ReplicationTask_SyncActivityTaskAttributes:
 		task.SyncActivityTaskAttributes = ToSyncActivityTaskAttributes(attr.SyncActivityTaskAttributes)
-	case *sharedv1.ReplicationTask_HistoryTaskV2Attributes:
+	case *adminv1.ReplicationTask_HistoryTaskV2Attributes:
 		task.HistoryTaskV2Attributes = ToHistoryTaskV2Attributes(attr.HistoryTaskV2Attributes)
-	case *sharedv1.ReplicationTask_FailoverMarkerAttributes:
+	case *adminv1.ReplicationTask_FailoverMarkerAttributes:
 		task.FailoverMarkerAttributes = ToFailoverMarkerAttributes(attr.FailoverMarkerAttributes)
 	}
 	return &task
 }
 
-func FromTaskType(t *int32) sharedv1.TaskType {
+func FromTaskType(t *int32) adminv1.TaskType {
 	if t == nil {
-		return sharedv1.TaskType_TASK_TYPE_INVALID
+		return adminv1.TaskType_TASK_TYPE_INVALID
 	}
 	switch common.TaskType(*t) {
 	case common.TaskTypeTransfer:
-		return sharedv1.TaskType_TASK_TYPE_TRANSFER
+		return adminv1.TaskType_TASK_TYPE_TRANSFER
 	case common.TaskTypeTimer:
-		return sharedv1.TaskType_TASK_TYPE_TIMER
+		return adminv1.TaskType_TASK_TYPE_TIMER
 	case common.TaskTypeReplication:
-		return sharedv1.TaskType_TASK_TYPE_REPLICATION
+		return adminv1.TaskType_TASK_TYPE_REPLICATION
+	case common.TaskTypeCrossCluster:
+		return adminv1.TaskType_TASK_TYPE_CROSS_CLUSTER
 	}
 	panic("unexpected enum value")
 }
 
-func ToTaskType(t sharedv1.TaskType) *int32 {
+func ToTaskType(t adminv1.TaskType) *int32 {
 	switch t {
-	case sharedv1.TaskType_TASK_TYPE_INVALID:
+	case adminv1.TaskType_TASK_TYPE_INVALID:
 		return nil
-	case sharedv1.TaskType_TASK_TYPE_TRANSFER:
+	case adminv1.TaskType_TASK_TYPE_TRANSFER:
 		return common.Int32Ptr(int32(common.TaskTypeTransfer))
-	case sharedv1.TaskType_TASK_TYPE_TIMER:
+	case adminv1.TaskType_TASK_TYPE_TIMER:
 		return common.Int32Ptr(int32(common.TaskTypeTimer))
-	case sharedv1.TaskType_TASK_TYPE_REPLICATION:
+	case adminv1.TaskType_TASK_TYPE_REPLICATION:
 		return common.Int32Ptr(int32(common.TaskTypeReplication))
+	case adminv1.TaskType_TASK_TYPE_CROSS_CLUSTER:
+		return common.Int32Ptr(int32(common.TaskTypeCrossCluster))
 	}
 	panic("unexpected enum value")
 }
 
-func FromFailoverMarkerTokenArray(t []*types.FailoverMarkerToken) []*sharedv1.FailoverMarkerToken {
+func FromFailoverMarkerTokenArray(t []*types.FailoverMarkerToken) []*adminv1.FailoverMarkerToken {
 	if t == nil {
 		return nil
 	}
-	v := make([]*sharedv1.FailoverMarkerToken, len(t))
+	v := make([]*adminv1.FailoverMarkerToken, len(t))
 	for i := range t {
 		v[i] = FromFailoverMarkerToken(t[i])
 	}
 	return v
 }
 
-func ToFailoverMarkerTokenArray(t []*sharedv1.FailoverMarkerToken) []*types.FailoverMarkerToken {
+func ToFailoverMarkerTokenArray(t []*adminv1.FailoverMarkerToken) []*types.FailoverMarkerToken {
 	if t == nil {
 		return nil
 	}
@@ -1025,18 +1028,18 @@ func ToFailoverMarkerTokenArray(t []*sharedv1.FailoverMarkerToken) []*types.Fail
 	return v
 }
 
-func FromVersionHistoryItemArray(t []*types.VersionHistoryItem) []*sharedv1.VersionHistoryItem {
+func FromVersionHistoryItemArray(t []*types.VersionHistoryItem) []*adminv1.VersionHistoryItem {
 	if t == nil {
 		return nil
 	}
-	v := make([]*sharedv1.VersionHistoryItem, len(t))
+	v := make([]*adminv1.VersionHistoryItem, len(t))
 	for i := range t {
 		v[i] = FromVersionHistoryItem(t[i])
 	}
 	return v
 }
 
-func ToVersionHistoryItemArray(t []*sharedv1.VersionHistoryItem) []*types.VersionHistoryItem {
+func ToVersionHistoryItemArray(t []*adminv1.VersionHistoryItem) []*types.VersionHistoryItem {
 	if t == nil {
 		return nil
 	}
@@ -1047,26 +1050,760 @@ func ToVersionHistoryItemArray(t []*sharedv1.VersionHistoryItem) []*types.Versio
 	return v
 }
 
-func FromEventIDVersionPair(id, version *int64) *sharedv1.VersionHistoryItem {
+func FromEventIDVersionPair(id, version *int64) *adminv1.VersionHistoryItem {
 	if id == nil || version == nil {
 		return nil
 	}
-	return &sharedv1.VersionHistoryItem{
+	return &adminv1.VersionHistoryItem{
 		EventId: *id,
 		Version: *version,
 	}
 }
 
-func ToEventID(item *sharedv1.VersionHistoryItem) *int64 {
+func ToEventID(item *adminv1.VersionHistoryItem) *int64 {
 	if item == nil {
 		return nil
 	}
 	return common.Int64Ptr(item.EventId)
 }
 
-func ToEventVersion(item *sharedv1.VersionHistoryItem) *int64 {
+func ToEventVersion(item *adminv1.VersionHistoryItem) *int64 {
 	if item == nil {
 		return nil
 	}
 	return common.Int64Ptr(item.Version)
+}
+
+// FromCrossClusterTaskType converts internal CrossClusterTaskType type to proto
+func FromCrossClusterTaskType(t *types.CrossClusterTaskType) adminv1.CrossClusterTaskType {
+	if t == nil {
+		return adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_INVALID
+	}
+	switch *t {
+	case types.CrossClusterTaskTypeStartChildExecution:
+		return adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_START_CHILD_EXECUTION
+	case types.CrossClusterTaskTypeCancelExecution:
+		return adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_CANCEL_EXECUTION
+	case types.CrossClusterTaskTypeSignalExecution:
+		return adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_SIGNAL_EXECUTION
+	case types.CrossClusterTaskTypeRecordChildWorkflowExeuctionComplete:
+		return adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_RECORD_CHILD_WORKKLOW_EXECUTION_COMPLETE
+	case types.CrossClusterTaskTypeApplyParentPolicy:
+		return adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_APPLY_PARENT_CLOSE_POLICY
+	}
+	panic("unexpected enum value")
+}
+
+// ToCrossClusterTaskType converts proto CrossClusterTaskType type to internal
+func ToCrossClusterTaskType(t adminv1.CrossClusterTaskType) *types.CrossClusterTaskType {
+	switch t {
+	case adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_INVALID:
+		return nil
+	case adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_START_CHILD_EXECUTION:
+		return types.CrossClusterTaskTypeStartChildExecution.Ptr()
+	case adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_CANCEL_EXECUTION:
+		return types.CrossClusterTaskTypeCancelExecution.Ptr()
+	case adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_SIGNAL_EXECUTION:
+		return types.CrossClusterTaskTypeSignalExecution.Ptr()
+	case adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_RECORD_CHILD_WORKKLOW_EXECUTION_COMPLETE:
+		return types.CrossClusterTaskTypeRecordChildWorkflowExeuctionComplete.Ptr()
+	case adminv1.CrossClusterTaskType_CROSS_CLUSTER_TASK_TYPE_APPLY_PARENT_CLOSE_POLICY:
+		return types.CrossClusterTaskTypeApplyParentPolicy.Ptr()
+	}
+	panic("unexpected enum value")
+}
+
+// FromCrossClusterTaskFailedCause converts internal CrossClusterTaskFailedCause type to proto
+func FromCrossClusterTaskFailedCause(t *types.CrossClusterTaskFailedCause) adminv1.CrossClusterTaskFailedCause {
+	if t == nil {
+		return adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_INVALID
+	}
+	switch *t {
+	case types.CrossClusterTaskFailedCauseDomainNotActive:
+		return adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_DOMAIN_NOT_ACTIVE
+	case types.CrossClusterTaskFailedCauseDomainNotExists:
+		return adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_DOMAIN_NOT_EXISTS
+	case types.CrossClusterTaskFailedCauseWorkflowAlreadyRunning:
+		return adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_WORKFLOW_ALREADY_RUNNING
+	case types.CrossClusterTaskFailedCauseWorkflowNotExists:
+		return adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_WORKFLOW_NOT_EXISTS
+	case types.CrossClusterTaskFailedCauseWorkflowAlreadyCompleted:
+		return adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_WORKFLOW_ALREADY_COMPLETED
+	case types.CrossClusterTaskFailedCauseUncategorized:
+		return adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_UNCATEGORIZED
+	}
+	panic("unexpected enum value")
+}
+
+// ToCrossClusterTaskFailedCause converts proto CrossClusterTaskFailedCause type to internal
+func ToCrossClusterTaskFailedCause(t adminv1.CrossClusterTaskFailedCause) *types.CrossClusterTaskFailedCause {
+	switch t {
+	case adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_INVALID:
+		return nil
+	case adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_DOMAIN_NOT_ACTIVE:
+		return types.CrossClusterTaskFailedCauseDomainNotActive.Ptr()
+	case adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_DOMAIN_NOT_EXISTS:
+		return types.CrossClusterTaskFailedCauseDomainNotExists.Ptr()
+	case adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_WORKFLOW_ALREADY_RUNNING:
+		return types.CrossClusterTaskFailedCauseWorkflowAlreadyRunning.Ptr()
+	case adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_WORKFLOW_NOT_EXISTS:
+		return types.CrossClusterTaskFailedCauseWorkflowNotExists.Ptr()
+	case adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_WORKFLOW_ALREADY_COMPLETED:
+		return types.CrossClusterTaskFailedCauseWorkflowAlreadyCompleted.Ptr()
+	case adminv1.CrossClusterTaskFailedCause_CROSS_CLUSTER_TASK_FAILED_CAUSE_UNCATEGORIZED:
+		return types.CrossClusterTaskFailedCauseUncategorized.Ptr()
+
+	}
+	panic("unexpected enum value")
+}
+
+// FromGetTaskFailedCause converts internal GetTaskFailedCause type to proto
+func FromGetTaskFailedCause(t *types.GetTaskFailedCause) adminv1.GetTaskFailedCause {
+	if t == nil {
+		return adminv1.GetTaskFailedCause_GET_TASK_FAILED_CAUSE_INVALID
+	}
+	switch *t {
+	case types.GetTaskFailedCauseServiceBusy:
+		return adminv1.GetTaskFailedCause_GET_TASK_FAILED_CAUSE_SERVICE_BUSY
+	case types.GetTaskFailedCauseTimeout:
+		return adminv1.GetTaskFailedCause_GET_TASK_FAILED_CAUSE_TIMEOUT
+	case types.GetTaskFailedCauseShardOwnershipLost:
+		return adminv1.GetTaskFailedCause_GET_TASK_FAILED_CAUSE_SHARD_OWNERSHIP_LOST
+	case types.GetTaskFailedCauseUncategorized:
+		return adminv1.GetTaskFailedCause_GET_TASK_FAILED_CAUSE_UNCATEGORIZED
+	}
+	panic("unexpected enum value")
+}
+
+// ToGetTaskFailedCause converts proto GetTaskFailedCause type to internal
+func ToGetTaskFailedCause(t adminv1.GetTaskFailedCause) *types.GetTaskFailedCause {
+	switch t {
+	case adminv1.GetTaskFailedCause_GET_TASK_FAILED_CAUSE_INVALID:
+		return nil
+	case adminv1.GetTaskFailedCause_GET_TASK_FAILED_CAUSE_SERVICE_BUSY:
+		return types.GetTaskFailedCauseServiceBusy.Ptr()
+	case adminv1.GetTaskFailedCause_GET_TASK_FAILED_CAUSE_TIMEOUT:
+		return types.GetTaskFailedCauseTimeout.Ptr()
+	case adminv1.GetTaskFailedCause_GET_TASK_FAILED_CAUSE_SHARD_OWNERSHIP_LOST:
+		return types.GetTaskFailedCauseShardOwnershipLost.Ptr()
+	case adminv1.GetTaskFailedCause_GET_TASK_FAILED_CAUSE_UNCATEGORIZED:
+		return types.GetTaskFailedCauseUncategorized.Ptr()
+	}
+	panic("unexpected enum value")
+}
+
+// FromCrossClusterTaskInfo converts internal CrossClusterTaskInfo type to proto
+func FromCrossClusterTaskInfo(t *types.CrossClusterTaskInfo) *adminv1.CrossClusterTaskInfo {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.CrossClusterTaskInfo{
+		DomainId:            t.DomainID,
+		WorkflowExecution:   FromWorkflowRunPair(t.WorkflowID, t.RunID),
+		TaskType:            FromCrossClusterTaskType(t.TaskType),
+		TaskState:           int32(t.TaskState),
+		TaskId:              t.TaskID,
+		VisibilityTimestamp: unixNanoToTime(t.VisibilityTimestamp),
+	}
+}
+
+// ToCrossClusterTaskInfo converts proto CrossClusterTaskInfo type to internal
+func ToCrossClusterTaskInfo(t *adminv1.CrossClusterTaskInfo) *types.CrossClusterTaskInfo {
+	if t == nil {
+		return nil
+	}
+	return &types.CrossClusterTaskInfo{
+		DomainID:            t.DomainId,
+		WorkflowID:          ToWorkflowID(t.WorkflowExecution),
+		RunID:               ToRunID(t.WorkflowExecution),
+		TaskType:            ToCrossClusterTaskType(t.TaskType),
+		TaskState:           int16(t.TaskState),
+		TaskID:              t.TaskId,
+		VisibilityTimestamp: timeToUnixNano(t.VisibilityTimestamp),
+	}
+}
+
+// FromCrossClusterStartChildExecutionRequestAttributes converts internal CrossClusterStartChildExecutionRequestAttributes type to proto
+func FromCrossClusterStartChildExecutionRequestAttributes(t *types.CrossClusterStartChildExecutionRequestAttributes) *adminv1.CrossClusterStartChildExecutionRequestAttributes {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.CrossClusterStartChildExecutionRequestAttributes{
+		TargetDomainId:           t.TargetDomainID,
+		RequestId:                t.RequestID,
+		InitiatedEventId:         t.InitiatedEventID,
+		InitiatedEventAttributes: FromStartChildWorkflowExecutionInitiatedEventAttributes(t.InitiatedEventAttributes),
+		TargetRunId:              t.GetTargetRunID(),
+	}
+}
+
+// ToCrossClusterStartChildExecutionRequestAttributes converts proto CrossClusterStartChildExecutionRequestAttributes type to internal
+func ToCrossClusterStartChildExecutionRequestAttributes(t *adminv1.CrossClusterStartChildExecutionRequestAttributes) *types.CrossClusterStartChildExecutionRequestAttributes {
+	if t == nil {
+		return nil
+	}
+	return &types.CrossClusterStartChildExecutionRequestAttributes{
+		TargetDomainID:           t.TargetDomainId,
+		RequestID:                t.RequestId,
+		InitiatedEventID:         t.InitiatedEventId,
+		InitiatedEventAttributes: ToStartChildWorkflowExecutionInitiatedEventAttributes(t.InitiatedEventAttributes),
+		TargetRunID:              &t.TargetRunId,
+	}
+}
+
+// FromCrossClusterStartChildExecutionResponseAttributes converts internal CrossClusterStartChildExecutionResponseAttributes type to proto
+func FromCrossClusterStartChildExecutionResponseAttributes(t *types.CrossClusterStartChildExecutionResponseAttributes) *adminv1.CrossClusterStartChildExecutionResponseAttributes {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.CrossClusterStartChildExecutionResponseAttributes{
+		RunId: t.RunID,
+	}
+}
+
+// ToCrossClusterStartChildExecutionResponseAttributes converts proto CrossClusterStartChildExecutionResponseAttributes type to internal
+func ToCrossClusterStartChildExecutionResponseAttributes(t *adminv1.CrossClusterStartChildExecutionResponseAttributes) *types.CrossClusterStartChildExecutionResponseAttributes {
+	if t == nil {
+		return nil
+	}
+	return &types.CrossClusterStartChildExecutionResponseAttributes{
+		RunID: t.RunId,
+	}
+}
+
+// FromCrossClusterCancelExecutionRequestAttributes converts internal CrossClusterCancelExecutionRequestAttributes type to proto
+func FromCrossClusterCancelExecutionRequestAttributes(t *types.CrossClusterCancelExecutionRequestAttributes) *adminv1.CrossClusterCancelExecutionRequestAttributes {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.CrossClusterCancelExecutionRequestAttributes{
+		TargetDomainId:          t.TargetDomainID,
+		TargetWorkflowExecution: FromWorkflowRunPair(t.TargetWorkflowID, t.TargetRunID),
+		RequestId:               t.RequestID,
+		InitiatedEventId:        t.InitiatedEventID,
+		ChildWorkflowOnly:       t.ChildWorkflowOnly,
+	}
+}
+
+// ToCrossClusterCancelExecutionRequestAttributes converts proto CrossClusterCancelExecutionRequestAttributes type to internal
+func ToCrossClusterCancelExecutionRequestAttributes(t *adminv1.CrossClusterCancelExecutionRequestAttributes) *types.CrossClusterCancelExecutionRequestAttributes {
+	if t == nil {
+		return nil
+	}
+	return &types.CrossClusterCancelExecutionRequestAttributes{
+		TargetDomainID:    t.TargetDomainId,
+		TargetWorkflowID:  ToWorkflowID(t.TargetWorkflowExecution),
+		TargetRunID:       ToRunID(t.TargetWorkflowExecution),
+		RequestID:         t.RequestId,
+		InitiatedEventID:  t.InitiatedEventId,
+		ChildWorkflowOnly: t.ChildWorkflowOnly,
+	}
+}
+
+// FromCrossClusterCancelExecutionResponseAttributes converts internal CrossClusterCancelExecutionResponseAttributes type to proto
+func FromCrossClusterCancelExecutionResponseAttributes(t *types.CrossClusterCancelExecutionResponseAttributes) *adminv1.CrossClusterCancelExecutionResponseAttributes {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.CrossClusterCancelExecutionResponseAttributes{}
+}
+
+// ToCrossClusterCancelExecutionResponseAttributes converts proto CrossClusterCancelExecutionResponseAttributes type to internal
+func ToCrossClusterCancelExecutionResponseAttributes(t *adminv1.CrossClusterCancelExecutionResponseAttributes) *types.CrossClusterCancelExecutionResponseAttributes {
+	if t == nil {
+		return nil
+	}
+	return &types.CrossClusterCancelExecutionResponseAttributes{}
+}
+
+// FromCrossClusterSignalExecutionRequestAttributes converts internal CrossClusterSignalExecutionRequestAttributes type to proto
+func FromCrossClusterSignalExecutionRequestAttributes(t *types.CrossClusterSignalExecutionRequestAttributes) *adminv1.CrossClusterSignalExecutionRequestAttributes {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.CrossClusterSignalExecutionRequestAttributes{
+		TargetDomainId:          t.TargetDomainID,
+		TargetWorkflowExecution: FromWorkflowRunPair(t.TargetWorkflowID, t.TargetRunID),
+		RequestId:               t.RequestID,
+		InitiatedEventId:        t.InitiatedEventID,
+		ChildWorkflowOnly:       t.ChildWorkflowOnly,
+		SignalName:              t.SignalName,
+		SignalInput:             FromPayload(t.SignalInput),
+		Control:                 t.Control,
+	}
+}
+
+// ToCrossClusterSignalExecutionRequestAttributes converts proto CrossClusterSignalExecutionRequestAttributes type to internal
+func ToCrossClusterSignalExecutionRequestAttributes(t *adminv1.CrossClusterSignalExecutionRequestAttributes) *types.CrossClusterSignalExecutionRequestAttributes {
+	if t == nil {
+		return nil
+	}
+	return &types.CrossClusterSignalExecutionRequestAttributes{
+		TargetDomainID:    t.TargetDomainId,
+		TargetWorkflowID:  ToWorkflowID(t.TargetWorkflowExecution),
+		TargetRunID:       ToRunID(t.TargetWorkflowExecution),
+		RequestID:         t.RequestId,
+		InitiatedEventID:  t.InitiatedEventId,
+		ChildWorkflowOnly: t.ChildWorkflowOnly,
+		SignalName:        t.SignalName,
+		SignalInput:       ToPayload(t.SignalInput),
+		Control:           t.Control,
+	}
+}
+
+// FromCrossClusterSignalExecutionResponseAttributes converts internal CrossClusterSignalExecutionResponseAttributes type to proto
+func FromCrossClusterSignalExecutionResponseAttributes(t *types.CrossClusterSignalExecutionResponseAttributes) *adminv1.CrossClusterSignalExecutionResponseAttributes {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.CrossClusterSignalExecutionResponseAttributes{}
+}
+
+// ToCrossClusterSignalExecutionResponseAttributes converts proto CrossClusterSignalExecutionResponseAttributes type to internal
+func ToCrossClusterSignalExecutionResponseAttributes(t *adminv1.CrossClusterSignalExecutionResponseAttributes) *types.CrossClusterSignalExecutionResponseAttributes {
+	if t == nil {
+		return nil
+	}
+	return &types.CrossClusterSignalExecutionResponseAttributes{}
+}
+
+// FromCrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes converts internal CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes type to proto
+func FromCrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes(t *types.CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes) *adminv1.CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes{
+		TargetDomainId:          t.TargetDomainID,
+		TargetWorkflowExecution: FromWorkflowRunPair(t.TargetWorkflowID, t.TargetRunID),
+		InitiatedEventId:        t.InitiatedEventID,
+		CompletionEvent:         FromHistoryEvent(t.CompletionEvent),
+	}
+}
+
+// ToCrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes converts proto CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes type to internal
+func ToCrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes(t *adminv1.CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes) *types.CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes {
+	if t == nil {
+		return nil
+	}
+	return &types.CrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes{
+		TargetDomainID:   t.TargetDomainId,
+		TargetWorkflowID: ToWorkflowID(t.TargetWorkflowExecution),
+		TargetRunID:      ToRunID(t.TargetWorkflowExecution),
+		InitiatedEventID: t.InitiatedEventId,
+		CompletionEvent:  ToHistoryEvent(t.CompletionEvent),
+	}
+}
+
+// FromCrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes converts internal CrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes type to proto
+func FromCrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes(t *types.CrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes) *adminv1.CrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.CrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes{}
+}
+
+// ToCrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes converts proto CrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes type to internal
+func ToCrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes(t *adminv1.CrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes) *types.CrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes {
+	if t == nil {
+		return nil
+	}
+	return &types.CrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes{}
+}
+
+// FromApplyParentClosePolicyStatus converts internal ApplyParentClosePolicyStatus type to proto
+func FromApplyParentClosePolicyStatus(t *types.ApplyParentClosePolicyStatus) *adminv1.ApplyParentClosePolicyStatus {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.ApplyParentClosePolicyStatus{
+		Completed:   t.Completed,
+		FailedCause: FromCrossClusterTaskFailedCause(t.FailedCause),
+	}
+}
+
+// ToApplyParentClosePolicyStatus converts proto ApplyParentClosePolicyStatus type to internal
+func ToApplyParentClosePolicyStatus(t *adminv1.ApplyParentClosePolicyStatus) *types.ApplyParentClosePolicyStatus {
+	if t == nil {
+		return nil
+	}
+	return &types.ApplyParentClosePolicyStatus{
+		Completed:   t.Completed,
+		FailedCause: ToCrossClusterTaskFailedCause(t.FailedCause),
+	}
+}
+
+// FromApplyParentClosePolicyAttributes converts internal ApplyParentClosePolicyAttributes type to proto
+func FromApplyParentClosePolicyAttributes(t *types.ApplyParentClosePolicyAttributes) *adminv1.ApplyParentClosePolicyAttributes {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.ApplyParentClosePolicyAttributes{
+		ChildDomainId:     t.ChildDomainID,
+		ChildWorkflowId:   t.ChildWorkflowID,
+		ChildRunId:        t.ChildRunID,
+		ParentClosePolicy: FromParentClosePolicy(t.ParentClosePolicy),
+	}
+}
+
+// ToApplyParentClosePolicyAttributes converts proto ApplyParentClosePolicyAttributes type to internal
+func ToApplyParentClosePolicyAttributes(t *adminv1.ApplyParentClosePolicyAttributes) *types.ApplyParentClosePolicyAttributes {
+	if t == nil {
+		return nil
+	}
+	return &types.ApplyParentClosePolicyAttributes{
+		ChildDomainID:     t.ChildDomainId,
+		ChildWorkflowID:   t.ChildWorkflowId,
+		ChildRunID:        t.ChildRunId,
+		ParentClosePolicy: ToParentClosePolicy(t.ParentClosePolicy),
+	}
+}
+
+// FromApplyParentClosePolicyResult converts proto ApplyParentClosePolicyResult type to internal
+func FromApplyParentClosePolicyResult(t *types.ApplyParentClosePolicyResult) *adminv1.ApplyParentClosePolicyResult {
+	if t == nil {
+		return nil
+	}
+	return &adminv1.ApplyParentClosePolicyResult{
+		Child:       FromApplyParentClosePolicyAttributes(t.Child),
+		FailedCause: FromCrossClusterTaskFailedCause(t.FailedCause),
+	}
+}
+
+// ToApplyParentClosePolicyResult converts proto ApplyParentClosePolicyResult type to internal
+func ToApplyParentClosePolicyResult(t *adminv1.ApplyParentClosePolicyResult) *types.ApplyParentClosePolicyResult {
+	if t == nil {
+		return nil
+	}
+	return &types.ApplyParentClosePolicyResult{
+		Child:       ToApplyParentClosePolicyAttributes(t.Child),
+		FailedCause: ToCrossClusterTaskFailedCause(t.FailedCause),
+	}
+}
+
+// FromCrossClusterApplyParentClosePolicyRequestAttributes converts internal CrossClusterApplyParentClosePolicyRequestAttributes type to proto
+func FromCrossClusterApplyParentClosePolicyRequestAttributes(t *types.CrossClusterApplyParentClosePolicyRequestAttributes) *adminv1.CrossClusterApplyParentClosePolicyRequestAttributes {
+	if t == nil {
+		return nil
+	}
+	requestAttributes := &adminv1.CrossClusterApplyParentClosePolicyRequestAttributes{}
+	for _, execution := range t.Children {
+		requestAttributes.Children = append(
+			requestAttributes.Children,
+			&adminv1.ApplyParentClosePolicyRequest{
+				Child:  FromApplyParentClosePolicyAttributes(execution.Child),
+				Status: FromApplyParentClosePolicyStatus(execution.Status),
+			},
+		)
+	}
+	return requestAttributes
+}
+
+// ToCrossClusterApplyParentClosePolicyRequestAttributes converts proto CrossClusterApplyParentClosePolicyRequestAttributes type to internal
+func ToCrossClusterApplyParentClosePolicyRequestAttributes(t *adminv1.CrossClusterApplyParentClosePolicyRequestAttributes) *types.CrossClusterApplyParentClosePolicyRequestAttributes {
+	if t == nil {
+		return nil
+	}
+	requestAttributes := &types.CrossClusterApplyParentClosePolicyRequestAttributes{}
+	for _, execution := range t.Children {
+		requestAttributes.Children = append(
+			requestAttributes.Children,
+			&types.ApplyParentClosePolicyRequest{
+				Child:  ToApplyParentClosePolicyAttributes(execution.Child),
+				Status: ToApplyParentClosePolicyStatus(execution.Status),
+			},
+		)
+	}
+	return requestAttributes
+}
+
+// FromCrossClusterApplyParentClosePolicyResponseAttributes converts internal CrossClusterApplyParentClosePolicyResponseAttributes type to proto
+func FromCrossClusterApplyParentClosePolicyResponseAttributes(t *types.CrossClusterApplyParentClosePolicyResponseAttributes) *adminv1.CrossClusterApplyParentClosePolicyResponseAttributes {
+	if t == nil {
+		return nil
+	}
+	response := &adminv1.CrossClusterApplyParentClosePolicyResponseAttributes{}
+	for _, childStatus := range t.ChildrenStatus {
+		response.ChildrenStatus = append(
+			response.ChildrenStatus,
+			FromApplyParentClosePolicyResult(childStatus),
+		)
+	}
+	return response
+}
+
+// ToCrossClusterApplyParentClosePolicyResponseAttributes converts proto CrossClusterApplyParentClosePolicyResponseAttributes type to internal
+func ToCrossClusterApplyParentClosePolicyResponseAttributes(t *adminv1.CrossClusterApplyParentClosePolicyResponseAttributes) *types.CrossClusterApplyParentClosePolicyResponseAttributes {
+	if t == nil {
+		return nil
+	}
+	response := &types.CrossClusterApplyParentClosePolicyResponseAttributes{}
+	for _, childStatus := range t.ChildrenStatus {
+		response.ChildrenStatus = append(
+			response.ChildrenStatus,
+			ToApplyParentClosePolicyResult(childStatus),
+		)
+	}
+	return response
+}
+
+// FromCrossClusterTaskRequest converts internal CrossClusterTaskRequest type to proto
+func FromCrossClusterTaskRequest(t *types.CrossClusterTaskRequest) *adminv1.CrossClusterTaskRequest {
+	if t == nil {
+		return nil
+	}
+	request := adminv1.CrossClusterTaskRequest{
+		TaskInfo: FromCrossClusterTaskInfo(t.TaskInfo),
+	}
+	if t.StartChildExecutionAttributes != nil {
+		request.Attributes = &adminv1.CrossClusterTaskRequest_StartChildExecutionAttributes{
+			StartChildExecutionAttributes: FromCrossClusterStartChildExecutionRequestAttributes(t.StartChildExecutionAttributes),
+		}
+	}
+	if t.CancelExecutionAttributes != nil {
+		request.Attributes = &adminv1.CrossClusterTaskRequest_CancelExecutionAttributes{
+			CancelExecutionAttributes: FromCrossClusterCancelExecutionRequestAttributes(t.CancelExecutionAttributes),
+		}
+	}
+	if t.SignalExecutionAttributes != nil {
+		request.Attributes = &adminv1.CrossClusterTaskRequest_SignalExecutionAttributes{
+			SignalExecutionAttributes: FromCrossClusterSignalExecutionRequestAttributes(t.SignalExecutionAttributes),
+		}
+	}
+	if t.RecordChildWorkflowExecutionCompleteAttributes != nil {
+		request.Attributes = &adminv1.CrossClusterTaskRequest_RecordChildWorkflowExecutionCompleteRequestAttributes{
+			RecordChildWorkflowExecutionCompleteRequestAttributes: FromCrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes(t.RecordChildWorkflowExecutionCompleteAttributes),
+		}
+	}
+	if t.ApplyParentClosePolicyAttributes != nil {
+		request.Attributes = &adminv1.CrossClusterTaskRequest_ApplyParentClosePolicyRequestAttributes{
+			ApplyParentClosePolicyRequestAttributes: FromCrossClusterApplyParentClosePolicyRequestAttributes(t.ApplyParentClosePolicyAttributes),
+		}
+	}
+	return &request
+}
+
+// ToCrossClusterTaskRequest converts proto CrossClusterTaskRequest type to internal
+func ToCrossClusterTaskRequest(t *adminv1.CrossClusterTaskRequest) *types.CrossClusterTaskRequest {
+	if t == nil {
+		return nil
+	}
+	request := types.CrossClusterTaskRequest{
+		TaskInfo: ToCrossClusterTaskInfo(t.TaskInfo),
+	}
+	switch attr := t.Attributes.(type) {
+	case *adminv1.CrossClusterTaskRequest_StartChildExecutionAttributes:
+		request.StartChildExecutionAttributes = ToCrossClusterStartChildExecutionRequestAttributes(attr.StartChildExecutionAttributes)
+	case *adminv1.CrossClusterTaskRequest_CancelExecutionAttributes:
+		request.CancelExecutionAttributes = ToCrossClusterCancelExecutionRequestAttributes(attr.CancelExecutionAttributes)
+	case *adminv1.CrossClusterTaskRequest_SignalExecutionAttributes:
+		request.SignalExecutionAttributes = ToCrossClusterSignalExecutionRequestAttributes(attr.SignalExecutionAttributes)
+	case *adminv1.CrossClusterTaskRequest_RecordChildWorkflowExecutionCompleteRequestAttributes:
+		request.RecordChildWorkflowExecutionCompleteAttributes = ToCrossClusterRecordChildWorkflowExecutionCompleteRequestAttributes(attr.RecordChildWorkflowExecutionCompleteRequestAttributes)
+	case *adminv1.CrossClusterTaskRequest_ApplyParentClosePolicyRequestAttributes:
+		request.ApplyParentClosePolicyAttributes = ToCrossClusterApplyParentClosePolicyRequestAttributes(attr.ApplyParentClosePolicyRequestAttributes)
+	}
+	return &request
+}
+
+// FromCrossClusterTaskResponse converts internal CrossClusterTaskResponse type to proto
+func FromCrossClusterTaskResponse(t *types.CrossClusterTaskResponse) *adminv1.CrossClusterTaskResponse {
+	if t == nil {
+		return nil
+	}
+	response := adminv1.CrossClusterTaskResponse{
+		TaskId:      t.TaskID,
+		TaskType:    FromCrossClusterTaskType(t.TaskType),
+		TaskState:   int32(t.TaskState),
+		FailedCause: FromCrossClusterTaskFailedCause(t.FailedCause),
+	}
+	if t.StartChildExecutionAttributes != nil {
+		response.Attributes = &adminv1.CrossClusterTaskResponse_StartChildExecutionAttributes{
+			StartChildExecutionAttributes: FromCrossClusterStartChildExecutionResponseAttributes(t.StartChildExecutionAttributes),
+		}
+	}
+	if t.CancelExecutionAttributes != nil {
+		response.Attributes = &adminv1.CrossClusterTaskResponse_CancelExecutionAttributes{
+			CancelExecutionAttributes: FromCrossClusterCancelExecutionResponseAttributes(t.CancelExecutionAttributes),
+		}
+	}
+	if t.SignalExecutionAttributes != nil {
+		response.Attributes = &adminv1.CrossClusterTaskResponse_SignalExecutionAttributes{
+			SignalExecutionAttributes: FromCrossClusterSignalExecutionResponseAttributes(t.SignalExecutionAttributes),
+		}
+	}
+	if t.RecordChildWorkflowExecutionCompleteAttributes != nil {
+		response.Attributes = &adminv1.CrossClusterTaskResponse_RecordChildWorkflowExecutionCompleteRequestAttributes{
+			RecordChildWorkflowExecutionCompleteRequestAttributes: FromCrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes(t.RecordChildWorkflowExecutionCompleteAttributes),
+		}
+	}
+	if t.ApplyParentClosePolicyAttributes != nil {
+		response.Attributes = &adminv1.CrossClusterTaskResponse_ApplyParentClosePolicyResponseAttributes{
+			ApplyParentClosePolicyResponseAttributes: FromCrossClusterApplyParentClosePolicyResponseAttributes(t.ApplyParentClosePolicyAttributes),
+		}
+	}
+	return &response
+}
+
+// ToCrossClusterTaskResponse converts proto CrossClusterTaskResponse type to internal
+func ToCrossClusterTaskResponse(t *adminv1.CrossClusterTaskResponse) *types.CrossClusterTaskResponse {
+	if t == nil {
+		return nil
+	}
+	response := types.CrossClusterTaskResponse{
+		TaskID:      t.TaskId,
+		TaskType:    ToCrossClusterTaskType(t.TaskType),
+		TaskState:   int16(t.TaskState),
+		FailedCause: ToCrossClusterTaskFailedCause(t.FailedCause),
+	}
+	switch attr := t.Attributes.(type) {
+	case *adminv1.CrossClusterTaskResponse_StartChildExecutionAttributes:
+		response.StartChildExecutionAttributes = ToCrossClusterStartChildExecutionResponseAttributes(attr.StartChildExecutionAttributes)
+	case *adminv1.CrossClusterTaskResponse_CancelExecutionAttributes:
+		response.CancelExecutionAttributes = ToCrossClusterCancelExecutionResponseAttributes(attr.CancelExecutionAttributes)
+	case *adminv1.CrossClusterTaskResponse_SignalExecutionAttributes:
+		response.SignalExecutionAttributes = ToCrossClusterSignalExecutionResponseAttributes(attr.SignalExecutionAttributes)
+	case *adminv1.CrossClusterTaskResponse_RecordChildWorkflowExecutionCompleteRequestAttributes:
+		response.RecordChildWorkflowExecutionCompleteAttributes = ToCrossClusterRecordChildWorkflowExecutionCompleteResponseAttributes(attr.RecordChildWorkflowExecutionCompleteRequestAttributes)
+	case *adminv1.CrossClusterTaskResponse_ApplyParentClosePolicyResponseAttributes:
+		response.ApplyParentClosePolicyAttributes = ToCrossClusterApplyParentClosePolicyResponseAttributes(attr.ApplyParentClosePolicyResponseAttributes)
+	}
+	return &response
+}
+
+// FromCrossClusterTaskRequestArray converts internal CrossClusterTaskRequest type array to proto
+func FromCrossClusterTaskRequestArray(t []*types.CrossClusterTaskRequest) *adminv1.CrossClusterTaskRequests {
+	if t == nil {
+		return nil
+	}
+	v := make([]*adminv1.CrossClusterTaskRequest, len(t))
+	for i := range t {
+		v[i] = FromCrossClusterTaskRequest(t[i])
+	}
+	return &adminv1.CrossClusterTaskRequests{
+		TaskRequests: v,
+	}
+}
+
+// ToCrossClusterTaskRequestArray converts proto CrossClusterTaskRequest type array to internal
+func ToCrossClusterTaskRequestArray(t *adminv1.CrossClusterTaskRequests) []*types.CrossClusterTaskRequest {
+	if t == nil || t.TaskRequests == nil {
+		return nil
+	}
+	v := make([]*types.CrossClusterTaskRequest, len(t.TaskRequests))
+	for i := range t.TaskRequests {
+		v[i] = ToCrossClusterTaskRequest(t.TaskRequests[i])
+	}
+	return v
+}
+
+// FromCrossClusterTaskRequestMap converts internal CrossClusterTaskRequest type map to proto
+func FromCrossClusterTaskRequestMap(t map[int32][]*types.CrossClusterTaskRequest) map[int32]*adminv1.CrossClusterTaskRequests {
+	if t == nil {
+		return nil
+	}
+	v := make(map[int32]*adminv1.CrossClusterTaskRequests, len(t))
+	for key := range t {
+		v[key] = FromCrossClusterTaskRequestArray(t[key])
+	}
+	return v
+}
+
+// ToCrossClusterTaskRequestMap converts proto CrossClusterTaskRequest type map to internal
+func ToCrossClusterTaskRequestMap(t map[int32]*adminv1.CrossClusterTaskRequests) map[int32][]*types.CrossClusterTaskRequest {
+	if t == nil {
+		return nil
+	}
+	v := make(map[int32][]*types.CrossClusterTaskRequest, len(t))
+	for key := range t {
+		value := ToCrossClusterTaskRequestArray(t[key])
+		if value == nil {
+			// grpc can't differentiate between empty array or nil array
+			// our application logic ensure no nil array will be returned
+			// for CrossClusterTaskRequest, so always convert to empty array
+			// we only need the special handling here as this array is used
+			// as a map value in GetCrossClusterTasksResponse,
+			// and if the map value is nil, THRIFT won't be able to encode the value
+			// this may happen when we are using grpc within a cluster but thrift across cluster
+			value = []*types.CrossClusterTaskRequest{}
+		}
+		v[key] = value
+	}
+	return v
+}
+
+// FromGetTaskFailedCauseMap converts internal GetTaskFailedCause type map to proto
+func FromGetTaskFailedCauseMap(t map[int32]types.GetTaskFailedCause) map[int32]adminv1.GetTaskFailedCause {
+	if t == nil {
+		return nil
+	}
+	v := make(map[int32]adminv1.GetTaskFailedCause, len(t))
+	for key, value := range t {
+		v[key] = FromGetTaskFailedCause(&value)
+	}
+	return v
+}
+
+// ToGetTaskFailedCauseMap converts proto GetTaskFailedCause type map to internal
+func ToGetTaskFailedCauseMap(t map[int32]adminv1.GetTaskFailedCause) map[int32]types.GetTaskFailedCause {
+	if t == nil {
+		return nil
+	}
+	v := make(map[int32]types.GetTaskFailedCause, len(t))
+	for key := range t {
+		if internalValue := ToGetTaskFailedCause(t[key]); internalValue != nil {
+			v[key] = *internalValue
+		}
+	}
+	return v
+}
+
+// FromCrossClusterTaskResponseArray converts internal CrossClusterTaskResponse type array to proto
+func FromCrossClusterTaskResponseArray(t []*types.CrossClusterTaskResponse) []*adminv1.CrossClusterTaskResponse {
+	if t == nil {
+		return nil
+	}
+	v := make([]*adminv1.CrossClusterTaskResponse, len(t))
+	for i := range t {
+		v[i] = FromCrossClusterTaskResponse(t[i])
+	}
+	return v
+}
+
+// ToCrossClusterTaskResponseArray converts proto CrossClusterTaskResponse type array to internal
+func ToCrossClusterTaskResponseArray(t []*adminv1.CrossClusterTaskResponse) []*types.CrossClusterTaskResponse {
+	if t == nil {
+		return nil
+	}
+	v := make([]*types.CrossClusterTaskResponse, len(t))
+	for i := range t {
+		v[i] = ToCrossClusterTaskResponse(t[i])
+	}
+	return v
+}
+
+func FromHistoryDLQCountEntryMap(t map[types.HistoryDLQCountKey]int64) []*adminv1.HistoryDLQCountEntry {
+	if t == nil {
+		return nil
+	}
+	entries := make([]*adminv1.HistoryDLQCountEntry, 0, len(t))
+	for key, count := range t {
+		entries = append(entries, &adminv1.HistoryDLQCountEntry{
+			ShardId:       key.ShardID,
+			SourceCluster: key.SourceCluster,
+			Count:         count,
+		})
+	}
+	return entries
+}
+
+func ToHistoryDLQCountEntryMap(t []*adminv1.HistoryDLQCountEntry) map[types.HistoryDLQCountKey]int64 {
+	if t == nil {
+		return nil
+	}
+	entries := make(map[types.HistoryDLQCountKey]int64, len(t))
+	for _, entry := range t {
+		key := types.HistoryDLQCountKey{ShardID: entry.ShardId, SourceCluster: entry.SourceCluster}
+		entries[key] = entry.Count
+	}
+	return entries
 }

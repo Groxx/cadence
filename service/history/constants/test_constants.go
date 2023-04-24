@@ -29,7 +29,7 @@ import (
 
 var (
 	// TestVersion is the workflow version for test
-	TestVersion = int64(1234)
+	TestVersion = cluster.TestCurrentClusterInitialFailoverVersion + (cluster.TestFailoverVersionIncrement * 5)
 	// TestDomainID is the domainID for test
 	TestDomainID = "deadbeef-0123-4567-890a-bcdef0123456"
 	// TestDomainName is the domainName for test
@@ -42,6 +42,10 @@ var (
 	TestTargetDomainID = "deadbeef-0123-4567-890a-bcdef0123458"
 	// TestTargetDomainName is the targetDomainName for test
 	TestTargetDomainName = "some random target domain name"
+	// TestRemoteTargetDomainID is the remoteTargetDomainID for test
+	TestRemoteTargetDomainID = "deadbeef-0123-4567-890a-bcdef0123460"
+	// TestRemoteTargetDomainName is the remoteTargetDomainName for test
+	TestRemoteTargetDomainName = "some random remote target domain name"
 	// TestChildDomainID is the childDomainID for test
 	TestChildDomainID = "deadbeef-0123-4567-890a-bcdef0123459"
 	// TestChildDomainName is the childDomainName for test
@@ -51,12 +55,14 @@ var (
 	// TestRunID is the workflow runID for test
 	TestRunID = "0d00698f-08e1-4d36-a3e2-3bf109f5d2d6"
 
+	// TestClusterMetadata is the cluster metadata for test
+	TestClusterMetadata = cluster.GetTestClusterMetadata(true)
+
 	// TestLocalDomainEntry is the local domain cache entry for test
 	TestLocalDomainEntry = cache.NewLocalDomainCacheEntryForTest(
 		&persistence.DomainInfo{ID: TestDomainID, Name: TestDomainName},
 		&persistence.DomainConfig{Retention: 1},
 		cluster.TestCurrentClusterName,
-		nil,
 	)
 
 	// TestGlobalDomainEntry is the global domain cache entry for test
@@ -75,7 +81,6 @@ var (
 			},
 		},
 		TestVersion,
-		nil,
 	)
 
 	// TestGlobalParentDomainEntry is the global parent domain cache entry for test
@@ -90,7 +95,6 @@ var (
 			},
 		},
 		TestVersion,
-		nil,
 	)
 
 	// TestGlobalTargetDomainEntry is the global target domain cache entry for test
@@ -105,7 +109,20 @@ var (
 			},
 		},
 		TestVersion,
-		nil,
+	)
+
+	// TestGlobalRemoteTargetDomainEntry is the global target domain cache entry for test
+	TestGlobalRemoteTargetDomainEntry = cache.NewGlobalDomainCacheEntryForTest(
+		&persistence.DomainInfo{ID: TestRemoteTargetDomainID, Name: TestRemoteTargetDomainName},
+		&persistence.DomainConfig{Retention: 1},
+		&persistence.DomainReplicationConfig{
+			ActiveClusterName: cluster.TestAlternativeClusterName,
+			Clusters: []*persistence.ClusterReplicationConfig{
+				{ClusterName: cluster.TestCurrentClusterName},
+				{ClusterName: cluster.TestAlternativeClusterName},
+			},
+		},
+		TestVersion,
 	)
 
 	// TestGlobalChildDomainEntry is the global child domain cache entry for test
@@ -120,6 +137,5 @@ var (
 			},
 		},
 		TestVersion,
-		nil,
 	)
 )

@@ -25,7 +25,7 @@ import (
 
 	"go.uber.org/yarpc"
 
-	apiv1 "github.com/uber/cadence/.gen/proto/api/v1"
+	apiv1 "github.com/uber/cadence-idl/go/proto/api/v1"
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/common/types/mapper/proto"
 )
@@ -111,6 +111,11 @@ func (g grpcClient) ListTaskListPartitions(ctx context.Context, request *types.L
 	return proto.ToListTaskListPartitionsResponse(response), proto.ToError(err)
 }
 
+func (g grpcClient) GetTaskListsByDomain(ctx context.Context, request *types.GetTaskListsByDomainRequest, opts ...yarpc.CallOption) (*types.GetTaskListsByDomainResponse, error) {
+	response, err := g.workflow.GetTaskListsByDomain(ctx, proto.FromGetTaskListsByDomainRequest(request), opts...)
+	return proto.ToGetTaskListsByDomainResponse(response), proto.ToError(err)
+}
+
 func (g grpcClient) ListWorkflowExecutions(ctx context.Context, request *types.ListWorkflowExecutionsRequest, opts ...yarpc.CallOption) (*types.ListWorkflowExecutionsResponse, error) {
 	response, err := g.visibility.ListWorkflowExecutions(ctx, proto.FromListWorkflowExecutionsRequest(request), opts...)
 	return proto.ToListWorkflowExecutionsResponse(response), proto.ToError(err)
@@ -147,18 +152,23 @@ func (g grpcClient) RegisterDomain(ctx context.Context, request *types.RegisterD
 }
 
 func (g grpcClient) RequestCancelWorkflowExecution(ctx context.Context, request *types.RequestCancelWorkflowExecutionRequest, opts ...yarpc.CallOption) error {
-	_, err := g.worker.RequestCancelWorkflowExecution(ctx, proto.FromRequestCancelWorkflowExecutionRequest(request), opts...)
+	_, err := g.workflow.RequestCancelWorkflowExecution(ctx, proto.FromRequestCancelWorkflowExecutionRequest(request), opts...)
 	return proto.ToError(err)
 }
 
 func (g grpcClient) ResetStickyTaskList(ctx context.Context, request *types.ResetStickyTaskListRequest, opts ...yarpc.CallOption) (*types.ResetStickyTaskListResponse, error) {
-	_, err := g.workflow.ResetStickyTaskList(ctx, proto.FromResetStickyTaskListRequest(request), opts...)
+	_, err := g.worker.ResetStickyTaskList(ctx, proto.FromResetStickyTaskListRequest(request), opts...)
 	return &types.ResetStickyTaskListResponse{}, proto.ToError(err)
 }
 
 func (g grpcClient) ResetWorkflowExecution(ctx context.Context, request *types.ResetWorkflowExecutionRequest, opts ...yarpc.CallOption) (*types.ResetWorkflowExecutionResponse, error) {
 	response, err := g.workflow.ResetWorkflowExecution(ctx, proto.FromResetWorkflowExecutionRequest(request), opts...)
 	return proto.ToResetWorkflowExecutionResponse(response), proto.ToError(err)
+}
+
+func (g grpcClient) RefreshWorkflowTasks(ctx context.Context, request *types.RefreshWorkflowTasksRequest, opts ...yarpc.CallOption) error {
+	_, err := g.workflow.RefreshWorkflowTasks(ctx, proto.FromRefreshWorkflowTasksRequest(request), opts...)
+	return proto.ToError(err)
 }
 
 func (g grpcClient) RespondActivityTaskCanceled(ctx context.Context, request *types.RespondActivityTaskCanceledRequest, opts ...yarpc.CallOption) error {
@@ -204,6 +214,11 @@ func (g grpcClient) RespondDecisionTaskFailed(ctx context.Context, request *type
 func (g grpcClient) RespondQueryTaskCompleted(ctx context.Context, request *types.RespondQueryTaskCompletedRequest, opts ...yarpc.CallOption) error {
 	_, err := g.worker.RespondQueryTaskCompleted(ctx, proto.FromRespondQueryTaskCompletedRequest(request), opts...)
 	return proto.ToError(err)
+}
+
+func (g grpcClient) RestartWorkflowExecution(ctx context.Context, request *types.RestartWorkflowExecutionRequest, opts ...yarpc.CallOption) (*types.RestartWorkflowExecutionResponse, error) {
+	response, err := g.workflow.RestartWorkflowExecution(ctx, proto.FromRestartWorkflowExecutionRequest(request), opts...)
+	return proto.ToRestartStartWorkflowExecutionResponse(response), proto.ToError(err)
 }
 
 func (g grpcClient) ScanWorkflowExecutions(ctx context.Context, request *types.ListWorkflowExecutionsRequest, opts ...yarpc.CallOption) (*types.ListWorkflowExecutionsResponse, error) {

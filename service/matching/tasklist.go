@@ -52,7 +52,7 @@ type (
 // one partition for a user specified task list, each of the
 // individual partitions have an internal name of the form
 //
-//     /__cadence_sys/[original-name]/[partitionID]
+//	/__cadence_sys/[original-name]/[partitionID]
 //
 // The name of the root partition is always the same as the user specified name. Rest of
 // the partitions follow the naming convention above. In addition, the task lists partitions
@@ -85,7 +85,9 @@ func (tn *qualifiedTaskListName) GetRoot() string {
 
 // Parent returns the name of the parent task list
 // input:
-//   degree: Number of children at each level of the tree
+//
+//	degree: Number of children at each level of the tree
+//
 // Returns empty string if this task list is the root
 func (tn *qualifiedTaskListName) Parent(degree int) string {
 	if tn.IsRoot() || degree == 0 {
@@ -122,12 +124,17 @@ func (tn *qualifiedTaskListName) init() error {
 	return nil
 }
 
-// newTaskListID returns taskListID which uniquely identfies as task list
-func newTaskListID(domainID, taskListName string, taskType int) (*taskListID, error) {
+// newTaskListID returns taskListID which uniquely identifies as task list
+func newTaskListID(
+	domainID string,
+	taskListName string,
+	taskType int,
+) (*taskListID, error) {
 	name, err := newTaskListName(taskListName)
 	if err != nil {
 		return nil, err
 	}
+
 	return &taskListID{
 		qualifiedTaskListName: name,
 		domainID:              domainID,

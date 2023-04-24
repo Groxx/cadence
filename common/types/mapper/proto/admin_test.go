@@ -25,7 +25,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	adminv1 "github.com/uber/cadence/.gen/proto/admin/v1"
+	adminv1 "github.com/uber/cadence-idl/go/proto/admin/v1"
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/common/types/testdata"
 )
@@ -122,6 +122,16 @@ func TestAdminGetWorkflowExecutionRawHistoryV2Response(t *testing.T) {
 		assert.Equal(t, item, ToAdminGetWorkflowExecutionRawHistoryV2Response(FromAdminGetWorkflowExecutionRawHistoryV2Response(item)))
 	}
 }
+func TestAdminCountDLQMessagesRequest(t *testing.T) {
+	for _, item := range []*types.CountDLQMessagesRequest{nil, {}, &testdata.AdminCountDLQMessagesRequest} {
+		assert.Equal(t, item, ToAdminCountDLQMessagesRequest(FromAdminCountDLQMessagesRequest(item)))
+	}
+}
+func TestAdminCountDLQMessagesResponse(t *testing.T) {
+	for _, item := range []*types.CountDLQMessagesResponse{nil, {}, &testdata.AdminCountDLQMessagesResponse} {
+		assert.Equal(t, item, ToAdminCountDLQMessagesResponse(FromAdminCountDLQMessagesResponse(item)))
+	}
+}
 func TestAdminMergeDLQMessagesRequest(t *testing.T) {
 	for _, item := range []*types.MergeDLQMessagesRequest{nil, {}, &testdata.AdminMergeDLQMessagesRequest} {
 		assert.Equal(t, item, ToAdminMergeDLQMessagesRequest(FromAdminMergeDLQMessagesRequest(item)))
@@ -170,5 +180,29 @@ func TestAdminResendReplicationTasksRequest(t *testing.T) {
 func TestAdminResetQueueRequest(t *testing.T) {
 	for _, item := range []*types.ResetQueueRequest{nil, {}, &testdata.AdminResetQueueRequest} {
 		assert.Equal(t, item, ToAdminResetQueueRequest(FromAdminResetQueueRequest(item)))
+	}
+}
+
+func TestAdminGetCrossClusterTasksRequest(t *testing.T) {
+	for _, item := range []*types.GetCrossClusterTasksRequest{nil, {}, &testdata.AdminGetCrossClusterTasksRequest} {
+		assert.Equal(t, item, ToAdminGetCrossClusterTasksRequest(FromAdminGetCrossClusterTasksRequest(item)))
+	}
+}
+
+func TestAdminGetCrossClusterTasksResponse(t *testing.T) {
+	for _, item := range []*types.GetCrossClusterTasksResponse{nil, {}, &testdata.AdminGetCrossClusterTasksResponse} {
+		assert.Equal(t, item, ToAdminGetCrossClusterTasksResponse(FromAdminGetCrossClusterTasksResponse(item)))
+	}
+}
+
+func TestAdminRespondCrossClusterTasksCompletedRequest(t *testing.T) {
+	for _, item := range []*types.RespondCrossClusterTasksCompletedRequest{nil, {}, &testdata.AdminRespondCrossClusterTasksCompletedRequest} {
+		assert.Equal(t, item, ToAdminRespondCrossClusterTasksCompletedRequest(FromAdminRespondCrossClusterTasksCompletedRequest(item)))
+	}
+}
+
+func TestAdminRespondCrossClusterTasksCompletedResponse(t *testing.T) {
+	for _, item := range []*types.RespondCrossClusterTasksCompletedResponse{nil, {}, &testdata.AdminRespondCrossClusterTasksCompletedResponse} {
+		assert.Equal(t, item, ToAdminRespondCrossClusterTasksCompletedResponse(FromAdminRespondCrossClusterTasksCompletedResponse(item)))
 	}
 }

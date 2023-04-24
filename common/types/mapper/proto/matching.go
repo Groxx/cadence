@@ -31,14 +31,15 @@ func FromMatchingAddActivityTaskRequest(t *types.AddActivityTaskRequest) *matchi
 		return nil
 	}
 	return &matchingv1.AddActivityTaskRequest{
-		DomainId:               t.DomainUUID,
-		WorkflowExecution:      FromWorkflowExecution(t.Execution),
-		SourceDomainId:         t.SourceDomainUUID,
-		TaskList:               FromTaskList(t.TaskList),
-		ScheduleId:             t.ScheduleID,
-		ScheduleToStartTimeout: secondsToDuration(t.ScheduleToStartTimeoutSeconds),
-		Source:                 FromTaskSource(t.Source),
-		ForwardedFrom:          t.ForwardedFrom,
+		DomainId:                 t.DomainUUID,
+		WorkflowExecution:        FromWorkflowExecution(t.Execution),
+		SourceDomainId:           t.SourceDomainUUID,
+		TaskList:                 FromTaskList(t.TaskList),
+		ScheduleId:               t.ScheduleID,
+		ScheduleToStartTimeout:   secondsToDuration(t.ScheduleToStartTimeoutSeconds),
+		Source:                   FromTaskSource(t.Source),
+		ForwardedFrom:            t.ForwardedFrom,
+		ActivityTaskDispatchInfo: FromActivityTaskDispatchInfo(t.ActivityTaskDispatchInfo),
 	}
 }
 
@@ -55,6 +56,7 @@ func ToMatchingAddActivityTaskRequest(t *matchingv1.AddActivityTaskRequest) *typ
 		ScheduleToStartTimeoutSeconds: durationToSeconds(t.ScheduleToStartTimeout),
 		Source:                        ToTaskSource(t.Source),
 		ForwardedFrom:                 t.ForwardedFrom,
+		ActivityTaskDispatchInfo:      ToActivityTaskDispatchInfo(t.ActivityTaskDispatchInfo),
 	}
 }
 
@@ -85,6 +87,36 @@ func ToMatchingAddDecisionTaskRequest(t *matchingv1.AddDecisionTaskRequest) *typ
 		ScheduleToStartTimeoutSeconds: durationToSeconds(t.ScheduleToStartTimeout),
 		Source:                        ToTaskSource(t.Source),
 		ForwardedFrom:                 t.ForwardedFrom,
+	}
+}
+
+func FromActivityTaskDispatchInfo(t *types.ActivityTaskDispatchInfo) *matchingv1.ActivityTaskDispatchInfo {
+	if t == nil {
+		return nil
+	}
+	return &matchingv1.ActivityTaskDispatchInfo{
+		ScheduledEvent:             FromHistoryEvent(t.ScheduledEvent),
+		StartedTime:                unixNanoToTime(t.StartedTimestamp),
+		Attempt:                    int32(common.Int64Default(t.Attempt)),
+		ScheduledTimeOfThisAttempt: unixNanoToTime(t.ScheduledTimestampOfThisAttempt),
+		HeartbeatDetails:           FromPayload(t.HeartbeatDetails),
+		WorkflowType:               FromWorkflowType(t.WorkflowType),
+		WorkflowDomain:             t.WorkflowDomain,
+	}
+}
+
+func ToActivityTaskDispatchInfo(t *matchingv1.ActivityTaskDispatchInfo) *types.ActivityTaskDispatchInfo {
+	if t == nil {
+		return nil
+	}
+	return &types.ActivityTaskDispatchInfo{
+		ScheduledEvent:                  ToHistoryEvent(t.ScheduledEvent),
+		StartedTimestamp:                timeToUnixNano(t.StartedTime),
+		Attempt:                         common.Int64Ptr(int64(t.Attempt)),
+		ScheduledTimestampOfThisAttempt: timeToUnixNano(t.ScheduledTimeOfThisAttempt),
+		HeartbeatDetails:                ToPayload(t.HeartbeatDetails),
+		WorkflowType:                    ToWorkflowType(t.WorkflowType),
+		WorkflowDomain:                  t.WorkflowDomain,
 	}
 }
 
@@ -198,6 +230,68 @@ func ToMatchingListTaskListPartitionsResponse(t *matchingv1.ListTaskListPartitio
 		ActivityTaskListPartitions: ToTaskListPartitionMetadataArray(t.ActivityTaskListPartitions),
 		DecisionTaskListPartitions: ToTaskListPartitionMetadataArray(t.DecisionTaskListPartitions),
 	}
+}
+
+func FromMatchingGetTaskListsByDomainRequest(t *types.GetTaskListsByDomainRequest) *matchingv1.GetTaskListsByDomainRequest {
+	if t == nil {
+		return nil
+	}
+	return &matchingv1.GetTaskListsByDomainRequest{
+		Domain: t.Domain,
+	}
+}
+
+func ToMatchingGetTaskListsByDomainRequest(t *matchingv1.GetTaskListsByDomainRequest) *types.GetTaskListsByDomainRequest {
+	if t == nil {
+		return nil
+	}
+	return &types.GetTaskListsByDomainRequest{
+		Domain: t.Domain,
+	}
+}
+
+func FromMatchingGetTaskListsByDomainResponse(t *types.GetTaskListsByDomainResponse) *matchingv1.GetTaskListsByDomainResponse {
+	if t == nil {
+		return nil
+	}
+
+	return &matchingv1.GetTaskListsByDomainResponse{
+		DecisionTaskListMap: FromMatchingDescribeTaskListResponseMap(t.GetDecisionTaskListMap()),
+		ActivityTaskListMap: FromMatchingDescribeTaskListResponseMap(t.GetActivityTaskListMap()),
+	}
+}
+
+func ToMatchingGetTaskListsByDomainResponse(t *matchingv1.GetTaskListsByDomainResponse) *types.GetTaskListsByDomainResponse {
+	if t == nil {
+		return nil
+	}
+
+	return &types.GetTaskListsByDomainResponse{
+		DecisionTaskListMap: ToMatchingDescribeTaskListResponseMap(t.GetDecisionTaskListMap()),
+		ActivityTaskListMap: ToMatchingDescribeTaskListResponseMap(t.GetActivityTaskListMap()),
+	}
+}
+
+func FromMatchingDescribeTaskListResponseMap(t map[string]*types.DescribeTaskListResponse) map[string]*matchingv1.DescribeTaskListResponse {
+	if t == nil {
+		return nil
+	}
+	taskListMap := make(map[string]*matchingv1.DescribeTaskListResponse, len(t))
+	for key, value := range t {
+		taskListMap[key] = FromMatchingDescribeTaskListResponse(value)
+	}
+	return taskListMap
+}
+
+func ToMatchingDescribeTaskListResponseMap(t map[string]*matchingv1.DescribeTaskListResponse) map[string]*types.DescribeTaskListResponse {
+	if t == nil {
+		return nil
+	}
+	taskListMap := make(map[string]*types.DescribeTaskListResponse, len(t))
+	for key, value := range t {
+		taskListMap[key] = ToMatchingDescribeTaskListResponse(value)
+	}
+	return taskListMap
 }
 
 func FromMatchingPollForActivityTaskRequest(t *types.MatchingPollForActivityTaskRequest) *matchingv1.PollForActivityTaskRequest {

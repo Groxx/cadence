@@ -26,19 +26,20 @@ import (
 
 // Logger is our abstraction for logging
 // Usage examples:
-//  import "github.com/uber/cadence/common/log/tag"
-//  1) logger = logger.WithTags(
-//          tag.WorkflowNextEventID( 123),
-//          tag.WorkflowActionWorkflowStarted,
-//          tag.WorkflowDomainID("test-domain-id"))
-//     logger.Info("hello world")
-//  2) logger.Info("hello world",
-//          tag.WorkflowNextEventID( 123),
-//          tag.WorkflowActionWorkflowStarted,
-//          tag.WorkflowDomainID("test-domain-id"))
-//	   )
-//  Note: msg should be static, it is not recommended to use fmt.Sprintf() for msg.
-//        Anything dynamic should be tagged.
+//
+//	 import "github.com/uber/cadence/common/log/tag"
+//	 1) logger = logger.WithTags(
+//	         tag.WorkflowNextEventID( 123),
+//	         tag.WorkflowActionWorkflowStarted,
+//	         tag.WorkflowDomainID("test-domain-id"))
+//	    logger.Info("hello world")
+//	 2) logger.Info("hello world",
+//	         tag.WorkflowNextEventID( 123),
+//	         tag.WorkflowActionWorkflowStarted,
+//	         tag.WorkflowDomainID("test-domain-id"))
+//		   )
+//	 Note: msg should be static, it is not recommended to use fmt.Sprintf() for msg.
+//	       Anything dynamic should be tagged.
 type Logger interface {
 	Debug(msg string, tags ...tag.Tag)
 	Info(msg string, tags ...tag.Tag)
@@ -46,6 +47,7 @@ type Logger interface {
 	Error(msg string, tags ...tag.Tag)
 	Fatal(msg string, tags ...tag.Tag)
 	WithTags(tags ...tag.Tag) Logger
+	SampleInfo(msg string, sampleRate int, tags ...tag.Tag)
 }
 
 type noop struct{}
@@ -55,11 +57,12 @@ func NewNoop() Logger {
 	return &noop{}
 }
 
-func (n *noop) Debug(msg string, tags ...tag.Tag) {}
-func (n *noop) Info(msg string, tags ...tag.Tag)  {}
-func (n *noop) Warn(msg string, tags ...tag.Tag)  {}
-func (n *noop) Error(msg string, tags ...tag.Tag) {}
-func (n *noop) Fatal(msg string, tags ...tag.Tag) {}
+func (n *noop) Debug(msg string, tags ...tag.Tag)                      {}
+func (n *noop) Info(msg string, tags ...tag.Tag)                       {}
+func (n *noop) Warn(msg string, tags ...tag.Tag)                       {}
+func (n *noop) Error(msg string, tags ...tag.Tag)                      {}
+func (n *noop) Fatal(msg string, tags ...tag.Tag)                      {}
+func (n *noop) SampleInfo(msg string, sampleRate int, tags ...tag.Tag) {}
 func (n *noop) WithTags(tags ...tag.Tag) Logger {
 	return n
 }

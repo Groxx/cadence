@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/uber/cadence/common/config"
+	"github.com/uber/cadence/common/persistence/nosql/nosqlplugin"
 )
 
 // Note: this file defines the minimal interface that is needed by Cadence's cassandra
@@ -39,7 +40,8 @@ type (
 	Client interface {
 		CreateSession(ClusterConfig) (Session, error)
 
-		ErrorChecker
+		nosqlplugin.ClientErrorChecker
+		IsCassandraConsistencyError(error) bool
 	}
 
 	// Session is the interface for interacting with the database.
@@ -72,6 +74,7 @@ type (
 		Query(string, ...interface{})
 		WithContext(context.Context) Batch
 		WithTimestamp(int64) Batch
+		Consistency(Consistency) Batch
 	}
 
 	// Iter is the interface for executing and iterating over all resulting rows.
@@ -87,13 +90,6 @@ type (
 		String() string
 	}
 
-	// ErrorChecker checks for common gocql errors
-	ErrorChecker interface {
-		IsTimeoutError(error) bool
-		IsNotFoundError(error) bool
-		IsThrottlingError(error) bool
-	}
-
 	// BatchType is the type of the Batch operation
 	BatchType byte
 
@@ -105,18 +101,20 @@ type (
 
 	// ClusterConfig is the config for cassandra connection
 	ClusterConfig struct {
-		Hosts             string
-		Port              int
-		User              string
-		Password          string
-		Keyspace          string
-		Region            string
-		Datacenter        string
-		MaxConns          int
-		TLS               *config.TLS
-		ProtoVersion      int
-		Consistency       Consistency
-		SerialConsistency SerialConsistency
-		Timeout           time.Duration
+		Hosts                 string
+		Port                  int
+		User                  string
+		Password              string
+		AllowedAuthenticators []string
+		Keyspace              string
+		Region                string
+		Datacenter            string
+		MaxConns              int
+		TLS                   *config.TLS
+		ProtoVersion          int
+		Consistency           Consistency
+		SerialConsistency     SerialConsistency
+		Timeout               time.Duration
+		ConnectTimeout        time.Duration
 	}
 )

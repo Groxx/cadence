@@ -32,7 +32,6 @@ import (
 	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/backoff"
 	"github.com/uber/cadence/common/cache"
-	"github.com/uber/cadence/common/cluster"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/types"
@@ -47,15 +46,11 @@ type (
 		suite.Suite
 		*require.Assertions
 
-		controller          *gomock.Controller
-		mockShard           *shard.TestContext
-		mockEventsCache     *events.MockCache
-		mockDomainCache     *cache.MockDomainCache
-		mockTaskGenerator   *MockMutableStateTaskGenerator
-		mockMutableState    *MockMutableState
-		mockClusterMetadata *cluster.MockMetadata
-
-		mockTaskGeneratorForNew *MockMutableStateTaskGenerator
+		controller       *gomock.Controller
+		mockShard        *shard.TestContext
+		mockEventsCache  *events.MockCache
+		mockDomainCache  *cache.MockDomainCache
+		mockMutableState *MockMutableState
 
 		logger log.Logger
 
@@ -81,9 +76,7 @@ func (s *stateBuilderSuite) SetupTest() {
 	s.Assertions = require.New(s.T())
 
 	s.controller = gomock.NewController(s.T())
-	s.mockTaskGenerator = NewMockMutableStateTaskGenerator(s.controller)
 	s.mockMutableState = NewMockMutableState(s.controller)
-	s.mockTaskGeneratorForNew = NewMockMutableStateTaskGenerator(s.controller)
 
 	s.mockShard = shard.NewTestContext(
 		s.controller,
@@ -96,10 +89,7 @@ func (s *stateBuilderSuite) SetupTest() {
 	)
 
 	s.mockDomainCache = s.mockShard.Resource.DomainCache
-	s.mockClusterMetadata = s.mockShard.Resource.ClusterMetadata
 	s.mockEventsCache = s.mockShard.MockEventsCache
-	s.mockClusterMetadata.EXPECT().GetCurrentClusterName().Return(cluster.TestCurrentClusterName).AnyTimes()
-	s.mockClusterMetadata.EXPECT().IsGlobalDomainEnabled().Return(true).AnyTimes()
 	s.mockEventsCache.EXPECT().PutEvent(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 
 	s.logger = s.mockShard.GetLogger()
@@ -109,12 +99,6 @@ func (s *stateBuilderSuite) SetupTest() {
 		s.mockShard,
 		s.logger,
 		s.mockMutableState,
-		func(mutableState MutableState) MutableStateTaskGenerator {
-			if mutableState == s.mockMutableState {
-				return s.mockTaskGenerator
-			}
-			return s.mockTaskGeneratorForNew
-		},
 	).(*stateBuilderImpl)
 	s.sourceCluster = "some random source cluster"
 }
@@ -127,15 +111,9 @@ func (s *stateBuilderSuite) TearDownTest() {
 
 func (s *stateBuilderSuite) mockUpdateVersion(events ...*types.HistoryEvent) {
 	for _, event := range events {
-		s.mockMutableState.EXPECT().UpdateCurrentVersion(event.GetVersion(), true).Times(1)
+		s.mockMutableState.EXPECT().UpdateCurrentVersion(event.Version, true).Times(1)
 	}
-	s.mockTaskGenerator.EXPECT().GenerateActivityTimerTasks(
-		s.stateBuilder.unixNanoToTime(events[len(events)-1].GetTimestamp()),
-	).Return(nil).Times(1)
-	s.mockTaskGenerator.EXPECT().GenerateUserTimerTasks(
-		s.stateBuilder.unixNanoToTime(events[len(events)-1].GetTimestamp()),
-	).Return(nil).Times(1)
-	s.mockMutableState.EXPECT().SetHistoryBuilder(NewHistoryBuilderFromEvents(events, s.logger)).Times(1)
+	s.mockMutableState.EXPECT().SetHistoryBuilder(NewHistoryBuilderFromEvents(events)).Times(1)
 }
 
 func (s *stateBuilderSuite) toHistory(events ...*types.HistoryEvent) []*types.HistoryEvent {
@@ -166,24 +144,16 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionStarted_No
 
 	event := &types.HistoryEvent{
 		Version:                                 version,
-		EventID:                                 1,
+		ID:                                      1,
 		Timestamp:                               common.Int64Ptr(now.UnixNano()),
 		EventType:                               &evenType,
 		WorkflowExecutionStartedEventAttributes: startWorkflowAttribute,
 	}
 
 	s.mockDomainCache.EXPECT().GetDomain(constants.TestParentDomainName).Return(constants.TestGlobalParentDomainEntry, nil).Times(1)
-	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionStartedEvent(&constants.TestParentDomainID, workflowExecution, requestID, event).Return(nil).Times(1)
+	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionStartedEvent(&constants.TestParentDomainID, workflowExecution, requestID, event, true).Return(nil).Times(1)
 	s.mockUpdateVersion(event)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(executionInfo).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateRecordWorkflowStartedTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		event,
-	).Return(nil).Times(1)
-	s.mockTaskGenerator.EXPECT().GenerateWorkflowStartTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		event,
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 	s.mockMutableState.EXPECT().SetHistoryTree(constants.TestRunID).Return(nil).Times(1)
 
@@ -193,6 +163,8 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionStarted_No
 
 func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionStarted_WithCronSchedule() {
 	cronSchedule := "* * * * *"
+	parsedSchedule, err := backoff.ValidateSchedule(cronSchedule)
+	require.NoError(s.T(), err)
 	version := int64(1)
 	requestID := uuid.New()
 	workflowExecution := types.WorkflowExecution{
@@ -207,43 +179,33 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionStarted_Wi
 
 	now := time.Now()
 	evenType := types.EventTypeWorkflowExecutionStarted
+	next, err := backoff.GetBackoffForNextSchedule(parsedSchedule, now, now, 0)
+	require.NoError(s.T(), err)
 	startWorkflowAttribute := &types.WorkflowExecutionStartedEventAttributes{
 		ParentWorkflowDomainID: common.StringPtr(constants.TestParentDomainID),
 		ParentWorkflowDomain:   common.StringPtr(constants.TestParentDomainName),
 		Initiator:              types.ContinueAsNewInitiatorCronSchedule.Ptr(),
 		FirstDecisionTaskBackoffSeconds: common.Int32Ptr(
-			int32(backoff.GetBackoffForNextSchedule(cronSchedule, now, now).Seconds()),
+			int32(next.Seconds()),
 		),
 	}
 
 	event := &types.HistoryEvent{
 		Version:                                 version,
-		EventID:                                 1,
+		ID:                                      1,
 		Timestamp:                               common.Int64Ptr(now.UnixNano()),
 		EventType:                               &evenType,
 		WorkflowExecutionStartedEventAttributes: startWorkflowAttribute,
 	}
 
 	s.mockDomainCache.EXPECT().GetDomain(constants.TestParentDomainName).Return(constants.TestGlobalParentDomainEntry, nil).Times(0)
-	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionStartedEvent(&constants.TestParentDomainID, workflowExecution, requestID, event).Return(nil).Times(1)
+	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionStartedEvent(&constants.TestParentDomainID, workflowExecution, requestID, event, true).Return(nil).Times(1)
 	s.mockUpdateVersion(event)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(executionInfo).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateRecordWorkflowStartedTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		event,
-	).Return(nil).Times(1)
-	s.mockTaskGenerator.EXPECT().GenerateWorkflowStartTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		event,
-	).Return(nil).Times(1)
-	s.mockTaskGenerator.EXPECT().GenerateDelayedDecisionTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		event,
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 	s.mockMutableState.EXPECT().SetHistoryTree(constants.TestRunID).Return(nil).Times(1)
 
-	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
+	_, err = s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
 	s.Nil(err)
 }
 
@@ -259,18 +221,16 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionTimedOut()
 	evenType := types.EventTypeWorkflowExecutionTimedOut
 	event := &types.HistoryEvent{
 		Version:                                  version,
-		EventID:                                  130,
+		ID:                                       130,
 		Timestamp:                                common.Int64Ptr(now.UnixNano()),
 		EventType:                                &evenType,
 		WorkflowExecutionTimedOutEventAttributes: &types.WorkflowExecutionTimedOutEventAttributes{},
 	}
 
-	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionTimedoutEvent(event.GetEventID(), event).Return(nil).Times(1)
+	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionTimedoutEvent(event.ID, event).Return(nil).Times(1)
 	s.mockUpdateVersion(event)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateWorkflowCloseTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-	).Return(nil).Times(1)
+	s.mockMutableState.EXPECT().GetDomainEntry().Return(constants.TestGlobalDomainEntry).AnyTimes()
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -289,18 +249,16 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionTerminated
 	evenType := types.EventTypeWorkflowExecutionTerminated
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		WorkflowExecutionTerminatedEventAttributes: &types.WorkflowExecutionTerminatedEventAttributes{},
 	}
 
-	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionTerminatedEvent(event.GetEventID(), event).Return(nil).Times(1)
+	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionTerminatedEvent(event.ID, event).Return(nil).Times(1)
 	s.mockUpdateVersion(event)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateWorkflowCloseTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-	).Return(nil).Times(1)
+	s.mockMutableState.EXPECT().GetDomainEntry().Return(constants.TestGlobalDomainEntry).AnyTimes()
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
 	s.Nil(err)
@@ -318,18 +276,16 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionFailed() {
 	evenType := types.EventTypeWorkflowExecutionFailed
 	event := &types.HistoryEvent{
 		Version:                                version,
-		EventID:                                130,
+		ID:                                     130,
 		Timestamp:                              common.Int64Ptr(now.UnixNano()),
 		EventType:                              &evenType,
 		WorkflowExecutionFailedEventAttributes: &types.WorkflowExecutionFailedEventAttributes{},
 	}
 
-	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionFailedEvent(event.GetEventID(), event).Return(nil).Times(1)
+	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionFailedEvent(event.ID, event).Return(nil).Times(1)
 	s.mockUpdateVersion(event)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateWorkflowCloseTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-	).Return(nil).Times(1)
+	s.mockMutableState.EXPECT().GetDomainEntry().Return(constants.TestGlobalDomainEntry).AnyTimes()
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -348,18 +304,16 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionCompleted(
 	evenType := types.EventTypeWorkflowExecutionCompleted
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		WorkflowExecutionCompletedEventAttributes: &types.WorkflowExecutionCompletedEventAttributes{},
 	}
 
-	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionCompletedEvent(event.GetEventID(), event).Return(nil).Times(1)
+	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionCompletedEvent(event.ID, event).Return(nil).Times(1)
 	s.mockUpdateVersion(event)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateWorkflowCloseTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-	).Return(nil).Times(1)
+	s.mockMutableState.EXPECT().GetDomainEntry().Return(constants.TestGlobalDomainEntry).AnyTimes()
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -378,18 +332,16 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionCanceled()
 	evenType := types.EventTypeWorkflowExecutionCanceled
 	event := &types.HistoryEvent{
 		Version:                                  version,
-		EventID:                                  130,
+		ID:                                       130,
 		Timestamp:                                common.Int64Ptr(now.UnixNano()),
 		EventType:                                &evenType,
 		WorkflowExecutionCanceledEventAttributes: &types.WorkflowExecutionCanceledEventAttributes{},
 	}
 
-	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionCanceledEvent(event.GetEventID(), event).Return(nil).Times(1)
+	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionCanceledEvent(event.ID, event).Return(nil).Times(1)
 	s.mockUpdateVersion(event)
+	s.mockMutableState.EXPECT().GetDomainEntry().Return(constants.TestGlobalDomainEntry).AnyTimes()
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateWorkflowCloseTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -416,7 +368,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionContinuedA
 
 	continueAsNewEvent := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: types.EventTypeWorkflowExecutionContinuedAsNew.Ptr(),
 		WorkflowExecutionContinuedAsNewEventAttributes: &types.WorkflowExecutionContinuedAsNewEventAttributes{
@@ -426,7 +378,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionContinuedA
 
 	newRunStartedEvent := &types.HistoryEvent{
 		Version:   version,
-		EventID:   1,
+		ID:        1,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: types.EventTypeWorkflowExecutionStarted.Ptr(),
 		WorkflowExecutionStartedEventAttributes: &types.WorkflowExecutionStartedEventAttributes{
@@ -446,7 +398,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionContinuedA
 
 	newRunSignalEvent := &types.HistoryEvent{
 		Version:   version,
-		EventID:   2,
+		ID:        2,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: types.EventTypeWorkflowExecutionSignaled.Ptr(),
 		WorkflowExecutionSignaledEventAttributes: &types.WorkflowExecutionSignaledEventAttributes{
@@ -459,7 +411,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionContinuedA
 	newRunDecisionAttempt := int64(123)
 	newRunDecisionEvent := &types.HistoryEvent{
 		Version:   version,
-		EventID:   3,
+		ID:        3,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: types.EventTypeDecisionTaskScheduled.Ptr(),
 		DecisionTaskScheduledEventAttributes: &types.DecisionTaskScheduledEventAttributes{
@@ -472,41 +424,18 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionContinuedA
 		newRunStartedEvent, newRunSignalEvent, newRunDecisionEvent,
 	}
 
-	s.mockClusterMetadata.EXPECT().ClusterNameForFailoverVersion(continueAsNewEvent.GetVersion()).Return(s.sourceCluster).AnyTimes()
 	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionContinuedAsNewEvent(
-		continueAsNewEvent.GetEventID(),
+		continueAsNewEvent.ID,
 		constants.TestDomainID,
 		continueAsNewEvent,
 	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().GetDomainEntry().Return(constants.TestGlobalDomainEntry).AnyTimes()
 	s.mockUpdateVersion(continueAsNewEvent)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateWorkflowCloseTasks(
-		s.stateBuilder.unixNanoToTime(continueAsNewEvent.GetTimestamp()),
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	// new workflow domain
 	s.mockDomainCache.EXPECT().GetDomain(constants.TestParentDomainName).Return(constants.TestGlobalParentDomainEntry, nil).AnyTimes()
-	// task for the new workflow
-	s.mockTaskGeneratorForNew.EXPECT().GenerateRecordWorkflowStartedTasks(
-		s.stateBuilder.unixNanoToTime(newRunStartedEvent.GetTimestamp()),
-		newRunStartedEvent,
-	).Return(nil).Times(1)
-	s.mockTaskGeneratorForNew.EXPECT().GenerateWorkflowStartTasks(
-		s.stateBuilder.unixNanoToTime(newRunStartedEvent.GetTimestamp()),
-		newRunStartedEvent,
-	).Return(nil).Times(1)
-	s.mockTaskGeneratorForNew.EXPECT().GenerateDecisionScheduleTasks(
-		s.stateBuilder.unixNanoToTime(newRunDecisionEvent.GetTimestamp()),
-		newRunDecisionEvent.GetEventID(),
-	).Return(nil).Times(1)
-	s.mockTaskGeneratorForNew.EXPECT().GenerateActivityTimerTasks(
-		s.stateBuilder.unixNanoToTime(newRunEvents[len(newRunEvents)-1].GetTimestamp()),
-	).Return(nil).Times(1)
-	s.mockTaskGeneratorForNew.EXPECT().GenerateUserTimerTasks(
-		s.stateBuilder.unixNanoToTime(newRunEvents[len(newRunEvents)-1].GetTimestamp()),
-	).Return(nil).Times(1)
 
 	newRunStateBuilder, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(continueAsNewEvent), newRunEvents)
 	s.Nil(err)
@@ -526,7 +455,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionContinuedA
 
 	continueAsNewEvent := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: types.EventTypeWorkflowExecutionContinuedAsNew.Ptr(),
 		WorkflowExecutionContinuedAsNewEventAttributes: &types.WorkflowExecutionContinuedAsNewEventAttributes{
@@ -535,16 +464,13 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionContinuedA
 	}
 
 	s.mockMutableState.EXPECT().ReplicateWorkflowExecutionContinuedAsNewEvent(
-		continueAsNewEvent.GetEventID(),
+		continueAsNewEvent.ID,
 		constants.TestDomainID,
 		continueAsNewEvent,
 	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().GetDomainEntry().Return(constants.TestGlobalDomainEntry).AnyTimes()
 	s.mockUpdateVersion(continueAsNewEvent)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateWorkflowCloseTasks(
-		s.stateBuilder.unixNanoToTime(continueAsNewEvent.GetTimestamp()),
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	// new workflow domain
@@ -567,7 +493,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionSignaled()
 	evenType := types.EventTypeWorkflowExecutionSignaled
 	event := &types.HistoryEvent{
 		Version:                                  version,
-		EventID:                                  130,
+		ID:                                       130,
 		Timestamp:                                common.Int64Ptr(now.UnixNano()),
 		EventType:                                &evenType,
 		WorkflowExecutionSignaledEventAttributes: &types.WorkflowExecutionSignaledEventAttributes{},
@@ -593,7 +519,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeWorkflowExecutionCancelRequ
 	evenType := types.EventTypeWorkflowExecutionCancelRequested
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		WorkflowExecutionCancelRequestedEventAttributes: &types.WorkflowExecutionCancelRequestedEventAttributes{},
@@ -621,17 +547,14 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeUpsertWorkflowSearchAttribu
 	evenType := types.EventTypeUpsertWorkflowSearchAttributes
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		UpsertWorkflowSearchAttributesEventAttributes: &types.UpsertWorkflowSearchAttributesEventAttributes{},
 	}
-	s.mockMutableState.EXPECT().ReplicateUpsertWorkflowSearchAttributesEvent(event).Return().Times(1)
+	s.mockMutableState.EXPECT().ReplicateUpsertWorkflowSearchAttributesEvent(event).Return(nil).Times(1)
 	s.mockUpdateVersion(event)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateWorkflowSearchAttrTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -651,7 +574,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeMarkerRecorded() {
 	evenType := types.EventTypeMarkerRecorded
 	event := &types.HistoryEvent{
 		Version:                       version,
-		EventID:                       130,
+		ID:                            130,
 		Timestamp:                     common.Int64Ptr(now.UnixNano()),
 		EventType:                     &evenType,
 		MarkerRecordedEventAttributes: &types.MarkerRecordedEventAttributes{},
@@ -682,7 +605,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeDecisionTaskScheduled() {
 	decisionAttempt := int64(111)
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		DecisionTaskScheduledEventAttributes: &types.DecisionTaskScheduledEventAttributes{
@@ -692,8 +615,8 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeDecisionTaskScheduled() {
 		},
 	}
 	di := &DecisionInfo{
-		Version:         event.GetVersion(),
-		ScheduleID:      event.GetEventID(),
+		Version:         event.Version,
+		ScheduleID:      event.ID,
 		StartedID:       common.EmptyEventID,
 		RequestID:       common.EmptyUUID,
 		DecisionTimeout: timeoutSecond,
@@ -705,13 +628,9 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeDecisionTaskScheduled() {
 	}
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(executionInfo).AnyTimes()
 	s.mockMutableState.EXPECT().ReplicateDecisionTaskScheduledEvent(
-		event.GetVersion(), event.GetEventID(), tasklist, timeoutSecond, decisionAttempt, event.GetTimestamp(), event.GetTimestamp(),
+		event.Version, event.ID, tasklist, timeoutSecond, decisionAttempt, event.GetTimestamp(), event.GetTimestamp(), false,
 	).Return(di, nil).Times(1)
 	s.mockUpdateVersion(event)
-	s.mockTaskGenerator.EXPECT().GenerateDecisionScheduleTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		di.ScheduleID,
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -734,7 +653,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeDecisionTaskStarted() {
 	evenType := types.EventTypeDecisionTaskStarted
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		DecisionTaskStartedEventAttributes: &types.DecisionTaskStartedEventAttributes{
@@ -743,23 +662,19 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeDecisionTaskStarted() {
 		},
 	}
 	di := &DecisionInfo{
-		Version:         event.GetVersion(),
+		Version:         event.Version,
 		ScheduleID:      scheduleID,
-		StartedID:       event.GetEventID(),
+		StartedID:       event.ID,
 		RequestID:       decisionRequestID,
 		DecisionTimeout: timeoutSecond,
 		TaskList:        tasklist,
 		Attempt:         0,
 	}
 	s.mockMutableState.EXPECT().ReplicateDecisionTaskStartedEvent(
-		(*DecisionInfo)(nil), event.GetVersion(), scheduleID, event.GetEventID(), decisionRequestID, event.GetTimestamp(),
+		(*DecisionInfo)(nil), event.Version, scheduleID, event.ID, decisionRequestID, event.GetTimestamp(),
 	).Return(di, nil).Times(1)
 	s.mockUpdateVersion(event)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateDecisionStartTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		di.ScheduleID,
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -781,7 +696,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeDecisionTaskTimedOut() {
 	evenType := types.EventTypeDecisionTaskTimedOut
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		DecisionTaskTimedOutEventAttributes: &types.DecisionTaskTimedOutEventAttributes{
@@ -792,21 +707,12 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeDecisionTaskTimedOut() {
 	}
 	s.mockMutableState.EXPECT().ReplicateDecisionTaskTimedOutEvent(types.TimeoutTypeStartToClose).Return(nil).Times(1)
 	tasklist := "some random tasklist"
-	newScheduleID := int64(233)
 	executionInfo := &persistence.WorkflowExecutionInfo{
 		TaskList: tasklist,
 	}
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(executionInfo).AnyTimes()
-	s.mockMutableState.EXPECT().ReplicateTransientDecisionTaskScheduled().Return(&DecisionInfo{
-		Version:    version,
-		ScheduleID: newScheduleID,
-		TaskList:   tasklist,
-	}, nil).Times(1)
+	s.mockMutableState.EXPECT().ReplicateTransientDecisionTaskScheduled().Return(nil).Times(1)
 	s.mockUpdateVersion(event)
-	s.mockTaskGenerator.EXPECT().GenerateDecisionScheduleTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		newScheduleID,
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -828,7 +734,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeDecisionTaskFailed() {
 	evenType := types.EventTypeDecisionTaskFailed
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		DecisionTaskFailedEventAttributes: &types.DecisionTaskFailedEventAttributes{
@@ -838,21 +744,12 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeDecisionTaskFailed() {
 	}
 	s.mockMutableState.EXPECT().ReplicateDecisionTaskFailedEvent().Return(nil).Times(1)
 	tasklist := "some random tasklist"
-	newScheduleID := int64(233)
 	executionInfo := &persistence.WorkflowExecutionInfo{
 		TaskList: tasklist,
 	}
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(executionInfo).AnyTimes()
-	s.mockMutableState.EXPECT().ReplicateTransientDecisionTaskScheduled().Return(&DecisionInfo{
-		Version:    version,
-		ScheduleID: newScheduleID,
-		TaskList:   tasklist,
-	}, nil).Times(1)
+	s.mockMutableState.EXPECT().ReplicateTransientDecisionTaskScheduled().Return(nil).Times(1)
 	s.mockUpdateVersion(event)
-	s.mockTaskGenerator.EXPECT().GenerateDecisionScheduleTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		newScheduleID,
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -874,7 +771,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeDecisionTaskCompleted() {
 	evenType := types.EventTypeDecisionTaskCompleted
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		DecisionTaskCompletedEventAttributes: &types.DecisionTaskCompletedEventAttributes{
@@ -908,7 +805,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeTimerStarted() {
 	evenType := types.EventTypeTimerStarted
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		TimerStartedEventAttributes: &types.TimerStartedEventAttributes{
@@ -917,10 +814,10 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeTimerStarted() {
 		},
 	}
 	ti := &persistence.TimerInfo{
-		Version:    event.GetVersion(),
+		Version:    event.Version,
 		TimerID:    timerID,
 		ExpiryTime: time.Unix(0, event.GetTimestamp()).Add(time.Duration(timeoutSecond) * time.Second),
-		StartedID:  event.GetEventID(),
+		StartedID:  event.ID,
 		TaskStatus: TimerTaskStatusNone,
 	}
 	s.mockMutableState.EXPECT().ReplicateTimerStartedEvent(event).Return(ti, nil).Times(1)
@@ -947,7 +844,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeTimerFired() {
 	evenType := types.EventTypeTimerFired
 	event := &types.HistoryEvent{
 		Version:                   version,
-		EventID:                   130,
+		ID:                        130,
 		Timestamp:                 common.Int64Ptr(now.UnixNano()),
 		EventType:                 &evenType,
 		TimerFiredEventAttributes: &types.TimerFiredEventAttributes{},
@@ -977,7 +874,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeCancelTimerFailed() {
 	evenType := types.EventTypeCancelTimerFailed
 	event := &types.HistoryEvent{
 		Version:                          version,
-		EventID:                          130,
+		ID:                               130,
 		Timestamp:                        common.Int64Ptr(now.UnixNano()),
 		EventType:                        &evenType,
 		CancelTimerFailedEventAttributes: &types.CancelTimerFailedEventAttributes{},
@@ -1005,7 +902,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeTimerCanceled() {
 	evenType := types.EventTypeTimerCanceled
 	event := &types.HistoryEvent{
 		Version:                      version,
-		EventID:                      130,
+		ID:                           130,
 		Timestamp:                    common.Int64Ptr(now.UnixNano()),
 		EventType:                    &evenType,
 		TimerCanceledEventAttributes: &types.TimerCanceledEventAttributes{},
@@ -1039,16 +936,16 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeActivityTaskScheduled() {
 	evenType := types.EventTypeActivityTaskScheduled
 	event := &types.HistoryEvent{
 		Version:                              version,
-		EventID:                              130,
+		ID:                                   130,
 		Timestamp:                            common.Int64Ptr(now.UnixNano()),
 		EventType:                            &evenType,
 		ActivityTaskScheduledEventAttributes: &types.ActivityTaskScheduledEventAttributes{},
 	}
 
 	ai := &persistence.ActivityInfo{
-		Version:                  event.GetVersion(),
-		ScheduleID:               event.GetEventID(),
-		ScheduledEventBatchID:    event.GetEventID(),
+		Version:                  event.Version,
+		ScheduleID:               event.ID,
+		ScheduledEventBatchID:    event.ID,
 		ScheduledEvent:           event,
 		ScheduledTime:            time.Unix(0, event.GetTimestamp()),
 		StartedID:                common.EmptyEventID,
@@ -1068,12 +965,8 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeActivityTaskScheduled() {
 		TaskList: tasklist,
 	}
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(executionInfo).AnyTimes()
-	s.mockMutableState.EXPECT().ReplicateActivityTaskScheduledEvent(event.GetEventID(), event).Return(ai, nil).Times(1)
+	s.mockMutableState.EXPECT().ReplicateActivityTaskScheduledEvent(event.ID, event, false).Return(ai, nil).Times(1)
 	s.mockUpdateVersion(event)
-	s.mockTaskGenerator.EXPECT().GenerateActivityTransferTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		event,
-	).Return(nil).Times(1)
 	// assertion on timer generated is in `mockUpdateVersion` function, since activity / user timer
 	// need to be refreshed each time
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
@@ -1096,7 +989,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeActivityTaskStarted() {
 	evenType := types.EventTypeActivityTaskScheduled
 	scheduledEvent := &types.HistoryEvent{
 		Version:                              version,
-		EventID:                              130,
+		ID:                                   130,
 		Timestamp:                            common.Int64Ptr(now.UnixNano()),
 		EventType:                            &evenType,
 		ActivityTaskScheduledEventAttributes: &types.ActivityTaskScheduledEventAttributes{},
@@ -1105,7 +998,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeActivityTaskStarted() {
 	evenType = types.EventTypeActivityTaskStarted
 	startedEvent := &types.HistoryEvent{
 		Version:                            version,
-		EventID:                            scheduledEvent.GetEventID() + 1,
+		ID:                                 scheduledEvent.ID + 1,
 		Timestamp:                          common.Int64Ptr(scheduledEvent.GetTimestamp() + 1000),
 		EventType:                          &evenType,
 		ActivityTaskStartedEventAttributes: &types.ActivityTaskStartedEventAttributes{},
@@ -1138,7 +1031,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeActivityTaskTimedOut() {
 	evenType := types.EventTypeActivityTaskTimedOut
 	event := &types.HistoryEvent{
 		Version:                             version,
-		EventID:                             130,
+		ID:                                  130,
 		Timestamp:                           common.Int64Ptr(now.UnixNano()),
 		EventType:                           &evenType,
 		ActivityTaskTimedOutEventAttributes: &types.ActivityTaskTimedOutEventAttributes{},
@@ -1169,7 +1062,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeActivityTaskFailed() {
 	evenType := types.EventTypeActivityTaskFailed
 	event := &types.HistoryEvent{
 		Version:                           version,
-		EventID:                           130,
+		ID:                                130,
 		Timestamp:                         common.Int64Ptr(now.UnixNano()),
 		EventType:                         &evenType,
 		ActivityTaskFailedEventAttributes: &types.ActivityTaskFailedEventAttributes{},
@@ -1199,7 +1092,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeActivityTaskCompleted() {
 	evenType := types.EventTypeActivityTaskCompleted
 	event := &types.HistoryEvent{
 		Version:                              version,
-		EventID:                              130,
+		ID:                                   130,
 		Timestamp:                            common.Int64Ptr(now.UnixNano()),
 		EventType:                            &evenType,
 		ActivityTaskCompletedEventAttributes: &types.ActivityTaskCompletedEventAttributes{},
@@ -1229,7 +1122,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeActivityTaskCancelRequested
 	evenType := types.EventTypeActivityTaskCancelRequested
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		ActivityTaskCancelRequestedEventAttributes: &types.ActivityTaskCancelRequestedEventAttributes{},
@@ -1256,7 +1149,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeRequestCancelActivityTaskFa
 	evenType := types.EventTypeRequestCancelActivityTaskFailed
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		RequestCancelActivityTaskFailedEventAttributes: &types.RequestCancelActivityTaskFailedEventAttributes{},
@@ -1282,7 +1175,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeActivityTaskCanceled() {
 	evenType := types.EventTypeActivityTaskCanceled
 	event := &types.HistoryEvent{
 		Version:                             version,
-		EventID:                             130,
+		ID:                                  130,
 		Timestamp:                           common.Int64Ptr(now.UnixNano()),
 		EventType:                           &evenType,
 		ActivityTaskCanceledEventAttributes: &types.ActivityTaskCanceledEventAttributes{},
@@ -1316,7 +1209,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeStartChildWorkflowExecution
 	evenType := types.EventTypeStartChildWorkflowExecutionInitiated
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		StartChildWorkflowExecutionInitiatedEventAttributes: &types.StartChildWorkflowExecutionInitiatedEventAttributes{
@@ -1326,24 +1219,21 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeStartChildWorkflowExecution
 	}
 
 	ci := &persistence.ChildExecutionInfo{
-		Version:               event.GetVersion(),
-		InitiatedID:           event.GetEventID(),
-		InitiatedEventBatchID: event.GetEventID(),
+		Version:               event.Version,
+		InitiatedID:           event.ID,
+		InitiatedEventBatchID: event.ID,
 		StartedID:             common.EmptyEventID,
 		CreateRequestID:       createRequestID,
-		DomainName:            constants.TestTargetDomainName,
+		DomainID:              constants.TestTargetDomainID,
+		DomainNameDEPRECATED:  constants.TestTargetDomainName,
 	}
 
 	// the create request ID is generated inside, cannot assert equal
 	s.mockMutableState.EXPECT().ReplicateStartChildWorkflowExecutionInitiatedEvent(
-		event.GetEventID(), event, gomock.Any(),
+		event.ID, event, gomock.Any(),
 	).Return(ci, nil).Times(1)
 	s.mockUpdateVersion(event)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateChildWorkflowTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		event,
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -1363,7 +1253,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeStartChildWorkflowExecution
 	evenType := types.EventTypeStartChildWorkflowExecutionFailed
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		StartChildWorkflowExecutionFailedEventAttributes: &types.StartChildWorkflowExecutionFailedEventAttributes{},
@@ -1390,7 +1280,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeChildWorkflowExecutionStart
 	evenType := types.EventTypeChildWorkflowExecutionStarted
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		ChildWorkflowExecutionStartedEventAttributes: &types.ChildWorkflowExecutionStartedEventAttributes{},
@@ -1417,7 +1307,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeChildWorkflowExecutionTimed
 	evenType := types.EventTypeChildWorkflowExecutionTimedOut
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		ChildWorkflowExecutionTimedOutEventAttributes: &types.ChildWorkflowExecutionTimedOutEventAttributes{},
@@ -1444,7 +1334,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeChildWorkflowExecutionTermi
 	evenType := types.EventTypeChildWorkflowExecutionTerminated
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		ChildWorkflowExecutionTerminatedEventAttributes: &types.ChildWorkflowExecutionTerminatedEventAttributes{},
@@ -1471,7 +1361,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeChildWorkflowExecutionFaile
 	evenType := types.EventTypeChildWorkflowExecutionFailed
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		ChildWorkflowExecutionFailedEventAttributes: &types.ChildWorkflowExecutionFailedEventAttributes{},
@@ -1498,7 +1388,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeChildWorkflowExecutionCompl
 	evenType := types.EventTypeChildWorkflowExecutionCompleted
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		ChildWorkflowExecutionCompletedEventAttributes: &types.ChildWorkflowExecutionCompletedEventAttributes{},
@@ -1533,7 +1423,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeRequestCancelExternalWorkfl
 	evenType := types.EventTypeRequestCancelExternalWorkflowExecutionInitiated
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		RequestCancelExternalWorkflowExecutionInitiatedEventAttributes: &types.RequestCancelExternalWorkflowExecutionInitiatedEventAttributes{
@@ -1547,21 +1437,17 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeRequestCancelExternalWorkfl
 		},
 	}
 	rci := &persistence.RequestCancelInfo{
-		Version:         event.GetVersion(),
-		InitiatedID:     event.GetEventID(),
+		Version:         event.Version,
+		InitiatedID:     event.ID,
 		CancelRequestID: cancellationRequestID,
 	}
 
 	// the cancellation request ID is generated inside, cannot assert equal
 	s.mockMutableState.EXPECT().ReplicateRequestCancelExternalWorkflowExecutionInitiatedEvent(
-		event.GetEventID(), event, gomock.Any(),
+		event.ID, event, gomock.Any(),
 	).Return(rci, nil).Times(1)
 	s.mockUpdateVersion(event)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateRequestCancelExternalTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		event,
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -1581,7 +1467,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeRequestCancelExternalWorkfl
 	evenType := types.EventTypeRequestCancelExternalWorkflowExecutionFailed
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		RequestCancelExternalWorkflowExecutionFailedEventAttributes: &types.RequestCancelExternalWorkflowExecutionFailedEventAttributes{},
@@ -1608,7 +1494,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeExternalWorkflowExecutionCa
 	evenType := types.EventTypeExternalWorkflowExecutionCancelRequested
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		ExternalWorkflowExecutionCancelRequestedEventAttributes: &types.ExternalWorkflowExecutionCancelRequestedEventAttributes{},
@@ -1635,7 +1521,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeChildWorkflowExecutionCance
 	evenType := types.EventTypeChildWorkflowExecutionCanceled
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		ChildWorkflowExecutionCanceledEventAttributes: &types.ChildWorkflowExecutionCanceledEventAttributes{},
@@ -1670,7 +1556,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeSignalExternalWorkflowExecu
 	evenType := types.EventTypeSignalExternalWorkflowExecutionInitiated
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		SignalExternalWorkflowExecutionInitiatedEventAttributes: &types.SignalExternalWorkflowExecutionInitiatedEventAttributes{
@@ -1685,8 +1571,8 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeSignalExternalWorkflowExecu
 		},
 	}
 	si := &persistence.SignalInfo{
-		Version:         event.GetVersion(),
-		InitiatedID:     event.GetEventID(),
+		Version:         event.Version,
+		InitiatedID:     event.ID,
 		SignalRequestID: signalRequestID,
 		SignalName:      signalName,
 		Input:           signalInput,
@@ -1695,14 +1581,10 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeSignalExternalWorkflowExecu
 
 	// the cancellation request ID is generated inside, cannot assert equal
 	s.mockMutableState.EXPECT().ReplicateSignalExternalWorkflowExecutionInitiatedEvent(
-		event.GetEventID(), event, gomock.Any(),
+		event.ID, event, gomock.Any(),
 	).Return(si, nil).Times(1)
 	s.mockUpdateVersion(event)
 	s.mockMutableState.EXPECT().GetExecutionInfo().Return(&persistence.WorkflowExecutionInfo{}).AnyTimes()
-	s.mockTaskGenerator.EXPECT().GenerateSignalExternalTasks(
-		s.stateBuilder.unixNanoToTime(event.GetTimestamp()),
-		event,
-	).Return(nil).Times(1)
 	s.mockMutableState.EXPECT().ClearStickyness().Times(1)
 
 	_, err := s.stateBuilder.ApplyEvents(constants.TestDomainID, requestID, workflowExecution, s.toHistory(event), nil)
@@ -1722,7 +1604,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeSignalExternalWorkflowExecu
 	evenType := types.EventTypeSignalExternalWorkflowExecutionFailed
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		SignalExternalWorkflowExecutionFailedEventAttributes: &types.SignalExternalWorkflowExecutionFailedEventAttributes{},
@@ -1749,7 +1631,7 @@ func (s *stateBuilderSuite) TestApplyEvents_EventTypeExternalWorkflowExecutionSi
 	evenType := types.EventTypeExternalWorkflowExecutionSignaled
 	event := &types.HistoryEvent{
 		Version:   version,
-		EventID:   130,
+		ID:        130,
 		Timestamp: common.Int64Ptr(now.UnixNano()),
 		EventType: &evenType,
 		ExternalWorkflowExecutionSignaledEventAttributes: &types.ExternalWorkflowExecutionSignaledEventAttributes{},

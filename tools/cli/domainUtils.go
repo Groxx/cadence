@@ -23,12 +23,13 @@ package cli
 import (
 	"strings"
 
+	"github.com/uber/cadence/tools/common/flag"
+
 	"github.com/stretchr/testify/mock"
 	"github.com/uber-go/tally"
 	"github.com/urfave/cli"
 
 	"github.com/uber/cadence/client/frontend"
-	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/archiver"
 	"github.com/uber/cadence/common/archiver/provider"
 	"github.com/uber/cadence/common/clock"
@@ -41,7 +42,7 @@ import (
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/mocks"
 	"github.com/uber/cadence/common/persistence"
-	"github.com/uber/cadence/common/persistence/client"
+	"github.com/uber/cadence/common/service"
 )
 
 const (
@@ -75,11 +76,13 @@ var (
 		},
 		cli.StringFlag{
 			Name:  FlagIsGlobalDomainWithAlias,
-			Usage: "Flag to indicate whether domain is a global domain",
+			Usage: "Flag to indicate whether domain is a global domain. Default to true. Local domain is now legacy.",
+			Value: "true",
 		},
-		cli.StringFlag{
+		cli.GenericFlag{
 			Name:  FlagDomainDataWithAlias,
-			Usage: "Domain data of key value pairs, in format of k1:v1,k2:v2,k3:v3",
+			Usage: "Domain data of key value pairs (must be in key1=value1,key2=value2,...,keyN=valueN format, e.g. cluster=dca or cluster=dca,instance=cadence)",
+			Value: &flag.StringMap{},
 		},
 		cli.StringFlag{
 			Name:  FlagSecurityTokenWithAlias,
@@ -127,9 +130,10 @@ var (
 			Name:  FlagClustersWithAlias,
 			Usage: "Clusters",
 		},
-		cli.StringFlag{
+		cli.GenericFlag{
 			Name:  FlagDomainDataWithAlias,
-			Usage: "Domain data of key value pairs, in format of k1:v1,k2:v2,k3:v3 ",
+			Usage: "Domain data of key value pairs (must be in key1=value1,key2=value2,...,keyN=valueN format, e.g. cluster=dca or cluster=dca,instance=cadence)",
+			Value: &flag.StringMap{},
 		},
 		cli.StringFlag{
 			Name:  FlagSecurityTokenWithAlias,
@@ -190,22 +194,14 @@ var (
 			Name:  FlagDomainID,
 			Usage: "Domain UUID (required if not specify domainName)",
 		},
+		cli.BoolFlag{
+			Name:  FlagPrintJSONWithAlias,
+			Usage: "Print in raw JSON format",
+		},
+		getFormatFlag(),
 	}
 
-	adminDomainCommonFlags = []cli.Flag{
-		cli.StringFlag{
-			Name:  FlagServiceConfigDirWithAlias,
-			Usage: "Required service configuration dir",
-		},
-		cli.StringFlag{
-			Name:  FlagServiceEnvWithAlias,
-			Usage: "Optional service env for loading service configuration",
-		},
-		cli.StringFlag{
-			Name:  FlagServiceZoneWithAlias,
-			Usage: "Optional service zone for loading service configuration",
-		},
-	}
+	adminDomainCommonFlags = getDBFlags()
 
 	adminRegisterDomainFlags = append(
 		registerDomainFlags,
@@ -238,19 +234,15 @@ func initializeAdminDomainHandler(
 	context *cli.Context,
 ) domain.Handler {
 
-	configuration := loadConfig(context)
+	configuration, err := cFactory.ServerConfig(context)
+	if err != nil {
+		ErrorAndExit("Unable to load config.", err)
+	}
+
 	metricsClient := initializeMetricsClient()
 	logger := initializeLogger(configuration)
-	clusterMetadata := initializeClusterMetadata(
-		configuration,
-		logger,
-	)
-	metadataMgr := initializeMetadataMgr(
-		configuration,
-		clusterMetadata,
-		metricsClient,
-		logger,
-	)
+	clusterMetadata := initializeClusterMetadata(configuration, metricsClient, logger)
+	metadataMgr := initializeDomainManager(context)
 	dynamicConfig := initializeDynamicConfig(configuration, logger)
 	return initializeDomainHandler(
 		logger,
@@ -277,21 +269,21 @@ func loadConfig(
 
 func initializeDomainHandler(
 	logger log.Logger,
-	metadataMgr persistence.MetadataManager,
+	domainManager persistence.DomainManager,
 	clusterMetadata cluster.Metadata,
 	archivalMetadata archiver.ArchivalMetadata,
 	archiverProvider provider.ArchiverProvider,
 ) domain.Handler {
 
 	domainConfig := domain.Config{
-		MinRetentionDays:  dynamicconfig.GetIntPropertyFn(domain.DefaultMinWorkflowRetentionInDays),
-		MaxBadBinaryCount: dynamicconfig.GetIntPropertyFilteredByDomain(domain.MaxBadBinaries),
-		FailoverCoolDown:  dynamicconfig.GetDurationPropertyFnFilteredByDomain(domain.FailoverCoolDown),
+		MinRetentionDays:  dynamicconfig.GetIntPropertyFn(dynamicconfig.MinRetentionDays.DefaultInt()),
+		MaxBadBinaryCount: dynamicconfig.GetIntPropertyFilteredByDomain(dynamicconfig.FrontendMaxBadBinaries.DefaultInt()),
+		FailoverCoolDown:  dynamicconfig.GetDurationPropertyFnFilteredByDomain(dynamicconfig.FrontendFailoverCoolDown.DefaultDuration()),
 	}
 	return domain.NewHandler(
 		domainConfig,
 		logger,
-		metadataMgr,
+		domainManager,
 		clusterMetadata,
 		initializeDomainReplicator(logger),
 		archivalMetadata,
@@ -310,46 +302,17 @@ func initializeLogger(
 	return loggerimpl.NewLogger(zapLogger)
 }
 
-func initializeMetadataMgr(
-	serviceConfig *config.Config,
-	clusterMetadata cluster.Metadata,
-	metricsClient metrics.Client,
-	logger log.Logger,
-) persistence.MetadataManager {
+func initializeClusterMetadata(serviceConfig *config.Config, metrics metrics.Client, logger log.Logger) cluster.Metadata {
 
-	pConfig := serviceConfig.Persistence
-	pConfig.VisibilityConfig = &config.VisibilityConfig{
-		VisibilityListMaxQPS:            dynamicconfig.GetIntPropertyFilteredByDomain(dependencyMaxQPS),
-		EnableSampling:                  dynamicconfig.GetBoolPropertyFn(false), // not used by domain operation
-		EnableReadFromClosedExecutionV2: dynamicconfig.GetBoolPropertyFn(false), // not used by domain operation
-	}
-	pFactory := client.NewFactory(
-		&pConfig,
-		dynamicconfig.GetIntPropertyFn(dependencyMaxQPS),
-		clusterMetadata.GetCurrentClusterName(),
-		metricsClient,
-		logger,
-	)
-	metadata, err := pFactory.NewMetadataManager()
-	if err != nil {
-		ErrorAndExit("Unable to initialize metadata manager.", err)
-	}
-	return metadata
-}
-
-func initializeClusterMetadata(
-	serviceConfig *config.Config,
-	logger log.Logger,
-) cluster.Metadata {
-
-	clusterMetadata := serviceConfig.ClusterMetadata
+	clusterGroupMetadata := serviceConfig.ClusterGroupMetadata
 	return cluster.NewMetadata(
+		clusterGroupMetadata.FailoverVersionIncrement,
+		clusterGroupMetadata.PrimaryClusterName,
+		clusterGroupMetadata.CurrentClusterName,
+		clusterGroupMetadata.ClusterGroup,
+		func(d string) bool { return false },
+		metrics,
 		logger,
-		dynamicconfig.GetBoolPropertyFn(clusterMetadata.EnableGlobalDomain),
-		clusterMetadata.FailoverVersionIncrement,
-		clusterMetadata.MasterClusterName,
-		clusterMetadata.CurrentClusterName,
-		clusterMetadata.ClusterInformation,
 	)
 }
 
@@ -395,7 +358,7 @@ func initializeArchivalProvider(
 	}
 
 	err := archiverProvider.RegisterBootstrapContainer(
-		common.FrontendServiceName,
+		service.Frontend,
 		historyArchiverBootstrapContainer,
 		visibilityArchiverBootstrapContainer,
 	)
@@ -424,7 +387,7 @@ func initializeDynamicConfig(
 	doneChan := make(chan struct{})
 	close(doneChan)
 	dynamicConfigClient, err := dynamicconfig.NewFileBasedClient(
-		&serviceConfig.DynamicConfigClient,
+		&serviceConfig.DynamicConfig.FileBased,
 		logger,
 		doneChan,
 	)

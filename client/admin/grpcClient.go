@@ -25,7 +25,7 @@ import (
 
 	"go.uber.org/yarpc"
 
-	adminv1 "github.com/uber/cadence/.gen/proto/admin/v1"
+	adminv1 "github.com/uber/cadence-idl/go/proto/admin/v1"
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/common/types/mapper/proto"
 )
@@ -51,6 +51,11 @@ func (g grpcClient) CloseShard(ctx context.Context, request *types.CloseShardReq
 func (g grpcClient) DescribeCluster(ctx context.Context, opts ...yarpc.CallOption) (*types.DescribeClusterResponse, error) {
 	response, err := g.c.DescribeCluster(ctx, &adminv1.DescribeClusterRequest{}, opts...)
 	return proto.ToAdminDescribeClusterResponse(response), proto.ToError(err)
+}
+
+func (g grpcClient) DescribeShardDistribution(ctx context.Context, request *types.DescribeShardDistributionRequest, opts ...yarpc.CallOption) (*types.DescribeShardDistributionResponse, error) {
+	response, err := g.c.DescribeShardDistribution(ctx, proto.FromAdminDescribeShardDistributionRequest(request), opts...)
+	return proto.ToAdminDescribeShardDistributionResponse(response), proto.ToError(err)
 }
 
 func (g grpcClient) DescribeHistoryHost(ctx context.Context, request *types.DescribeHistoryHostRequest, opts ...yarpc.CallOption) (*types.DescribeHistoryHostResponse, error) {
@@ -86,6 +91,11 @@ func (g grpcClient) GetReplicationMessages(ctx context.Context, request *types.G
 func (g grpcClient) GetWorkflowExecutionRawHistoryV2(ctx context.Context, request *types.GetWorkflowExecutionRawHistoryV2Request, opts ...yarpc.CallOption) (*types.GetWorkflowExecutionRawHistoryV2Response, error) {
 	response, err := g.c.GetWorkflowExecutionRawHistoryV2(ctx, proto.FromAdminGetWorkflowExecutionRawHistoryV2Request(request), opts...)
 	return proto.ToAdminGetWorkflowExecutionRawHistoryV2Response(response), proto.ToError(err)
+}
+
+func (g grpcClient) CountDLQMessages(ctx context.Context, request *types.CountDLQMessagesRequest, opts ...yarpc.CallOption) (*types.CountDLQMessagesResponse, error) {
+	response, err := g.c.CountDLQMessages(ctx, proto.FromAdminCountDLQMessagesRequest(request), opts...)
+	return proto.ToAdminCountDLQMessagesResponse(response), proto.ToError(err)
 }
 
 func (g grpcClient) MergeDLQMessages(ctx context.Context, request *types.MergeDLQMessagesRequest, opts ...yarpc.CallOption) (*types.MergeDLQMessagesResponse, error) {
@@ -126,4 +136,44 @@ func (g grpcClient) ResendReplicationTasks(ctx context.Context, request *types.R
 func (g grpcClient) ResetQueue(ctx context.Context, request *types.ResetQueueRequest, opts ...yarpc.CallOption) error {
 	_, err := g.c.ResetQueue(ctx, proto.FromAdminResetQueueRequest(request), opts...)
 	return proto.ToError(err)
+}
+
+func (g grpcClient) GetCrossClusterTasks(ctx context.Context, request *types.GetCrossClusterTasksRequest, opts ...yarpc.CallOption) (*types.GetCrossClusterTasksResponse, error) {
+	response, err := g.c.GetCrossClusterTasks(ctx, proto.FromAdminGetCrossClusterTasksRequest(request), opts...)
+	return proto.ToAdminGetCrossClusterTasksResponse(response), proto.ToError(err)
+}
+
+func (g grpcClient) RespondCrossClusterTasksCompleted(ctx context.Context, request *types.RespondCrossClusterTasksCompletedRequest, opts ...yarpc.CallOption) (*types.RespondCrossClusterTasksCompletedResponse, error) {
+	response, err := g.c.RespondCrossClusterTasksCompleted(ctx, proto.FromAdminRespondCrossClusterTasksCompletedRequest(request), opts...)
+	return proto.ToAdminRespondCrossClusterTasksCompletedResponse(response), proto.ToError(err)
+}
+
+func (g grpcClient) GetDynamicConfig(ctx context.Context, request *types.GetDynamicConfigRequest, opts ...yarpc.CallOption) (*types.GetDynamicConfigResponse, error) {
+	response, err := g.c.GetDynamicConfig(ctx, proto.FromGetDynamicConfigRequest(request), opts...)
+	return proto.ToGetDynamicConfigResponse(response), proto.ToError(err)
+}
+
+func (g grpcClient) UpdateDynamicConfig(ctx context.Context, request *types.UpdateDynamicConfigRequest, opts ...yarpc.CallOption) error {
+	_, err := g.c.UpdateDynamicConfig(ctx, proto.FromUpdateDynamicConfigRequest(request), opts...)
+	return proto.ToError(err)
+}
+
+func (g grpcClient) RestoreDynamicConfig(ctx context.Context, request *types.RestoreDynamicConfigRequest, opts ...yarpc.CallOption) error {
+	_, err := g.c.RestoreDynamicConfig(ctx, proto.FromRestoreDynamicConfigRequest(request), opts...)
+	return proto.ToError(err)
+}
+
+func (g grpcClient) DeleteWorkflow(ctx context.Context, request *types.AdminDeleteWorkflowRequest, opts ...yarpc.CallOption) (*types.AdminDeleteWorkflowResponse, error) {
+	response, err := g.c.DeleteWorkflow(ctx, proto.FromAdminDeleteWorkflowRequest(request), opts...)
+	return proto.ToAdminDeleteWorkflowResponse(response), proto.ToError(err)
+}
+
+func (g grpcClient) MaintainCorruptWorkflow(ctx context.Context, request *types.AdminMaintainWorkflowRequest, opts ...yarpc.CallOption) (*types.AdminMaintainWorkflowResponse, error) {
+	response, err := g.c.MaintainCorruptWorkflow(ctx, proto.FromAdminMaintainWorkflowRequest(request), opts...)
+	return proto.ToAdminMaintainWorkflowResponse(response), proto.ToError(err)
+}
+
+func (g grpcClient) ListDynamicConfig(ctx context.Context, request *types.ListDynamicConfigRequest, opts ...yarpc.CallOption) (*types.ListDynamicConfigResponse, error) {
+	response, err := g.c.ListDynamicConfig(ctx, proto.FromListDynamicConfigRequest(request), opts...)
+	return proto.ToListDynamicConfigResponse(response), proto.ToError(err)
 }

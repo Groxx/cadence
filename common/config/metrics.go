@@ -36,6 +36,10 @@ import (
 	statsdreporter "github.com/uber/cadence/common/metrics/tally/statsd"
 )
 
+const (
+	_defaultReportingInterval = time.Second
+)
+
 // tally sanitizer options that satisfy both Prometheus and M3 restrictions.
 // This will rename metrics at the tally emission level, so metrics name we
 // use maybe different from what gets emitted. In the current implementation
@@ -63,23 +67,26 @@ var (
 	}
 )
 
-// NewScope builds a new tally scope
-// for this metrics configuration
-//
-// If the underlying configuration is
-// valid for multiple reporter types,
-// only one of them will be used for
-// reporting. Currently, m3 is preferred
-// over statsd
+// NewScope builds a new tally scope for this metrics configuration
+// Only one reporter type is allowed
 func (c *Metrics) NewScope(logger log.Logger, service string) tally.Scope {
+	if c.ReportingInterval <= 0 {
+		c.ReportingInterval = _defaultReportingInterval
+	}
 	rootScope := tally.NoopScope
 	if c.M3 != nil {
 		rootScope = c.newM3Scope(logger)
 	}
 	if c.Statsd != nil {
+		if rootScope != tally.NoopScope {
+			logger.Fatal("error creating metric reporter: cannot have more than one types of metric configuration")
+		}
 		rootScope = c.newStatsdScope(logger)
 	}
 	if c.Prometheus != nil {
+		if rootScope != tally.NoopScope {
+			logger.Fatal("error creating metric reporter: cannot have more than one types of metric configuration")
+		}
 		rootScope = c.newPrometheusScope(logger)
 	}
 	rootScope = rootScope.Tagged(map[string]string{metrics.CadenceServiceTagName: service})
@@ -98,7 +105,7 @@ func (c *Metrics) newM3Scope(logger log.Logger) tally.Scope {
 		CachedReporter: reporter,
 		Prefix:         c.Prefix,
 	}
-	scope, _ := tally.NewRootScope(scopeOpts, time.Second)
+	scope, _ := tally.NewRootScope(scopeOpts, c.ReportingInterval)
 	return scope
 }
 
@@ -109,7 +116,13 @@ func (c *Metrics) newStatsdScope(logger log.Logger) tally.Scope {
 	if len(config.HostPort) == 0 {
 		return tally.NoopScope
 	}
-	statter, err := statsd.NewBufferedClient(config.HostPort, config.Prefix, config.FlushInterval, config.FlushBytes)
+	statter, err := statsd.NewClientWithConfig(&statsd.ClientConfig{
+		Address:       config.HostPort,
+		Prefix:        config.Prefix,
+		UseBuffered:   true,
+		FlushInterval: config.FlushInterval,
+		FlushBytes:    config.FlushBytes,
+	})
 	if err != nil {
 		logger.Fatal("error creating statsd client", tag.Error(err))
 	}
@@ -121,7 +134,7 @@ func (c *Metrics) newStatsdScope(logger log.Logger) tally.Scope {
 		Reporter: reporter,
 		Prefix:   c.Prefix,
 	}
-	scope, _ := tally.NewRootScope(scopeOpts, time.Second)
+	scope, _ := tally.NewRootScope(scopeOpts, c.ReportingInterval)
 	return scope
 }
 
@@ -149,6 +162,6 @@ func (c *Metrics) newPrometheusScope(logger log.Logger) tally.Scope {
 		SanitizeOptions: &sanitizeOptions,
 		Prefix:          c.Prefix,
 	}
-	scope, _ := tally.NewRootScope(scopeOpts, time.Second)
+	scope, _ := tally.NewRootScope(scopeOpts, c.ReportingInterval)
 	return scope
 }

@@ -21,6 +21,7 @@
 package sql
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -40,6 +41,7 @@ type (
 		clusterName string
 		logger      log.Logger
 		parser      serialization.Parser
+		dc          *p.DynamicConfiguration
 	}
 
 	// dbConn represents a logical mysql connection - its a
@@ -60,6 +62,7 @@ func NewFactory(
 	clusterName string,
 	logger log.Logger,
 	parser serialization.Parser,
+	dc *p.DynamicConfiguration,
 ) *Factory {
 	return &Factory{
 		cfg:         cfg,
@@ -67,6 +70,7 @@ func NewFactory(
 		logger:      logger,
 		dbConn:      newRefCountedDBConn(&cfg),
 		parser:      parser,
+		dc:          dc,
 	}
 }
 
@@ -85,20 +89,20 @@ func (f *Factory) NewShardStore() (p.ShardStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newShardPersistence(conn, f.clusterName, f.logger, f.parser)
+	return NewShardPersistence(conn, f.clusterName, f.logger, f.parser)
 }
 
-// NewHistoryV2Store returns a new history store
-func (f *Factory) NewHistoryV2Store() (p.HistoryStore, error) {
+// NewHistoryStore returns a new history store
+func (f *Factory) NewHistoryStore() (p.HistoryStore, error) {
 	conn, err := f.dbConn.get()
 	if err != nil {
 		return nil, err
 	}
-	return newHistoryV2Persistence(conn, f.logger, f.parser)
+	return NewHistoryV2Persistence(conn, f.logger, f.parser)
 }
 
-// NewMetadataStore returns a new metadata store
-func (f *Factory) NewMetadataStore() (p.MetadataStore, error) {
+// NewDomainStore returns a new metadata store
+func (f *Factory) NewDomainStore() (p.DomainStore, error) {
 	conn, err := f.dbConn.get()
 	if err != nil {
 		return nil, err
@@ -112,7 +116,7 @@ func (f *Factory) NewExecutionStore(shardID int) (p.ExecutionStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewSQLExecutionStore(conn, f.logger, shardID, f.parser)
+	return NewSQLExecutionStore(conn, f.logger, shardID, f.parser, f.dc)
 }
 
 // NewVisibilityStore returns a visibility store
@@ -128,7 +132,12 @@ func (f *Factory) NewQueue(queueType p.QueueType) (p.Queue, error) {
 		return nil, err
 	}
 
-	return newQueue(conn, f.logger, queueType)
+	return newQueueStore(conn, f.logger, queueType)
+}
+
+// NewConfigStore returns a new config store backed by sql. Not Yet Implemented.
+func (f *Factory) NewConfigStore() (p.ConfigStore, error) {
+	return nil, errors.New("sql config store not yet implemented")
 }
 
 // Close closes the factory

@@ -33,6 +33,7 @@ import (
 	"go.uber.org/cadence/activity"
 
 	c "github.com/uber/cadence/common"
+	"github.com/uber/cadence/common/log/tag"
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/reconciliation/store"
@@ -112,8 +113,14 @@ func ScanShardActivity(
 		LastShardIndexHandled: -1,
 		Reports:               nil,
 	}
+	ctx, err := GetScannerContext(activityCtx)
+	if err != nil {
+		return nil, err
+	}
+
 	if activity.HasHeartbeatDetails(activityCtx) {
 		if err := activity.GetHeartbeatDetails(activityCtx, &heartbeatDetails); err != nil {
+			ctx.Logger.Error("getting heartbeat details", tag.Error(err))
 			return nil, err
 		}
 	}
@@ -121,6 +128,7 @@ func ScanShardActivity(
 		currentShardID := params.Shards[i]
 		shardReport, err := scanShard(activityCtx, params, currentShardID, heartbeatDetails)
 		if err != nil {
+			ctx.Logger.Error("scanning shard", tag.Error(err))
 			return nil, err
 		}
 		heartbeatDetails = ScanShardHeartbeatDetails{
@@ -169,8 +177,10 @@ func scanShard(
 		ctx.Hooks.Iterator(activityCtx, pr, params),
 		resources.GetBlobstoreClient(),
 		params.BlobstoreFlushThreshold,
-		ctx.Hooks.Manager(activityCtx, pr, params),
+		ctx.Hooks.Manager(activityCtx, pr, params, resources.GetDomainCache()),
 		func() { activity.RecordHeartbeat(activityCtx, heartbeatDetails) },
+		scope,
+		resources.GetDomainCache(),
 	)
 	report := scanner.Scan(activityCtx)
 	if report.Result.ControlFlowFailure != nil {
@@ -291,12 +301,18 @@ func FixShardActivity(
 	activityCtx context.Context,
 	params FixShardActivityParams,
 ) ([]FixReport, error) {
+	ctx, err := GetFixerContext(activityCtx)
+	if err != nil {
+		return nil, err
+	}
+
 	heartbeatDetails := FixShardHeartbeatDetails{
 		LastShardIndexHandled: -1,
 		Reports:               nil,
 	}
 	if activity.HasHeartbeatDetails(activityCtx) {
 		if err := activity.GetHeartbeatDetails(activityCtx, &heartbeatDetails); err != nil {
+			ctx.Logger.Error("getting heartbeat details", tag.Error(err))
 			return nil, err
 		}
 	}
@@ -305,6 +321,7 @@ func FixShardActivity(
 		currentKeys := params.CorruptedKeysEntries[i].CorruptedKeys
 		shardReport, err := fixShard(activityCtx, params, currentShardID, currentKeys, heartbeatDetails)
 		if err != nil {
+			ctx.Logger.Error("fixing shard", tag.Error(err))
 			return nil, err
 		}
 		heartbeatDetails = FixShardHeartbeatDetails{
@@ -351,13 +368,14 @@ func fixShard(
 	fixer := NewFixer(
 		activityCtx,
 		shardID,
-		ctx.Hooks.InvariantManager(activityCtx, pr, params),
+		ctx.Hooks.InvariantManager(activityCtx, pr, params, resource.GetDomainCache()),
 		ctx.Hooks.Iterator(activityCtx, resource.GetBlobstoreClient(), corruptedKeys, params),
 		resource.GetBlobstoreClient(),
 		params.ResolvedFixerWorkflowConfig.BlobstoreFlushThreshold,
 		func() { activity.RecordHeartbeat(activityCtx, heartbeatDetails) },
 		resource.GetDomainCache(),
 		ctx.Config.DynamicParams.AllowDomain,
+		scope,
 	)
 	report := fixer.Fix()
 	if report.Result.ControlFlowFailure != nil {

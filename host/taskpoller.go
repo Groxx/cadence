@@ -26,10 +26,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/yarpc"
 
 	"github.com/uber/cadence/common"
-	"github.com/uber/cadence/common/client"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/log/tag"
 	"github.com/uber/cadence/common/types"
@@ -148,6 +146,10 @@ Loop:
 			continue Loop
 		}
 
+		if response.GetNextEventID() == 0 {
+			p.Logger.Fatal("NextEventID is not set for decision or query task")
+		}
+
 		var events []*types.HistoryEvent
 		if response.Query == nil || !pollStickyTaskList {
 			// if not query task, should have some history events
@@ -158,7 +160,7 @@ Loop:
 			}
 
 			events = history.Events
-			if events == nil || len(events) == 0 {
+			if len(events) == 0 {
 				p.Logger.Fatal("History Events are empty")
 			}
 
@@ -268,9 +270,6 @@ Loop:
 				ForceCreateNewDecisionTask: forceCreateNewDecision,
 				QueryResults:               getQueryResults(response.GetQueries(), queryResult),
 			},
-			yarpc.WithHeader(common.LibraryVersionHeaderName, "0.0.1"),
-			yarpc.WithHeader(common.FeatureVersionHeaderName, client.GoWorkerConsistentQueryVersion),
-			yarpc.WithHeader(common.ClientImplHeaderName, client.GoSDK),
 		)
 
 		return false, newTask, err
@@ -294,7 +293,7 @@ func (p *TaskPoller) HandlePartialDecision(response *types.PollForDecisionTaskRe
 	}
 
 	events = history.Events
-	if events == nil || len(events) == 0 {
+	if len(events) == 0 {
 		p.Logger.Fatal("History Events are empty")
 	}
 
@@ -327,9 +326,6 @@ func (p *TaskPoller) HandlePartialDecision(response *types.PollForDecisionTaskRe
 			ReturnNewDecisionTask:      true,
 			ForceCreateNewDecisionTask: true,
 		},
-		yarpc.WithHeader(common.LibraryVersionHeaderName, "0.0.1"),
-		yarpc.WithHeader(common.FeatureVersionHeaderName, client.GoWorkerConsistentQueryVersion),
-		yarpc.WithHeader(common.ClientImplHeaderName, client.GoSDK),
 	)
 
 	return newTask, err

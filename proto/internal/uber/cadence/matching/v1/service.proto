@@ -32,6 +32,7 @@ import "uber/cadence/api/v1/query.proto";
 import "uber/cadence/api/v1/tasklist.proto";
 import "uber/cadence/api/v1/service_worker.proto";
 import "uber/cadence/api/v1/service_workflow.proto";
+import "uber/cadence/api/v1/history.proto";
 import "uber/cadence/shared/v1/history.proto";
 import "uber/cadence/shared/v1/tasklist.proto";
 
@@ -79,6 +80,9 @@ service MatchingAPI {
 
   // ListTaskListPartitions returns a map of partitionKey and hostAddress for a taskList
   rpc ListTaskListPartitions(ListTaskListPartitionsRequest) returns (ListTaskListPartitionsResponse);
+
+  // GetTaskListsByDomain returns all tasklist for a given domain
+  rpc GetTaskListsByDomain(GetTaskListsByDomainRequest) returns (GetTaskListsByDomainResponse);
 }
 
 message PollForDecisionTaskRequest {
@@ -156,6 +160,18 @@ message AddActivityTaskRequest {
   google.protobuf.Duration schedule_to_start_timeout = 6;
   shared.v1.TaskSource source = 7;
   string forwarded_from = 8;
+  ActivityTaskDispatchInfo activityTaskDispatchInfo = 9;
+}
+
+
+message ActivityTaskDispatchInfo {
+  api.v1.HistoryEvent scheduled_event = 1;
+  google.protobuf.Timestamp started_time = 2;
+  int32 attempt = 3;
+  google.protobuf.Timestamp scheduled_time_of_this_attempt = 4;
+  api.v1.Payload heartbeat_details = 5;
+  api.v1.WorkflowType workflow_type = 6;
+  string workflow_domain = 7;
 }
 
 message AddActivityTaskResponse {
@@ -212,3 +228,13 @@ message ListTaskListPartitionsResponse {
   repeated api.v1.TaskListPartitionMetadata activity_task_list_partitions = 1;
   repeated api.v1.TaskListPartitionMetadata decision_task_list_partitions = 2;
 }
+
+message GetTaskListsByDomainRequest {
+  string domain = 1;
+}
+
+message GetTaskListsByDomainResponse {
+  map <string,DescribeTaskListResponse> decision_task_list_map = 1;
+  map <string,DescribeTaskListResponse> activity_task_list_map = 2;
+}
+

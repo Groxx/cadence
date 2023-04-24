@@ -57,28 +57,25 @@ func NewReplicationQueue(
 	logger log.Logger,
 ) ReplicationQueue {
 	return &replicationQueueImpl{
-		queue:               queue,
-		clusterName:         clusterName,
-		metricsClient:       metricsClient,
-		logger:              logger,
-		encoder:             codec.NewThriftRWEncoder(),
-		ackNotificationChan: make(chan bool),
-		done:                make(chan bool),
-		status:              common.DaemonStatusInitialized,
+		queue:         queue,
+		clusterName:   clusterName,
+		metricsClient: metricsClient,
+		logger:        logger,
+		encoder:       codec.NewThriftRWEncoder(),
+		done:          make(chan bool),
+		status:        common.DaemonStatusInitialized,
 	}
 }
 
 type (
 	replicationQueueImpl struct {
-		queue               persistence.QueueManager
-		clusterName         string
-		metricsClient       metrics.Client
-		logger              log.Logger
-		encoder             codec.BinaryEncoder
-		ackLevelUpdated     bool
-		ackNotificationChan chan bool
-		done                chan bool
-		status              int32
+		queue         persistence.QueueManager
+		clusterName   string
+		metricsClient metrics.Client
+		logger        log.Logger
+		encoder       codec.BinaryEncoder
+		done          chan bool
+		status        int32
 	}
 
 	// ReplicationQueue is used to publish and list domain replication tasks
@@ -94,6 +91,7 @@ type (
 		GetDLQAckLevel(ctx context.Context) (int64, error)
 		RangeDeleteMessagesFromDLQ(ctx context.Context, firstMessageID int64, lastMessageID int64) error
 		DeleteMessageFromDLQ(ctx context.Context, messageID int64) error
+		GetDLQSize(ctx context.Context) (int64, error)
 	}
 )
 
@@ -102,7 +100,6 @@ func (q *replicationQueueImpl) Start() {
 		return
 	}
 	go q.purgeProcessor()
-	go q.emitDLQSize()
 }
 
 func (q *replicationQueueImpl) Stop() {
@@ -177,14 +174,8 @@ func (q *replicationQueueImpl) UpdateAckLevel(
 	clusterName string,
 ) error {
 
-	err := q.queue.UpdateAckLevel(ctx, lastProcessedMessageID, clusterName)
-	if err != nil {
+	if err := q.queue.UpdateAckLevel(ctx, lastProcessedMessageID, clusterName); err != nil {
 		return fmt.Errorf("failed to update ack level: %v", err)
-	}
-
-	select {
-	case q.ackNotificationChan <- true:
-	default:
 	}
 
 	return nil
@@ -271,6 +262,10 @@ func (q *replicationQueueImpl) DeleteMessageFromDLQ(
 	return q.queue.DeleteMessageFromDLQ(ctx, messageID)
 }
 
+func (q *replicationQueueImpl) GetDLQSize(ctx context.Context) (int64, error) {
+	return q.queue.GetDLQSize(ctx)
+}
+
 func (q *replicationQueueImpl) purgeAckedMessages() error {
 	ackLevelByCluster, err := q.GetAckLevels(context.Background())
 	if err != nil {
@@ -288,11 +283,11 @@ func (q *replicationQueueImpl) purgeAckedMessages() error {
 		}
 	}
 
-	err = q.queue.DeleteMessagesBefore(context.Background(), minAckLevel)
-	if err != nil {
-		return fmt.Errorf("failed to purge messages: %v", err)
+	if minAckLevel != int64(math.MaxInt64) {
+		if err = q.queue.DeleteMessagesBefore(context.Background(), minAckLevel); err != nil {
+			return fmt.Errorf("failed to purge messages: %v", err)
+		}
 	}
-
 	return nil
 }
 
@@ -305,44 +300,8 @@ func (q *replicationQueueImpl) purgeProcessor() {
 		case <-q.done:
 			return
 		case <-ticker.C:
-			if q.ackLevelUpdated {
-				err := q.purgeAckedMessages()
-				if err != nil {
-					q.logger.Warn("Failed to purge acked domain replication messages.", tag.Error(err))
-				} else {
-					q.ackLevelUpdated = false
-				}
-			}
-		case <-q.ackNotificationChan:
-			q.ackLevelUpdated = true
-		}
-	}
-}
-
-func (q *replicationQueueImpl) emitDLQSize() {
-	ticker := time.NewTicker(queueSizeQueryInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-q.done:
-			return
-		case <-ticker.C:
-			size, err := q.queue.GetDLQSize(context.Background())
-			if err != nil {
-				q.logger.Warn("Failed to get DLQ size.", tag.Error(err))
-				q.metricsClient.Scope(
-					metrics.DomainReplicationQueueScope,
-				).IncCounter(
-					metrics.DomainReplicationQueueSizeErrorCount,
-				)
-			} else {
-				q.metricsClient.Scope(
-					metrics.DomainReplicationQueueScope,
-				).UpdateGauge(
-					metrics.DomainReplicationQueueSizeGauge,
-					float64(size),
-				)
+			if err := q.purgeAckedMessages(); err != nil {
+				q.logger.Warn("Failed to purge acked domain replication messages.", tag.Error(err))
 			}
 		}
 	}

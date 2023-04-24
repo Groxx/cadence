@@ -68,9 +68,12 @@ type (
 // map during iterator can cause a dead lock.
 //
 // @param initialSz
-//		The initial size for the map
+//
+//	The initial size for the map
+//
 // @param hashfn
-// 		The hash function to use for sharding
+//
+//	The hash function to use for sharding
 func NewShardedConcurrentTxMap(initialCap int, hashfn HashFunc) ConcurrentTxMap {
 	cmap := new(ShardedConcurrentTxMap)
 	cmap.hashfn = hashfn
@@ -193,6 +196,13 @@ func (cmap *ShardedConcurrentTxMap) RemoveIf(key interface{}, fn PredicateFunc) 
 	return removed
 }
 
+func newMapIterator() *mapIteratorImpl {
+	return &mapIteratorImpl{
+		dataCh: make(chan *MapEntry, 8),
+		stopCh: make(chan struct{}),
+	}
+}
+
 // Close closes the iterator
 func (it *mapIteratorImpl) Close() {
 	close(it.stopCh)
@@ -208,9 +218,7 @@ func (it *mapIteratorImpl) Entries() <-chan *MapEntry {
 // to the map during iteration can cause a dead lock.
 func (cmap *ShardedConcurrentTxMap) Iter() MapIterator {
 
-	iterator := new(mapIteratorImpl)
-	iterator.dataCh = make(chan *MapEntry, 8)
-	iterator.stopCh = make(chan struct{})
+	iterator := newMapIterator()
 
 	go func(iterator *mapIteratorImpl) {
 		for i := 0; i < nShards; i++ {

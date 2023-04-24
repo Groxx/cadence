@@ -75,6 +75,8 @@ var (
 	}
 	HistoryGetReplicationMessagesRequest  = AdminGetReplicationMessagesRequest
 	HistoryGetReplicationMessagesResponse = AdminGetReplicationMessagesResponse
+	HistoryCountDLQMessagesRequest        = types.CountDLQMessagesRequest{ForceFetch: true}
+	HistoryCountDLQMessagesResponse       = types.HistoryCountDLQMessagesResponse{Entries: map[types.HistoryDLQCountKey]int64{types.HistoryDLQCountKey{1, "A"}: 10}}
 	HistoryMergeDLQMessagesRequest        = AdminMergeDLQMessagesRequest
 	HistoryMergeDLQMessagesResponse       = AdminMergeDLQMessagesResponse
 	HistoryNotifyFailoverMarkersRequest   = types.NotifyFailoverMarkersRequest{
@@ -286,7 +288,13 @@ var (
 		Timestamp:     &Timestamp1,
 	}
 	HistoryTerminateWorkflowExecutionRequest = types.HistoryTerminateWorkflowExecutionRequest{
-		DomainUUID:       DomainID,
-		TerminateRequest: &TerminateWorkflowExecutionRequest,
+		DomainUUID:                DomainID,
+		TerminateRequest:          &TerminateWorkflowExecutionRequest,
+		ExternalWorkflowExecution: &WorkflowExecution,
+		ChildWorkflowOnly:         true,
 	}
+	HistoryGetCrossClusterTasksRequest               = GetCrossClusterTasksRequest
+	HistoryGetCrossClusterTasksResponse              = GetCrossClusterTasksResponse
+	HistoryRespondCrossClusterTasksCompletedRequest  = RespondCrossClusterTasksCompletedRequest
+	HistoryRespondCrossClusterTasksCompletedResponse = RespondCrossClusterTasksCompletedResponse
 )

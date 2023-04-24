@@ -46,7 +46,9 @@ func init() {
 	registerActivity(largeResultActivity, activityTypeLargeResult)
 }
 
-func historyArchivalWorkflow(ctx workflow.Context, scheduledTimeNanos int64, _ string) error {
+func historyArchivalWorkflow(ctx workflow.Context, inputScheduledTimeNanos int64) error {
+	scheduledTimeNanos := getScheduledTimeFromInputIfNonZero(ctx, inputScheduledTimeNanos)
+
 	profile, err := beginWorkflow(ctx, wfTypeHistoryArchival, scheduledTimeNanos)
 	if err != nil {
 		return err
@@ -170,5 +172,5 @@ func archivalExternalWorkflow(ctx workflow.Context, scheduledTimeNanos int64) er
 }
 
 func largeResultActivity() ([]byte, error) {
-	return make([]byte, resultSize, resultSize), nil
+	return make([]byte, resultSize), nil
 }

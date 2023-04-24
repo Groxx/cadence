@@ -26,7 +26,7 @@ import (
 	"go.uber.org/yarpc/encoding/protobuf"
 	"go.uber.org/yarpc/yarpcerrors"
 
-	apiv1 "github.com/uber/cadence/.gen/proto/api/v1"
+	apiv1 "github.com/uber/cadence-idl/go/proto/api/v1"
 	sharedv1 "github.com/uber/cadence/.gen/proto/shared/v1"
 	"github.com/uber/cadence/common/types"
 )
@@ -84,6 +84,10 @@ func FromError(err error) error {
 			ClientImpl:        e.ClientImpl,
 			SupportedVersions: e.SupportedVersions,
 		}))
+	case *types.FeatureNotEnabledError:
+		return protobuf.NewError(yarpcerrors.CodeFailedPrecondition, "Feature flag not enabled", protobuf.WithErrorDetails(&apiv1.FeatureNotEnabledError{
+			FeatureFlag: e.FeatureFlag,
+		}))
 	case *types.DomainNotActiveError:
 		return protobuf.NewError(yarpcerrors.CodeFailedPrecondition, e.Message, protobuf.WithErrorDetails(&apiv1.DomainNotActiveError{
 			Domain:         e.DomainName,
@@ -98,6 +102,8 @@ func FromError(err error) error {
 		return protobuf.NewError(yarpcerrors.CodeResourceExhausted, e.Message, protobuf.WithErrorDetails(&apiv1.ServiceBusyError{}))
 	case *types.RemoteSyncMatchedError:
 		return protobuf.NewError(yarpcerrors.CodeUnavailable, e.Message, protobuf.WithErrorDetails(&sharedv1.RemoteSyncMatchedError{}))
+	case *types.StickyWorkerUnavailableError:
+		return protobuf.NewError(yarpcerrors.CodeUnavailable, e.Message, protobuf.WithErrorDetails(&apiv1.StickyWorkerUnavailableError{}))
 	}
 
 	return protobuf.NewError(yarpcerrors.CodeUnknown, err.Error())
@@ -199,6 +205,10 @@ func ToError(err error) error {
 				ClientImpl:        details.ClientImpl,
 				SupportedVersions: details.SupportedVersions,
 			}
+		case *apiv1.FeatureNotEnabledError:
+			return &types.FeatureNotEnabledError{
+				FeatureFlag: details.FeatureFlag,
+			}
 		case *apiv1.DomainNotActiveError:
 			return &types.DomainNotActiveError{
 				Message:        status.Message(),
@@ -222,6 +232,10 @@ func ToError(err error) error {
 		switch getErrorDetails(err).(type) {
 		case *sharedv1.RemoteSyncMatchedError:
 			return &types.RemoteSyncMatchedError{
+				Message: status.Message(),
+			}
+		case *apiv1.StickyWorkerUnavailableError:
+			return &types.StickyWorkerUnavailableError{
 				Message: status.Message(),
 			}
 		}

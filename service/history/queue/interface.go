@@ -23,8 +23,10 @@
 package queue
 
 import (
+	"context"
+
 	"github.com/uber/cadence/common"
-	"github.com/uber/cadence/common/persistence"
+	hcommon "github.com/uber/cadence/service/history/common"
 	"github.com/uber/cadence/service/history/task"
 )
 
@@ -56,6 +58,8 @@ type (
 		Split(ProcessingQueueSplitPolicy) []ProcessingQueue
 		Merge(ProcessingQueue) []ProcessingQueue
 		AddTasks(map[task.Key]task.Task, task.Key)
+		GetTask(task.Key) (task.Task, error)
+		GetTasks() []task.Task
 		UpdateAckLevel() (task.Key, int) // return new ack level and number of pending tasks
 		// TODO: add Offload() method
 	}
@@ -73,6 +77,8 @@ type (
 		Queues() []ProcessingQueue
 		ActiveQueue() ProcessingQueue
 		AddTasks(map[task.Key]task.Task, task.Key)
+		GetTask(task.Key) (task.Task, error)
+		GetTasks() []task.Task
 		UpdateAckLevels() (task.Key, int) // return min of all new ack levels and number of total pending tasks
 		Split(ProcessingQueueSplitPolicy) []ProcessingQueue
 		Merge([]ProcessingQueue)
@@ -83,8 +89,8 @@ type (
 	Processor interface {
 		common.Daemon
 		FailoverDomain(domainIDs map[string]struct{})
-		NotifyNewTask(clusterName string, executionInfo *persistence.WorkflowExecutionInfo, tasks []persistence.Task)
-		HandleAction(clusterName string, action *Action) (*ActionResult, error) // TODO: enforce context timeout for Actions
+		NotifyNewTask(clusterName string, info *hcommon.NotifyTaskInfo)
+		HandleAction(ctx context.Context, clusterName string, action *Action) (*ActionResult, error)
 		LockTaskProcessing()
 		UnlockTaskProcessing()
 	}

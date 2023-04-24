@@ -35,13 +35,17 @@ import (
 
 // VisibilityQueryValidator for sql query validation
 type VisibilityQueryValidator struct {
-	validSearchAttributes dynamicconfig.MapPropertyFn
+	validSearchAttributes          dynamicconfig.MapPropertyFn
+	enableQueryAttributeValidation dynamicconfig.BoolPropertyFn
 }
 
 // NewQueryValidator create VisibilityQueryValidator
-func NewQueryValidator(validSearchAttributes dynamicconfig.MapPropertyFn) *VisibilityQueryValidator {
+func NewQueryValidator(
+	validSearchAttributes dynamicconfig.MapPropertyFn,
+	enableQueryAttributeValidation dynamicconfig.BoolPropertyFn) *VisibilityQueryValidator {
 	return &VisibilityQueryValidator{
-		validSearchAttributes: validSearchAttributes,
+		validSearchAttributes:          validSearchAttributes,
+		enableQueryAttributeValidation: enableQueryAttributeValidation,
 	}
 }
 
@@ -136,17 +140,19 @@ func (qv *VisibilityQueryValidator) validateComparisonExpr(expr sqlparser.Expr) 
 		return errors.New("invalid comparison expression")
 	}
 	colNameStr := colName.Name.String()
-	if qv.isValidSearchAttributes(colNameStr) {
-		if !definition.IsSystemIndexedKey(colNameStr) { // add search attribute prefix
-			comparisonExpr.Left = &sqlparser.ColName{
-				Metadata:  colName.Metadata,
-				Name:      sqlparser.NewColIdent(definition.Attr + "." + colNameStr),
-				Qualifier: colName.Qualifier,
-			}
-		}
-		return nil
+	if !qv.isValidSearchAttributes(colNameStr) {
+		return fmt.Errorf("invalid search attribute %q", colNameStr)
 	}
-	return errors.New("invalid search attribute")
+
+	if !definition.IsSystemIndexedKey(colNameStr) { // add search attribute prefix
+		comparisonExpr.Left = &sqlparser.ColName{
+			Metadata:  colName.Metadata,
+			Name:      sqlparser.NewColIdent(definition.Attr + "." + colNameStr),
+			Qualifier: colName.Qualifier,
+		}
+	}
+
+	return nil
 }
 
 func (qv *VisibilityQueryValidator) validateRangeExpr(expr sqlparser.Expr) error {
@@ -156,17 +162,20 @@ func (qv *VisibilityQueryValidator) validateRangeExpr(expr sqlparser.Expr) error
 		return errors.New("invalid range expression")
 	}
 	colNameStr := colName.Name.String()
-	if qv.isValidSearchAttributes(colNameStr) {
-		if !definition.IsSystemIndexedKey(colNameStr) { // add search attribute prefix
-			rangeCond.Left = &sqlparser.ColName{
-				Metadata:  colName.Metadata,
-				Name:      sqlparser.NewColIdent(definition.Attr + "." + colNameStr),
-				Qualifier: colName.Qualifier,
-			}
-		}
-		return nil
+
+	if !qv.isValidSearchAttributes(colNameStr) {
+		return fmt.Errorf("invalid search attribute %q", colNameStr)
 	}
-	return errors.New("invalid search attribute")
+
+	if !definition.IsSystemIndexedKey(colNameStr) { // add search attribute prefix
+		rangeCond.Left = &sqlparser.ColName{
+			Metadata:  colName.Metadata,
+			Name:      sqlparser.NewColIdent(definition.Attr + "." + colNameStr),
+			Qualifier: colName.Qualifier,
+		}
+	}
+
+	return nil
 }
 
 func (qv *VisibilityQueryValidator) validateOrderByExpr(orderBy sqlparser.OrderBy) error {
@@ -193,7 +202,10 @@ func (qv *VisibilityQueryValidator) validateOrderByExpr(orderBy sqlparser.OrderB
 
 // isValidSearchAttributes return true if key is registered
 func (qv *VisibilityQueryValidator) isValidSearchAttributes(key string) bool {
-	validAttr := qv.validSearchAttributes()
-	_, isValidKey := validAttr[key]
-	return isValidKey
+	if qv.enableQueryAttributeValidation() {
+		validAttr := qv.validSearchAttributes()
+		_, isValidKey := validAttr[key]
+		return isValidKey
+	}
+	return true
 }

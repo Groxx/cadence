@@ -1,5 +1,7 @@
-// Copyright (c) 2017-2020 Uber Technologies, Inc.
-//
+// Copyright (c) 2017-2020 Uber Technologies Inc.
+
+// Portions of the Software are attributed to Copyright (c) 2020 Temporal Technologies Inc.
+
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
@@ -7,16 +9,16 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-// THE SOFTWARE.
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 package matching
 
@@ -28,6 +30,9 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/uber/cadence/common/cluster"
+	"github.com/uber/cadence/common/service"
 
 	"github.com/pborman/uuid"
 
@@ -44,6 +49,10 @@ import (
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/types"
 )
+
+// If sticky poller is not seem in last 10s, we treat it as sticky worker unavailable
+// This seems aggressive, but the default sticky schedule_to_start timeout is 5s, so 10s seems reasonable.
+const _stickyPollerUnavailableWindow = 10 * time.Second
 
 // Implements matching.Engine
 // TODO: Switch implementation from lock/channel based to a partitioned agent
@@ -68,6 +77,7 @@ type (
 
 	matchingEngineImpl struct {
 		taskManager          persistence.TaskManager
+		clusterMetadata      cluster.Metadata
 		historyService       history.Client
 		matchingClient       matching.Client
 		tokenSerializer      common.TaskTokenSerializer
@@ -79,7 +89,7 @@ type (
 		lockableQueryTaskMap lockableQueryTaskMap
 		domainCache          cache.DomainCache
 		versionChecker       client.VersionChecker
-		keyResolver          membership.ServiceResolver
+		membershipResolver   membership.Resolver
 	}
 )
 
@@ -92,28 +102,31 @@ var (
 	historyServiceOperationRetryPolicy = common.CreateHistoryServiceRetryPolicy()
 
 	// ErrNoTasks is exported temporarily for integration test
-	ErrNoTasks    = errors.New("No tasks")
-	errPumpClosed = errors.New("Task list pump closed its channel")
+	ErrNoTasks    = errors.New("no tasks")
+	errPumpClosed = errors.New("task list pump closed its channel")
 
 	pollerIDKey pollerIDCtxKey = "pollerID"
 	identityKey identityCtxKey = "identity"
+
+	_stickyPollerUnavailableError = &types.StickyWorkerUnavailableError{Message: "sticky worker is unavailable, please use non-sticky task list."}
 )
 
 var _ Engine = (*matchingEngineImpl)(nil) // Asserts that interface is indeed implemented
 
 // NewEngine creates an instance of matching engine
 func NewEngine(taskManager persistence.TaskManager,
+	clusterMetadata cluster.Metadata,
 	historyService history.Client,
 	matchingClient matching.Client,
 	config *Config,
 	logger log.Logger,
 	metricsClient metrics.Client,
 	domainCache cache.DomainCache,
-	resolver membership.ServiceResolver,
+	resolver membership.Resolver,
 ) Engine {
-
 	return &matchingEngineImpl{
 		taskManager:          taskManager,
+		clusterMetadata:      clusterMetadata,
 		historyService:       historyService,
 		tokenSerializer:      common.NewJSONTaskTokenSerializer(),
 		taskLists:            make(map[taskListID]taskListManager),
@@ -124,7 +137,7 @@ func NewEngine(taskManager persistence.TaskManager,
 		lockableQueryTaskMap: lockableQueryTaskMap{queryTaskMap: make(map[string]chan *queryResult)},
 		domainCache:          domainCache,
 		versionChecker:       client.NewVersionChecker(),
-		keyResolver:          resolver,
+		membershipResolver:   resolver,
 	}
 }
 
@@ -165,8 +178,11 @@ func (e *matchingEngineImpl) String() string {
 
 // Returns taskListManager for a task list. If not already cached gets new range from DB and
 // if successful creates one.
-func (e *matchingEngineImpl) getTaskListManager(taskList *taskListID,
-	taskListKind *types.TaskListKind) (taskListManager, error) {
+func (e *matchingEngineImpl) getTaskListManager(
+	taskList *taskListID,
+	taskListKind *types.TaskListKind,
+) (taskListManager, error) {
+
 	// The first check is an optimization so almost all requests will have a task list manager
 	// and return avoiding the write lock
 	e.taskListsLock.RLock()
@@ -196,6 +212,7 @@ func (e *matchingEngineImpl) getTaskListManager(taskList *taskListID,
 		logger.Info("Task list manager state changed", tag.LifeCycleStartFailed, tag.Error(err))
 		return nil, err
 	}
+
 	e.taskLists[*taskList] = mgr
 	e.metricsClient.Scope(metrics.MatchingTaskListMgrScope).UpdateGauge(
 		metrics.TaskListManagersGauge,
@@ -211,6 +228,26 @@ func (e *matchingEngineImpl) getTaskListManager(taskList *taskListID,
 	return mgr, nil
 }
 
+func (e *matchingEngineImpl) getTaskListByDomainLocked(
+	domainID string,
+) *types.GetTaskListsByDomainResponse {
+	decisionTaskListMap := make(map[string]*types.DescribeTaskListResponse)
+	activityTaskListMap := make(map[string]*types.DescribeTaskListResponse)
+	for tl, tlm := range e.taskLists {
+		if tlm.GetTaskListKind() == types.TaskListKindNormal && tl.domainID == domainID {
+			if types.TaskListType(tl.taskType) == types.TaskListTypeDecision {
+				decisionTaskListMap[tl.baseName] = tlm.DescribeTaskList(false)
+			}
+			activityTaskListMap[tl.baseName] = tlm.DescribeTaskList(false)
+		}
+	}
+
+	return &types.GetTaskListsByDomainResponse{
+		DecisionTaskListMap: decisionTaskListMap,
+		ActivityTaskListMap: activityTaskListMap,
+	}
+}
+
 // For use in tests
 func (e *matchingEngineImpl) updateTaskList(taskList *taskListID, mgr taskListManager) {
 	e.taskListsLock.Lock()
@@ -218,10 +255,14 @@ func (e *matchingEngineImpl) updateTaskList(taskList *taskListID, mgr taskListMa
 	e.taskLists[*taskList] = mgr
 }
 
-func (e *matchingEngineImpl) removeTaskListManager(id *taskListID) {
+func (e *matchingEngineImpl) removeTaskListManager(tlMgr taskListManager) {
+	id := tlMgr.TaskListID()
 	e.taskListsLock.Lock()
-	defer e.taskListsLock.Unlock()
-	delete(e.taskLists, *id)
+	currentTlMgr, ok := e.taskLists[*id]
+	if ok && tlMgr == currentTlMgr {
+		delete(e.taskLists, *id)
+	}
+	e.taskListsLock.Unlock()
 	e.metricsClient.Scope(metrics.MatchingTaskListMgrScope).UpdateGauge(
 		metrics.TaskListManagersGauge,
 		float64(len(e.taskLists)),
@@ -234,8 +275,8 @@ func (e *matchingEngineImpl) AddDecisionTask(
 	request *types.AddDecisionTaskRequest,
 ) (bool, error) {
 	domainID := request.GetDomainUUID()
-	taskListName := request.TaskList.GetName()
-	taskListKind := request.TaskList.Kind
+	taskListName := request.GetTaskList().GetName()
+	taskListKind := request.GetTaskList().Kind
 	taskListType := persistence.TaskListTypeDecision
 
 	e.emitInfoOrDebugLog(
@@ -255,9 +296,31 @@ func (e *matchingEngineImpl) AddDecisionTask(
 		return false, err
 	}
 
+	// get the domainName
+	domainName, err := e.domainCache.GetDomainName(domainID)
+	if err != nil {
+		return false, err
+	}
+
+	// Only emit traffic metrics if the tasklist is not sticky and is not forwarded
+	if taskListKind != nil && *taskListKind != types.TaskListKindSticky && request.ForwardedFrom == "" {
+		e.metricsClient.Scope(metrics.MatchingAddTaskScope).Tagged(metrics.DomainTag(domainName),
+			metrics.TaskListTag(taskListName), metrics.TaskListTypeTag("decision_task")).IncCounter(metrics.CadenceTasklistRequests)
+		e.emitInfoOrDebugLog(domainID, "Emitting tasklist counter on decision task", tag.Dynamic("tasklistName", taskListName),
+			tag.Dynamic("taskListBaseName", taskList.baseName),
+			tag.Dynamic("tasklistType", *taskListKind))
+	}
+
 	tlMgr, err := e.getTaskListManager(taskList, taskListKind)
 	if err != nil {
 		return false, err
+	}
+
+	if taskListKind != nil && *taskListKind == types.TaskListKindSticky {
+		// check if the sticky worker is still available, if not, fail this request early
+		if !tlMgr.HasPollerAfter(time.Now().Add(-_stickyPollerUnavailableWindow)) {
+			return false, _stickyPollerUnavailableError
+		}
 	}
 
 	taskInfo := &persistence.TaskInfo{
@@ -282,7 +345,8 @@ func (e *matchingEngineImpl) AddActivityTask(
 	request *types.AddActivityTaskRequest,
 ) (bool, error) {
 	domainID := request.GetDomainUUID()
-	taskListName := request.TaskList.GetName()
+	taskListName := request.GetTaskList().GetName()
+	taskListKind := request.GetTaskList().Kind
 	taskListType := persistence.TaskListTypeActivity
 
 	e.emitInfoOrDebugLog(
@@ -302,7 +366,22 @@ func (e *matchingEngineImpl) AddActivityTask(
 		return false, err
 	}
 
-	tlMgr, err := e.getTaskListManager(taskList, request.TaskList.Kind)
+	// get the domainName
+	domainName, err := e.domainCache.GetDomainName(domainID)
+	if err != nil {
+		return false, err
+	}
+
+	// Only emit traffic metrics if the tasklist is not sticky and is not forwarded
+	if taskListKind != nil && *taskListKind != types.TaskListKindSticky && request.ForwardedFrom == "" {
+		e.metricsClient.Scope(metrics.MatchingAddTaskScope).Tagged(metrics.DomainTag(domainName),
+			metrics.TaskListTag(taskListName), metrics.TaskListTypeTag("activity_task")).IncCounter(metrics.CadenceTasklistRequests)
+		e.emitInfoOrDebugLog(domainID, "Emitting tasklist counter on decision task", tag.Dynamic("tasklistName", taskListName),
+			tag.Dynamic("taskListBaseName", taskList.baseName),
+			tag.Dynamic("tasklistType", *taskListKind))
+	}
+
+	tlMgr, err := e.getTaskListManager(taskList, taskListKind)
 	if err != nil {
 		return false, err
 	}
@@ -316,10 +395,11 @@ func (e *matchingEngineImpl) AddActivityTask(
 		CreatedTime:            time.Now(),
 	}
 	return tlMgr.AddTask(hCtx.Context, addTaskParams{
-		execution:     request.Execution,
-		taskInfo:      taskInfo,
-		source:        request.GetSource(),
-		forwardedFrom: request.GetForwardedFrom(),
+		execution:                request.Execution,
+		taskInfo:                 taskInfo,
+		source:                   request.GetSource(),
+		forwardedFrom:            request.GetForwardedFrom(),
+		activityTaskDispatchInfo: request.ActivityTaskDispatchInfo,
 	})
 }
 
@@ -331,7 +411,8 @@ func (e *matchingEngineImpl) PollForDecisionTask(
 	domainID := req.GetDomainUUID()
 	pollerID := req.GetPollerID()
 	request := req.PollRequest
-	taskListName := request.TaskList.GetName()
+	taskListName := request.GetTaskList().GetName()
+	taskListKind := request.GetTaskList().Kind
 	e.logger.Debug("Received PollForDecisionTask for taskList",
 		tag.WorkflowTaskListName(taskListName),
 		tag.WorkflowDomainID(domainID),
@@ -351,7 +432,7 @@ pollLoop:
 		// long-poll when frontend calls CancelOutstandingPoll API
 		pollerCtx := context.WithValue(hCtx.Context, pollerIDKey, pollerID)
 		pollerCtx = context.WithValue(pollerCtx, identityKey, request.GetIdentity())
-		task, err := e.getTask(pollerCtx, taskList, nil, request.TaskList.Kind)
+		task, err := e.getTask(pollerCtx, taskList, nil, taskListKind)
 		if err != nil {
 			// TODO: Is empty poll the best reply for errPumpClosed?
 			if err == ErrNoTasks || err == errPumpClosed {
@@ -434,7 +515,7 @@ func (e *matchingEngineImpl) PollForActivityTask(
 	domainID := req.GetDomainUUID()
 	pollerID := req.GetPollerID()
 	request := req.PollRequest
-	taskListName := request.TaskList.GetName()
+	taskListName := request.GetTaskList().GetName()
 	e.logger.Debug("Received PollForActivityTask",
 		tag.WorkflowTaskListName(taskListName),
 		tag.WorkflowDomainID(domainID),
@@ -476,6 +557,10 @@ pollLoop:
 			// tasks received from remote are already started. So, simply forward the response
 			return task.pollForActivityResponse(), nil
 		}
+		if task.activityTaskDispatchInfo != nil {
+			task.finish(nil)
+			return e.createSyncMatchPollForActivityTaskResponse(task, task.activityTaskDispatchInfo), nil
+		}
 
 		resp, err := e.recordActivityTaskStarted(hCtx.Context, request, task)
 		if err != nil {
@@ -503,6 +588,45 @@ pollLoop:
 	}
 }
 
+func (e *matchingEngineImpl) createSyncMatchPollForActivityTaskResponse(
+	task *InternalTask,
+	activityTaskDispatchInfo *types.ActivityTaskDispatchInfo,
+) *types.PollForActivityTaskResponse {
+
+	scheduledEvent := activityTaskDispatchInfo.ScheduledEvent
+	attributes := scheduledEvent.ActivityTaskScheduledEventAttributes
+	response := &types.PollForActivityTaskResponse{}
+	response.ActivityID = attributes.ActivityID
+	response.ActivityType = attributes.ActivityType
+	response.Header = attributes.Header
+	response.Input = attributes.Input
+	response.WorkflowExecution = task.workflowExecution()
+	response.ScheduledTimestampOfThisAttempt = activityTaskDispatchInfo.ScheduledTimestampOfThisAttempt
+	response.ScheduledTimestamp = scheduledEvent.Timestamp
+	response.ScheduleToCloseTimeoutSeconds = attributes.ScheduleToCloseTimeoutSeconds
+	response.StartedTimestamp = activityTaskDispatchInfo.StartedTimestamp
+	response.StartToCloseTimeoutSeconds = attributes.StartToCloseTimeoutSeconds
+	response.HeartbeatTimeoutSeconds = attributes.HeartbeatTimeoutSeconds
+
+	token := &common.TaskToken{
+		DomainID:        task.event.DomainID,
+		WorkflowID:      task.event.WorkflowID,
+		WorkflowType:    activityTaskDispatchInfo.WorkflowType.GetName(),
+		RunID:           task.event.RunID,
+		ScheduleID:      task.event.ScheduleID,
+		ScheduleAttempt: common.Int64Default(activityTaskDispatchInfo.Attempt),
+		ActivityID:      attributes.GetActivityID(),
+		ActivityType:    attributes.GetActivityType().GetName(),
+	}
+
+	response.TaskToken, _ = e.tokenSerializer.Serialize(token)
+	response.Attempt = int32(token.ScheduleAttempt)
+	response.HeartbeatDetails = activityTaskDispatchInfo.HeartbeatDetails
+	response.WorkflowType = activityTaskDispatchInfo.WorkflowType
+	response.WorkflowDomain = activityTaskDispatchInfo.WorkflowDomain
+	return response
+}
+
 // QueryWorkflow creates a DecisionTask with query data, send it through sync match channel, wait for that DecisionTask
 // to be processed by worker, and then return the query result.
 func (e *matchingEngineImpl) QueryWorkflow(
@@ -510,8 +634,8 @@ func (e *matchingEngineImpl) QueryWorkflow(
 	queryRequest *types.MatchingQueryWorkflowRequest,
 ) (*types.QueryWorkflowResponse, error) {
 	domainID := queryRequest.GetDomainUUID()
-	taskListName := queryRequest.TaskList.GetName()
-	taskListKind := queryRequest.TaskList.Kind
+	taskListName := queryRequest.GetTaskList().GetName()
+	taskListKind := queryRequest.GetTaskList().Kind
 	taskList, err := newTaskListID(domainID, taskListName, persistence.TaskListTypeDecision)
 	if err != nil {
 		return nil, err
@@ -521,6 +645,14 @@ func (e *matchingEngineImpl) QueryWorkflow(
 	if err != nil {
 		return nil, err
 	}
+
+	if taskListKind != nil && *taskListKind == types.TaskListKindSticky {
+		// check if the sticky worker is still available, if not, fail this request early
+		if !tlMgr.HasPollerAfter(time.Now().Add(-_stickyPollerUnavailableWindow)) {
+			return nil, _stickyPollerUnavailableError
+		}
+	}
+
 	taskID := uuid.New()
 	resp, err := tlMgr.DispatchQueryTask(hCtx.Context, taskID, queryRequest)
 
@@ -588,14 +720,15 @@ func (e *matchingEngineImpl) CancelOutstandingPoll(
 ) error {
 	domainID := request.GetDomainUUID()
 	taskListType := int(request.GetTaskListType())
-	taskListName := request.TaskList.GetName()
+	taskListName := request.GetTaskList().GetName()
+	taskListKind := request.GetTaskList().Kind
 	pollerID := request.GetPollerID()
 
 	taskList, err := newTaskListID(domainID, taskListName, taskListType)
 	if err != nil {
 		return err
 	}
-	taskListKind := request.TaskList.Kind
+
 	tlMgr, err := e.getTaskListManager(taskList, taskListKind)
 	if err != nil {
 		return err
@@ -614,12 +747,14 @@ func (e *matchingEngineImpl) DescribeTaskList(
 	if request.DescRequest.GetTaskListType() == types.TaskListTypeActivity {
 		taskListType = persistence.TaskListTypeActivity
 	}
-	taskListName := request.DescRequest.TaskList.GetName()
+	taskListName := request.GetDescRequest().GetTaskList().GetName()
+	taskListKind := request.GetDescRequest().GetTaskList().Kind
+
 	taskList, err := newTaskListID(domainID, taskListName, taskListType)
 	if err != nil {
 		return nil, err
 	}
-	taskListKind := request.DescRequest.TaskList.Kind
+
 	tlMgr, err := e.getTaskListManager(taskList, taskListKind)
 	if err != nil {
 		return nil, err
@@ -672,8 +807,22 @@ func (e *matchingEngineImpl) listTaskListPartitions(
 	return partitionHostInfo, nil
 }
 
+func (e *matchingEngineImpl) GetTaskListsByDomain(
+	hCtx *handlerContext,
+	request *types.GetTaskListsByDomainRequest,
+) (*types.GetTaskListsByDomainResponse, error) {
+	domainID, err := e.domainCache.GetDomainID(request.GetDomain())
+	if err != nil {
+		return nil, err
+	}
+
+	e.taskListsLock.RLock()
+	defer e.taskListsLock.RUnlock()
+	return e.getTaskListByDomainLocked(domainID), nil
+}
+
 func (e *matchingEngineImpl) getHostInfo(partitionKey string) (string, error) {
-	host, err := e.keyResolver.Lookup(partitionKey)
+	host, err := e.membershipResolver.Lookup(service.Matching, partitionKey)
 	if err != nil {
 		return "", err
 	}
@@ -691,6 +840,9 @@ func (e *matchingEngineImpl) getAllPartitions(
 	}
 	taskList := request.GetTaskList()
 	taskListID, err := newTaskListID(domainID, taskList.GetName(), taskListType)
+	if err != nil {
+		return partitionKeys, err
+	}
 	rootPartition := taskListID.GetRoot()
 
 	partitionKeys = append(partitionKeys, rootPartition)
@@ -711,7 +863,7 @@ func (e *matchingEngineImpl) getAllPartitions(
 // Loads a task from persistence and wraps it in a task context
 func (e *matchingEngineImpl) getTask(
 	ctx context.Context, taskList *taskListID, maxDispatchPerSecond *float64, taskListKind *types.TaskListKind,
-) (*internalTask, error) {
+) (*InternalTask, error) {
 	tlMgr, err := e.getTaskListManager(taskList, taskListKind)
 	if err != nil {
 		return nil, err
@@ -719,21 +871,22 @@ func (e *matchingEngineImpl) getTask(
 	return tlMgr.GetTask(ctx, maxDispatchPerSecond)
 }
 
-func (e *matchingEngineImpl) unloadTaskList(id *taskListID) {
+func (e *matchingEngineImpl) unloadTaskList(tlMgr taskListManager) {
+	id := tlMgr.TaskListID()
 	e.taskListsLock.Lock()
-	tlMgr, ok := e.taskLists[*id]
-	if ok {
-		delete(e.taskLists, *id)
+	currentTlMgr, ok := e.taskLists[*id]
+	if !ok || tlMgr != currentTlMgr {
+		e.taskListsLock.Unlock()
+		return
 	}
+	delete(e.taskLists, *id)
 	e.taskListsLock.Unlock()
-	if ok {
-		tlMgr.Stop()
-	}
+	tlMgr.Stop()
 }
 
 // Populate the decision task response based on context and scheduled/started events.
 func (e *matchingEngineImpl) createPollForDecisionTaskResponse(
-	task *internalTask,
+	task *InternalTask,
 	historyResponse *types.RecordDecisionTaskStartedResponse,
 	scope metrics.Scope,
 ) *types.MatchingPollForDecisionTaskResponse {
@@ -772,7 +925,7 @@ func (e *matchingEngineImpl) createPollForDecisionTaskResponse(
 
 // Populate the activity task response based on context and scheduled/started events.
 func (e *matchingEngineImpl) createPollForActivityTaskResponse(
-	task *internalTask,
+	task *InternalTask,
 	historyResponse *types.RecordActivityTaskStartedResponse,
 	scope metrics.Scope,
 ) *types.PollForActivityTaskResponse {
@@ -796,11 +949,11 @@ func (e *matchingEngineImpl) createPollForActivityTaskResponse(
 	response.Input = attributes.Input
 	response.WorkflowExecution = task.workflowExecution()
 	response.ScheduledTimestampOfThisAttempt = historyResponse.ScheduledTimestampOfThisAttempt
-	response.ScheduledTimestamp = common.Int64Ptr(*scheduledEvent.Timestamp)
-	response.ScheduleToCloseTimeoutSeconds = common.Int32Ptr(*attributes.ScheduleToCloseTimeoutSeconds)
+	response.ScheduledTimestamp = scheduledEvent.Timestamp
+	response.ScheduleToCloseTimeoutSeconds = attributes.ScheduleToCloseTimeoutSeconds
 	response.StartedTimestamp = historyResponse.StartedTimestamp
-	response.StartToCloseTimeoutSeconds = common.Int32Ptr(*attributes.StartToCloseTimeoutSeconds)
-	response.HeartbeatTimeoutSeconds = common.Int32Ptr(*attributes.HeartbeatTimeoutSeconds)
+	response.StartToCloseTimeoutSeconds = attributes.StartToCloseTimeoutSeconds
+	response.HeartbeatTimeoutSeconds = attributes.HeartbeatTimeoutSeconds
 
 	token := &common.TaskToken{
 		DomainID:        task.event.DomainID,
@@ -824,7 +977,7 @@ func (e *matchingEngineImpl) createPollForActivityTaskResponse(
 func (e *matchingEngineImpl) recordDecisionTaskStarted(
 	ctx context.Context,
 	pollReq *types.PollForDecisionTaskRequest,
-	task *internalTask,
+	task *InternalTask,
 ) (*types.RecordDecisionTaskStartedResponse, error) {
 	request := &types.RecordDecisionTaskStartedRequest{
 		DomainUUID:        task.event.DomainID,
@@ -840,20 +993,18 @@ func (e *matchingEngineImpl) recordDecisionTaskStarted(
 		resp, err = e.historyService.RecordDecisionTaskStarted(ctx, request)
 		return err
 	}
-	err := backoff.Retry(op, historyServiceOperationRetryPolicy, func(err error) bool {
-		switch err.(type) {
-		case *types.EntityNotExistsError, *types.WorkflowExecutionAlreadyCompletedError, *types.EventAlreadyStartedError:
-			return false
-		}
-		return true
-	})
+	throttleRetry := backoff.NewThrottleRetry(
+		backoff.WithRetryPolicy(historyServiceOperationRetryPolicy),
+		backoff.WithRetryableError(isMatchingRetryableError),
+	)
+	err := throttleRetry.Do(ctx, op)
 	return resp, err
 }
 
 func (e *matchingEngineImpl) recordActivityTaskStarted(
 	ctx context.Context,
 	pollReq *types.PollForActivityTaskRequest,
-	task *internalTask,
+	task *InternalTask,
 ) (*types.RecordActivityTaskStartedResponse, error) {
 	request := &types.RecordActivityTaskStartedRequest{
 		DomainUUID:        task.event.DomainID,
@@ -869,13 +1020,11 @@ func (e *matchingEngineImpl) recordActivityTaskStarted(
 		resp, err = e.historyService.RecordActivityTaskStarted(ctx, request)
 		return err
 	}
-	err := backoff.Retry(op, historyServiceOperationRetryPolicy, func(err error) bool {
-		switch err.(type) {
-		case *types.EntityNotExistsError, *types.WorkflowExecutionAlreadyCompletedError, *types.EventAlreadyStartedError:
-			return false
-		}
-		return true
-	})
+	throttleRetry := backoff.NewThrottleRetry(
+		backoff.WithRetryPolicy(historyServiceOperationRetryPolicy),
+		backoff.WithRetryableError(isMatchingRetryableError),
+	)
+	err := throttleRetry.Do(ctx, op)
 	return resp, err
 }
 
@@ -926,4 +1075,12 @@ func (m *lockableQueryTaskMap) delete(key string) {
 	m.Lock()
 	defer m.Unlock()
 	delete(m.queryTaskMap, key)
+}
+
+func isMatchingRetryableError(err error) bool {
+	switch err.(type) {
+	case *types.EntityNotExistsError, *types.WorkflowExecutionAlreadyCompletedError, *types.EventAlreadyStartedError:
+		return false
+	}
+	return true
 }

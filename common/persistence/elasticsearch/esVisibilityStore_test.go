@@ -35,9 +35,7 @@ import (
 	"github.com/valyala/fastjson"
 
 	"github.com/uber/cadence/.gen/go/indexer"
-	workflow "github.com/uber/cadence/.gen/go/shared"
 	"github.com/uber/cadence/common"
-	"github.com/uber/cadence/common/config"
 	"github.com/uber/cadence/common/definition"
 	"github.com/uber/cadence/common/dynamicconfig"
 	es "github.com/uber/cadence/common/elasticsearch"
@@ -45,8 +43,8 @@ import (
 	"github.com/uber/cadence/common/log/loggerimpl"
 	"github.com/uber/cadence/common/mocks"
 	p "github.com/uber/cadence/common/persistence"
+	"github.com/uber/cadence/common/service"
 	"github.com/uber/cadence/common/types"
-	"github.com/uber/cadence/common/types/mapper/thrift"
 )
 
 type ESVisibilitySuite struct {
@@ -68,7 +66,6 @@ var (
 	testLatestTime   = int64(2547596872371000000)
 	testWorkflowType = "test-wf-type"
 	testWorkflowID   = "test-wid"
-	testRunID        = "1601da05-4db9-4eeb-89e4-da99481bdfc9"
 	testCloseStatus  = int32(1)
 
 	testRequest = &p.InternalListWorkflowExecutionsRequest{
@@ -83,13 +80,6 @@ var (
 
 	testContextTimeout = 5 * time.Second
 
-	filterOpen     = "must_not:map[exists:map[field:CloseStatus]]"
-	filterClose    = "map[exists:map[field:CloseStatus]]"
-	filterByType   = fmt.Sprintf("map[match:map[WorkflowType:map[query:%s]]]", testWorkflowType)
-	filterByWID    = fmt.Sprintf("map[match:map[WorkflowID:map[query:%s]]]", testWorkflowID)
-	filterByRunID  = fmt.Sprintf("map[match:map[RunID:map[query:%s]]]", testRunID)
-	filterByStatus = fmt.Sprintf("map[match:map[CloseStatus:map[query:%v]]]", testCloseStatus)
-
 	esIndexMaxResultWindow = 3
 )
 
@@ -102,7 +92,7 @@ func (s *ESVisibilitySuite) SetupTest() {
 	s.Assertions = require.New(s.T())
 
 	s.mockESClient = &esMocks.GenericClient{}
-	config := &config.VisibilityConfig{
+	config := &service.Config{
 		ESIndexMaxResultWindow: dynamicconfig.GetIntPropertyFn(esIndexMaxResultWindow),
 		ValidSearchAttributes:  dynamicconfig.GetMapPropertyFn(definition.GetDefaultIndexedKeys()),
 	}
@@ -127,8 +117,11 @@ func (s *ESVisibilitySuite) TestRecordWorkflowExecutionStarted() {
 	request.StartTimestamp = time.Unix(0, int64(123))
 	request.ExecutionTimestamp = time.Unix(0, int64(321))
 	request.TaskID = int64(111)
+	request.IsCron = true
+	request.NumClusters = 2
 	memoBytes := []byte(`test bytes`)
 	request.Memo = p.NewDataBlob(memoBytes, common.EncodingTypeThriftRW)
+	request.ShardID = 1234
 
 	s.mockProducer.On("Publish", mock.Anything, mock.MatchedBy(func(input *indexer.Message) bool {
 		fields := input.Fields
@@ -141,6 +134,10 @@ func (s *ESVisibilitySuite) TestRecordWorkflowExecutionStarted() {
 		s.Equal(request.ExecutionTimestamp.UnixNano(), fields[es.ExecutionTime].GetIntData())
 		s.Equal(memoBytes, fields[es.Memo].GetBinaryData())
 		s.Equal(string(common.EncodingTypeThriftRW), fields[es.Encoding].GetStringData())
+		s.Equal(request.IsCron, fields[es.IsCron].GetBoolData())
+		s.Equal((int64)(request.NumClusters), fields[es.NumClusters].GetIntData())
+		s.Equal(indexer.VisibilityOperationRecordStarted, *input.VisibilityOperation)
+		s.Equal((int64)(request.ShardID), fields[es.ShardID].GetIntData())
 		return true
 	})).Return(nil).Once()
 
@@ -185,9 +182,12 @@ func (s *ESVisibilitySuite) TestRecordWorkflowExecutionClosed() {
 	memoBytes := []byte(`test bytes`)
 	request.Memo = p.NewDataBlob(memoBytes, common.EncodingTypeThriftRW)
 	request.CloseTimestamp = time.Unix(0, int64(999))
-	closeStatus := workflow.WorkflowExecutionCloseStatusTerminated
-	request.Status = *thrift.ToWorkflowExecutionCloseStatus(&closeStatus)
+	request.Status = types.WorkflowExecutionCloseStatusTerminated
 	request.HistoryLength = int64(20)
+	request.IsCron = false
+	request.NumClusters = 2
+	request.UpdateTimestamp = time.Unix(0, int64(213))
+	request.ShardID = 1234
 	s.mockProducer.On("Publish", mock.Anything, mock.MatchedBy(func(input *indexer.Message) bool {
 		fields := input.Fields
 		s.Equal(request.DomainUUID, input.GetDomainID())
@@ -200,8 +200,13 @@ func (s *ESVisibilitySuite) TestRecordWorkflowExecutionClosed() {
 		s.Equal(memoBytes, fields[es.Memo].GetBinaryData())
 		s.Equal(string(common.EncodingTypeThriftRW), fields[es.Encoding].GetStringData())
 		s.Equal(request.CloseTimestamp.UnixNano(), fields[es.CloseTime].GetIntData())
-		s.Equal(int64(closeStatus), fields[es.CloseStatus].GetIntData())
+		s.Equal(int64(request.Status), fields[es.CloseStatus].GetIntData())
 		s.Equal(request.HistoryLength, fields[es.HistoryLength].GetIntData())
+		s.Equal(request.IsCron, fields[es.IsCron].GetBoolData())
+		s.Equal((int64)(request.NumClusters), fields[es.NumClusters].GetIntData())
+		s.Equal(indexer.VisibilityOperationRecordClosed, *input.VisibilityOperation)
+		s.Equal(request.UpdateTimestamp.UnixNano(), fields[es.UpdateTime].GetIntData())
+		s.Equal((int64)(request.ShardID), fields[es.ShardID].GetIntData())
 		return true
 	})).Return(nil).Once()
 
@@ -230,6 +235,49 @@ func (s *ESVisibilitySuite) TestRecordWorkflowExecutionClosed_EmptyRequest() {
 	defer cancel()
 
 	err := s.visibilityStore.RecordWorkflowExecutionClosed(ctx, request)
+	s.NoError(err)
+}
+
+func (s *ESVisibilitySuite) TestRecordWorkflowExecutionUninitialized() {
+	// test non-empty request fields match
+	request := &p.InternalRecordWorkflowExecutionUninitializedRequest{}
+	request.DomainUUID = "domainID"
+	request.WorkflowID = "wid"
+	request.RunID = "rid"
+	request.WorkflowTypeName = "wfType"
+	request.UpdateTimestamp = time.Unix(0, int64(213))
+	request.ShardID = 1234
+
+	s.mockProducer.On("Publish", mock.Anything, mock.MatchedBy(func(input *indexer.Message) bool {
+		fields := input.Fields
+		s.Equal(request.DomainUUID, input.GetDomainID())
+		s.Equal(request.WorkflowID, input.GetWorkflowID())
+		s.Equal(request.RunID, input.GetRunID())
+		s.Equal(request.WorkflowTypeName, fields[es.WorkflowType].GetStringData())
+		s.Equal(request.UpdateTimestamp.UnixNano(), fields[es.UpdateTime].GetIntData())
+		s.Equal(request.ShardID, fields[es.ShardID].GetIntData())
+		return true
+	})).Return(nil).Once()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testContextTimeout)
+	defer cancel()
+
+	err := s.visibilityStore.RecordWorkflowExecutionUninitialized(ctx, request)
+	s.NoError(err)
+}
+
+func (s *ESVisibilitySuite) TestRecordWorkflowExecutionUninitialized_EmptyRequest() {
+	// test empty request
+	request := &p.InternalRecordWorkflowExecutionUninitializedRequest{}
+	s.mockProducer.On("Publish", mock.Anything, mock.MatchedBy(func(input *indexer.Message) bool {
+		s.Equal(indexer.MessageTypeCreate, input.GetMessageType())
+		return true
+	})).Return(nil).Once()
+
+	ctx, cancel := context.WithTimeout(context.Background(), testContextTimeout)
+	defer cancel()
+
+	err := s.visibilityStore.RecordWorkflowExecutionUninitialized(ctx, request)
 	s.NoError(err)
 }
 
@@ -396,10 +444,10 @@ func (s *ESVisibilitySuite) TestListClosedWorkflowExecutionsByStatus() {
 		return true
 	})).Return(testSearchResult, nil).Once()
 
-	closeStatus := workflow.WorkflowExecutionCloseStatus(testCloseStatus)
+	closeStatus := types.WorkflowExecutionCloseStatus(testCloseStatus)
 	request := &p.InternalListClosedWorkflowExecutionsByStatusRequest{
 		InternalListWorkflowExecutionsRequest: *testRequest,
-		Status:                                *thrift.ToWorkflowExecutionCloseStatus(&closeStatus),
+		Status:                                closeStatus,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), testContextTimeout)
@@ -543,7 +591,7 @@ func (s *ESVisibilitySuite) TestShouldSearchAfter() {
 	s.True(es.ShouldSearchAfter(token))
 }
 
-//nolint
+// nolint
 func (s *ESVisibilitySuite) TestGetESQueryDSL() {
 	request := &p.ListWorkflowExecutionsByQueryRequest{
 		DomainUUID: testDomainID,
@@ -624,11 +672,11 @@ func (s *ESVisibilitySuite) TestGetESQueryDSL() {
 	s.Equal(`{"query":{"bool":{"must":[{"match_phrase":{"DomainID":{"query":"bfd5c907-f899-4baf-a7b2-2ab85e623ebd"}}},{"bool":{"must":[{"match_all":{}}]}}]}},"from":0,"size":10,"sort":[{"ExecutionTime":"desc"},{"RunID":"desc"}]}`, dsl)
 
 	request.Query = `order by StartTime desc, CloseTime desc`
-	dsl, err = v.getESQueryDSL(request, token)
+	_, err = v.getESQueryDSL(request, token)
 	s.Equal(errors.New("only one field can be used to sort"), err)
 
 	request.Query = `order by CustomStringField desc`
-	dsl, err = v.getESQueryDSL(request, token)
+	_, err = v.getESQueryDSL(request, token)
 	s.Equal(errors.New("not able to sort by IndexedValueTypeString field, use IndexedValueTypeKeyword field"), err)
 
 	request.Query = `order by CustomIntField asc`
@@ -703,6 +751,12 @@ func (s *ESVisibilitySuite) TestGetESQueryDSLForCount() {
 	dsl, err = getESQueryDSLForCount(request)
 	s.Nil(err)
 	s.Equal(`{"query":{"bool":{"must":[{"match_phrase":{"DomainID":{"query":"bfd5c907-f899-4baf-a7b2-2ab85e623ebd"}}},{"bool":{"must":[{"range":{"ExecutionTime":{"gt":"0"}}},{"bool":{"must":[{"range":{"ExecutionTime":{"lt":"1000"}}}]}}]}}]}}}`, dsl)
+
+	request.Query = `StartTime = missing and UpdateTime >= "2022-10-04T16:00:00+07:00"`
+	dsl, err = getESQueryDSLForCount(request)
+	s.Nil(err)
+	s.Equal(`{"query":{"bool":{"must":[{"match_phrase":{"DomainID":{"query":"bfd5c907-f899-4baf-a7b2-2ab85e623ebd"}}},{"bool":{"must":[{"bool":{"must_not":{"exists":{"field":"StartTime"}}}},{"range":{"UpdateTime":{"from":"1664874000000000000"}}}]}}]}}}`, dsl)
+
 }
 
 func (s *ESVisibilitySuite) TestAddDomainToQuery() {
@@ -935,8 +989,8 @@ func (s *ESVisibilitySuite) TestProcessAllValuesForKey() {
 }
 
 func (s *ESVisibilitySuite) TestGetFieldType() {
-	s.Equal(workflow.IndexedValueTypeInt, s.visibilityStore.getFieldType("StartTime"))
-	s.Equal(workflow.IndexedValueTypeDatetime, s.visibilityStore.getFieldType("Attr.CustomDatetimeField"))
+	s.Equal(types.IndexedValueTypeInt, s.visibilityStore.getFieldType("StartTime"))
+	s.Equal(types.IndexedValueTypeDatetime, s.visibilityStore.getFieldType("Attr.CustomDatetimeField"))
 }
 
 func (s *ESVisibilitySuite) TestGetValueOfSearchAfterInJSON() {

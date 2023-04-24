@@ -21,51 +21,31 @@
 package elasticsearch
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"io/ioutil"
 	"net/http"
 	"time"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	esaws "github.com/olivere/elastic/aws/v4"
 
 	"github.com/uber/cadence/common/config"
 )
 
-const unknownStatusCode = -1
+const (
+	// TODO https://github.com/uber/cadence/issues/3686
+	oneMicroSecondInNano = int64(time.Microsecond / time.Nanosecond)
 
-// TODO https://github.com/uber/cadence/issues/3686
-const oneMicroSecondInNano = int64(time.Microsecond / time.Nanosecond)
+	esDocIDDelimiter = "~"
+	esDocType        = "_doc"
+	esDocIDSizeLimit = 512
+)
 
 // Build Http Client with TLS
 func buildTLSHTTPClient(config config.TLS) (*http.Client, error) {
-	// Setup base TLS config
-	// EnableHostVerification is a secure flag vs insecureSkipVerify is insecure so inverse the valu
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: !config.EnableHostVerification,
-	}
-
-	// Setup server name
-	if config.ServerName != "" {
-		tlsConfig.ServerName = config.ServerName
-	}
-
-	// Load client cert
-	if config.CertFile != "" && config.KeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(config.CertFile, config.KeyFile)
-		if err != nil {
-			return nil, err
-		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
-	}
-
-	// Load CA cert
-	if config.CaFile != "" {
-		caCert, err := ioutil.ReadFile(config.CaFile)
-		if err != nil {
-			return nil, err
-		}
-		caCertPool := x509.NewCertPool()
-		caCertPool.AppendCertsFromPEM(caCert)
-		tlsConfig.RootCAs = caCertPool
+	tlsConfig, err := config.ToTLSConfig()
+	if err != nil {
+		return nil, err
 	}
 
 	// Setup HTTPS client
@@ -73,4 +53,52 @@ func buildTLSHTTPClient(config config.TLS) (*http.Client, error) {
 	tlsClient := &http.Client{Transport: transport}
 
 	return tlsClient, nil
+}
+
+func buildAWSSigningClient(awsconfig config.AWSSigning) (*http.Client, error) {
+	if err := config.CheckAWSSigningConfig(awsconfig); err != nil {
+		return nil, err
+	}
+
+	if awsconfig.EnvironmentCredential != nil {
+		return signingClientFromEnv(*awsconfig.EnvironmentCredential)
+	}
+
+	return signingClientFromStatic(*awsconfig.StaticCredential)
+}
+
+func GetESDocIDSizeLimit() int {
+	return esDocIDSizeLimit
+}
+
+func GetESDocType() string {
+	return esDocType
+}
+
+func GetESDocDelimiter() string {
+	return esDocIDDelimiter
+}
+
+func GenerateDocID(wid, rid string) string {
+	return wid + esDocIDDelimiter + rid
+}
+
+// refer to https://github.com/olivere/elastic/blob/release-branch.v7/recipes/aws-connect-v4/main.go
+func signingClientFromStatic(credentialConfig config.AWSStaticCredential) (*http.Client, error) {
+	awsCredentials := credentials.NewStaticCredentials(
+		credentialConfig.AccessKey,
+		credentialConfig.SecretKey,
+		credentialConfig.SessionToken,
+	)
+	return esaws.NewV4SigningClient(awsCredentials, credentialConfig.Region), nil
+}
+
+func signingClientFromEnv(credentialConfig config.AWSEnvironmentCredential) (*http.Client, error) {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(credentialConfig.Region)},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return esaws.NewV4SigningClient(sess.Config.Credentials, credentialConfig.Region), nil
 }

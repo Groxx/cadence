@@ -54,8 +54,7 @@ type (
 		// static infos
 
 		GetServiceName() string
-		GetHostName() string
-		GetHostInfo() *membership.HostInfo
+		GetHostInfo() membership.HostInfo
 		GetArchivalMetadata() archiver.ArchivalMetadata
 		GetClusterMetadata() cluster.Metadata
 
@@ -72,12 +71,7 @@ type (
 		GetDomainReplicationQueue() domain.ReplicationQueue
 
 		// membership infos
-
-		GetMembershipMonitor() membership.Monitor
-		GetFrontendServiceResolver() membership.ServiceResolver
-		GetMatchingServiceResolver() membership.ServiceResolver
-		GetHistoryServiceResolver() membership.ServiceResolver
-		GetWorkerServiceResolver() membership.ServiceResolver
+		GetMembershipResolver() membership.Resolver
 
 		// internal services clients
 
@@ -94,7 +88,7 @@ type (
 
 		// persistence clients
 
-		GetMetadataManager() persistence.MetadataManager
+		GetDomainManager() persistence.DomainManager
 		GetTaskManager() persistence.TaskManager
 		GetVisibilityManager() persistence.VisibilityManager
 		GetShardManager() persistence.ShardManager

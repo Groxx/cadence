@@ -24,6 +24,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/uber/cadence/testflags"
+
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/suite"
 
@@ -35,11 +37,12 @@ import (
 type (
 	SetupSchemaTestSuite struct {
 		test.SetupSchemaTestBase
-		client *cassandra.CqlClient
+		client cassandra.CqlClient
 	}
 )
 
 func TestSetupSchemaTestSuite(t *testing.T) {
+	testflags.RequireCassandra(t)
 	suite.Run(t, new(SetupSchemaTestSuite))
 }
 

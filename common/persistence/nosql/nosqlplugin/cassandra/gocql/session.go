@@ -50,7 +50,7 @@ type (
 
 func NewSession(
 	config ClusterConfig,
-) (*session, error) {
+) (Session, error) {
 	gocqlSession, err := initSession(config)
 	if err != nil {
 		return nil, err
@@ -68,10 +68,11 @@ func initSession(
 	config ClusterConfig,
 ) (*gocql.Session, error) {
 	cluster := newCassandraCluster(config)
-	cluster.ProtoVersion = config.ProtoVersion
 	cluster.Consistency = mustConvertConsistency(config.Consistency)
 	cluster.SerialConsistency = mustConvertSerialConsistency(config.SerialConsistency)
 	cluster.Timeout = config.Timeout
+	cluster.ConnectTimeout = config.ConnectTimeout
+
 	return cluster.CreateSession()
 }
 

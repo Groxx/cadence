@@ -467,3 +467,221 @@ func ToHostInfoArray(t []*admin.HostInfo) []*types.HostInfo {
 	}
 	return v
 }
+
+// FromGetDynamicConfigRequest converts internal GetDynamicConfigRequest type to thrift
+func FromGetDynamicConfigRequest(t *types.GetDynamicConfigRequest) *admin.GetDynamicConfigRequest {
+	if t == nil {
+		return nil
+	}
+	return &admin.GetDynamicConfigRequest{
+		ConfigName: &t.ConfigName,
+		Filters:    FromDynamicConfigFilterArray(t.Filters),
+	}
+}
+
+// ToGetDynamicConfigRequest converts thrift GetDynamicConfigRequest type to internal
+func ToGetDynamicConfigRequest(t *admin.GetDynamicConfigRequest) *types.GetDynamicConfigRequest {
+	if t == nil {
+		return nil
+	}
+	return &types.GetDynamicConfigRequest{
+		ConfigName: t.GetConfigName(),
+		Filters:    ToDynamicConfigFilterArray(t.Filters),
+	}
+}
+
+// FromGetDynamicConfigResponse converts internal GetDynamicConfigResponse type to thrift
+func FromGetDynamicConfigResponse(t *types.GetDynamicConfigResponse) *admin.GetDynamicConfigResponse {
+	if t == nil {
+		return nil
+	}
+	return &admin.GetDynamicConfigResponse{
+		Value: FromDataBlob(t.Value),
+	}
+}
+
+// ToGetDynamicConfigResponse converts thrift GetDynamicConfigResponse type to internal
+func ToGetDynamicConfigResponse(t *admin.GetDynamicConfigResponse) *types.GetDynamicConfigResponse {
+	if t == nil {
+		return nil
+	}
+	return &types.GetDynamicConfigResponse{
+		Value: ToDataBlob(t.Value),
+	}
+}
+
+// FromUpdateDynamicConfigRequest converts internal UpdateDynamicConfigRequest type to thrift
+func FromUpdateDynamicConfigRequest(t *types.UpdateDynamicConfigRequest) *admin.UpdateDynamicConfigRequest {
+	if t == nil {
+		return nil
+	}
+	return &admin.UpdateDynamicConfigRequest{
+		ConfigName:   &t.ConfigName,
+		ConfigValues: FromDynamicConfigValueArray(t.ConfigValues),
+	}
+}
+
+// ToUpdateDynamicConfigRequest converts thrift UpdateDynamicConfigRequest type to internal
+func ToUpdateDynamicConfigRequest(t *admin.UpdateDynamicConfigRequest) *types.UpdateDynamicConfigRequest {
+	if t == nil {
+		return nil
+	}
+	return &types.UpdateDynamicConfigRequest{
+		ConfigName:   t.GetConfigName(),
+		ConfigValues: ToDynamicConfigValueArray(t.ConfigValues),
+	}
+}
+
+// FromRestoreDynamicConfigRequest converts internal RestoreDynamicConfigRequest type to thrift
+func FromRestoreDynamicConfigRequest(t *types.RestoreDynamicConfigRequest) *admin.RestoreDynamicConfigRequest {
+	if t == nil {
+		return nil
+	}
+	return &admin.RestoreDynamicConfigRequest{
+		ConfigName: &t.ConfigName,
+		Filters:    FromDynamicConfigFilterArray(t.Filters),
+	}
+}
+
+// ToRestoreDynamicConfigRequest converts thrift RestoreDynamicConfigRequest type to internal
+func ToRestoreDynamicConfigRequest(t *admin.RestoreDynamicConfigRequest) *types.RestoreDynamicConfigRequest {
+	if t == nil {
+		return nil
+	}
+	return &types.RestoreDynamicConfigRequest{
+		ConfigName: t.GetConfigName(),
+		Filters:    ToDynamicConfigFilterArray(t.Filters),
+	}
+}
+
+// FromAdminDeleteWorkflowRequest converts internal AdminDeleteWorkflowRequest type to thrift
+func FromAdminDeleteWorkflowRequest(t *types.AdminDeleteWorkflowRequest) *admin.AdminDeleteWorkflowRequest {
+	if t == nil {
+		return nil
+	}
+	return &admin.AdminDeleteWorkflowRequest{
+		Domain:    &t.Domain,
+		Execution: FromWorkflowExecution(t.Execution),
+	}
+}
+
+// ToAdminDeleteWorkflowRequest converts thrift AdminDeleteWorkflowRequest type to internal
+func ToAdminDeleteWorkflowRequest(t *admin.AdminDeleteWorkflowRequest) *types.AdminDeleteWorkflowRequest {
+	if t == nil {
+		return nil
+	}
+	return &types.AdminDeleteWorkflowRequest{
+		Domain:    t.GetDomain(),
+		Execution: ToWorkflowExecution(t.Execution),
+	}
+}
+
+// FromAdminDeleteWorkflowResponse converts internal AdminDeleteWorkflowResponse type to thrift
+func FromAdminDeleteWorkflowResponse(t *types.AdminDeleteWorkflowResponse) *admin.AdminDeleteWorkflowResponse {
+	if t == nil {
+		return nil
+	}
+	return &admin.AdminDeleteWorkflowResponse{
+		HistoryDeleted:    &t.HistoryDeleted,
+		ExecutionsDeleted: &t.ExecutionsDeleted,
+		VisibilityDeleted: &t.VisibilityDeleted,
+	}
+}
+
+// ToAdminDeleteWorkflowResponse converts thrift AdminDeleteWorkflowResponse type to internal
+func ToAdminDeleteWorkflowResponse(t *admin.AdminDeleteWorkflowResponse) *types.AdminDeleteWorkflowResponse {
+	if t == nil {
+		return nil
+	}
+	return &types.AdminDeleteWorkflowResponse{
+		HistoryDeleted:    *t.HistoryDeleted,
+		ExecutionsDeleted: *t.ExecutionsDeleted,
+		VisibilityDeleted: *t.VisibilityDeleted,
+	}
+}
+
+// FromAdminMaintainWorkflowRequest converts internal AdminMaintainWorkflowRequest type to thrift
+func FromAdminMaintainWorkflowRequest(t *types.AdminMaintainWorkflowRequest) *admin.AdminMaintainWorkflowRequest {
+	if t == nil {
+		return nil
+	}
+	return &admin.AdminMaintainWorkflowRequest{
+		Domain:    &t.Domain,
+		Execution: FromWorkflowExecution(t.Execution),
+	}
+}
+
+// ToAdminMaintainWorkflowRequest converts thrift AdminMaintainWorkflowRequest type to internal
+func ToAdminMaintainWorkflowRequest(t *admin.AdminMaintainWorkflowRequest) *types.AdminMaintainWorkflowRequest {
+	if t == nil {
+		return nil
+	}
+	return &types.AdminMaintainWorkflowRequest{
+		Domain:    t.GetDomain(),
+		Execution: ToWorkflowExecution(t.Execution),
+	}
+}
+
+// FromAdminMaintainWorkflowResponse converts internal AdminMaintainWorkflowResponse type to thrift
+func FromAdminMaintainWorkflowResponse(t *types.AdminMaintainWorkflowResponse) *admin.AdminMaintainWorkflowResponse {
+	if t == nil {
+		return nil
+	}
+	return &admin.AdminMaintainWorkflowResponse{
+		HistoryDeleted:    &t.HistoryDeleted,
+		ExecutionsDeleted: &t.ExecutionsDeleted,
+		VisibilityDeleted: &t.VisibilityDeleted,
+	}
+}
+
+// ToAdminMaintainWorkflowResponse converts thrift AdminMaintainWorkflowResponse type to internal
+func ToAdminMaintainWorkflowResponse(t *admin.AdminMaintainWorkflowResponse) *types.AdminMaintainWorkflowResponse {
+	if t == nil {
+		return nil
+	}
+	return &types.AdminMaintainWorkflowResponse{
+		HistoryDeleted:    *t.HistoryDeleted,
+		ExecutionsDeleted: *t.ExecutionsDeleted,
+		VisibilityDeleted: *t.VisibilityDeleted,
+	}
+}
+
+// FromListDynamicConfigResponse converts internal ListDynamicConfigResponse type to thrift
+func FromListDynamicConfigResponse(t *types.ListDynamicConfigResponse) *admin.ListDynamicConfigResponse {
+	if t == nil {
+		return nil
+	}
+	return &admin.ListDynamicConfigResponse{
+		Entries: FromDynamicConfigEntryArray(t.Entries),
+	}
+}
+
+// FromListDynamicConfigRequest converts internal ListDynamicConfigRequest type to thrift
+func FromListDynamicConfigRequest(t *types.ListDynamicConfigRequest) *admin.ListDynamicConfigRequest {
+	if t == nil {
+		return nil
+	}
+	return &admin.ListDynamicConfigRequest{
+		ConfigName: &t.ConfigName,
+	}
+}
+
+// ToListDynamicConfigRequest converts thrift ListDynamicConfigRequest type to internal
+func ToListDynamicConfigRequest(t *admin.ListDynamicConfigRequest) *types.ListDynamicConfigRequest {
+	if t == nil {
+		return nil
+	}
+	return &types.ListDynamicConfigRequest{
+		ConfigName: t.GetConfigName(),
+	}
+}
+
+// ToListDynamicConfigResponse converts thrift ListDynamicConfigResponse type to internal
+func ToListDynamicConfigResponse(t *admin.ListDynamicConfigResponse) *types.ListDynamicConfigResponse {
+	if t == nil {
+		return nil
+	}
+	return &types.ListDynamicConfigResponse{
+		Entries: ToDynamicConfigEntryArray(t.Entries),
+	}
+}

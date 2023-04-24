@@ -29,6 +29,7 @@ import (
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/persistence"
+	"github.com/uber/cadence/common/service"
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/service/history/config"
 	"github.com/uber/cadence/service/history/execution"
@@ -48,6 +49,7 @@ type (
 		logger         log.Logger
 		metricsClient  metrics.Client
 		config         *config.Config
+		throttleRetry  *backoff.ThrottleRetry
 	}
 )
 
@@ -66,6 +68,10 @@ func newTimerTaskExecutorBase(
 		logger:         logger,
 		metricsClient:  metricsClient,
 		config:         config,
+		throttleRetry: backoff.NewThrottleRetry(
+			backoff.WithRetryPolicy(taskRetryPolicy),
+			backoff.WithRetryableError(persistence.IsTransientError),
+		),
 	}
 }
 
@@ -176,7 +182,7 @@ func (t *timerTaskExecutorBase) archiveWorkflow(
 			BranchToken:          branchToken,
 			CloseFailoverVersion: closeFailoverVersion,
 		},
-		CallerService:        common.HistoryServiceName,
+		CallerService:        service.History,
 		AttemptArchiveInline: false, // archive in workflow by default
 	}
 	executionStats, err := workflowContext.LoadExecutionStats(ctx)
@@ -219,30 +225,38 @@ func (t *timerTaskExecutorBase) deleteWorkflowExecution(
 	ctx context.Context,
 	task *persistence.TimerTaskInfo,
 ) error {
-
+	domainName, err := t.shard.GetDomainCache().GetDomainName(task.DomainID)
+	if err != nil {
+		return err
+	}
 	op := func() error {
 		return t.shard.GetExecutionManager().DeleteWorkflowExecution(ctx, &persistence.DeleteWorkflowExecutionRequest{
 			DomainID:   task.DomainID,
 			WorkflowID: task.WorkflowID,
 			RunID:      task.RunID,
+			DomainName: domainName,
 		})
 	}
-	return backoff.Retry(op, taskRetryPolicy, persistence.IsTransientError)
+	return t.throttleRetry.Do(ctx, op)
 }
 
 func (t *timerTaskExecutorBase) deleteCurrentWorkflowExecution(
 	ctx context.Context,
 	task *persistence.TimerTaskInfo,
 ) error {
-
+	domainName, err := t.shard.GetDomainCache().GetDomainName(task.DomainID)
+	if err != nil {
+		return err
+	}
 	op := func() error {
 		return t.shard.GetExecutionManager().DeleteCurrentWorkflowExecution(ctx, &persistence.DeleteCurrentWorkflowExecutionRequest{
 			DomainID:   task.DomainID,
 			WorkflowID: task.WorkflowID,
 			RunID:      task.RunID,
+			DomainName: domainName,
 		})
 	}
-	return backoff.Retry(op, taskRetryPolicy, persistence.IsTransientError)
+	return t.throttleRetry.Do(ctx, op)
 }
 
 func (t *timerTaskExecutorBase) deleteWorkflowHistory(
@@ -256,13 +270,18 @@ func (t *timerTaskExecutorBase) deleteWorkflowHistory(
 		if err != nil {
 			return err
 		}
+		domainName, err := t.shard.GetDomainCache().GetDomainName(task.DomainID)
+		if err != nil {
+			return err
+		}
 		return t.shard.GetHistoryManager().DeleteHistoryBranch(ctx, &persistence.DeleteHistoryBranchRequest{
 			BranchToken: branchToken,
 			ShardID:     common.IntPtr(t.shard.GetShardID()),
+			DomainName:  domainName,
 		})
 
 	}
-	return backoff.Retry(op, taskRetryPolicy, persistence.IsTransientError)
+	return t.throttleRetry.Do(ctx, op)
 }
 
 func (t *timerTaskExecutorBase) deleteWorkflowVisibility(
@@ -270,9 +289,14 @@ func (t *timerTaskExecutorBase) deleteWorkflowVisibility(
 	task *persistence.TimerTaskInfo,
 ) error {
 
+	domain, errorDomainName := t.shard.GetDomainCache().GetDomainName(task.DomainID)
+	if errorDomainName != nil {
+		return errorDomainName
+	}
 	op := func() error {
 		request := &persistence.VisibilityDeleteWorkflowExecutionRequest{
 			DomainID:   task.DomainID,
+			Domain:     domain,
 			WorkflowID: task.WorkflowID,
 			RunID:      task.RunID,
 			TaskID:     task.TaskID,
@@ -280,5 +304,5 @@ func (t *timerTaskExecutorBase) deleteWorkflowVisibility(
 		// TODO: expose GetVisibilityManager method on shardContext interface
 		return t.shard.GetService().GetVisibilityManager().DeleteWorkflowExecution(ctx, request) // delete from db
 	}
-	return backoff.Retry(op, taskRetryPolicy, persistence.IsTransientError)
+	return t.throttleRetry.Do(ctx, op)
 }

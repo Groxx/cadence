@@ -21,6 +21,7 @@
 package dynamicconfig
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -2210,6 +2211,13 @@ const (
 	// Value type: string ["test-domain","test-domain2"]
 	// Default value: ""
 	ESAnalyzerWorkflowTypeMetricDomains
+	// FrontendRPSStrategy defines which kind of in-bound RPS ratelimiter will be used.
+	// KeyName: frontend.RPSStrategy
+	// Value types: string
+	// Default value: per-host
+	// Allowed values (see RPSStrategy): per-host, per-host-warm-global, global-warm-per-host, global
+	// Allowed filters: N/A
+	FrontendRPSStrategy
 
 	// LastStringKey must be the last one in this const group
 	LastStringKey
@@ -2732,6 +2740,38 @@ const (
 	AllIsolationGroups
 
 	LastListKey
+)
+
+// RPSStrategy defines values for the FrontendRPSStrategy dynamic config key.
+type RPSStrategy string
+
+// Validate checks the value of an RPSStrategy string.
+// If an error is returned, use the hard-coded default value as a fallback (likely either PerHost or Global).
+func (r RPSStrategy) Validate() error {
+	switch r {
+	case PerHost, PerHostWarmGlobal, GlobalWarmPerHost, Global:
+		return nil
+	}
+	return errors.New(fmt.Sprintf("unrecognized RPSStrategy value: %q", r))
+}
+
+const (
+	// PerHost uses only the per-host / old-style ratelimiter.
+	// This will completely disable global–limiting functionality.
+	PerHost RPSStrategy = "per-host"
+
+	// PerHostWarmGlobal uses the per-host ratelimiter to control traffic, but contributes and collects global load information.
+	// This is intended as a temporary state, for validating and smoothly migrating to/from the global ratelimiter.
+	PerHostWarmGlobal RPSStrategy = "per-host-warm-global"
+
+	// GlobalWarmPerHost uses the global ratelimiter, but keeps calling the per-host limiters to collect metrics
+	// on their behavior, and to warm their caches.
+	// This is intended as a temporary state, for validating and smoothly migrating to/from the global ratelimiter.
+	GlobalWarmPerHost RPSStrategy = "global-warm-per-host"
+
+	// Global uses only the global ratelimiter.
+	// Per-host ratelimiters already created may still exist in memory, but will not be used.
+	Global RPSStrategy = "global"
 )
 
 // DefaultIsolationGroupConfigStoreManagerGlobalMapping is the dynamic config value for isolation groups
@@ -4396,6 +4436,12 @@ var StringKeys = map[StringKey]DynamicString{
 		KeyName:      "worker.ESAnalyzerWorkflowTypeMetricDomains",
 		Description:  "ESAnalyzerWorkflowDurationWarnThresholds defines the domains we want to emit wf version metrics on",
 		DefaultValue: "",
+	},
+	FrontendRPSStrategy: DynamicString{
+		KeyName:     "frontend.RPSStrategy",
+		Description: "FrontendRPSStrategy defines which kind of in-bound RPS ratelimiter will be used.",
+		// Allowed values (see RPSStrategy): per-host, per-host-warm-global, global-warm-per-host, global
+		DefaultValue: string(PerHost),
 	},
 }
 

@@ -2249,6 +2249,19 @@ const (
 	// Default value: 10s (10*time.Second)
 	// Allowed filters: N/A
 	DomainFailoverRefreshInterval
+	// FrontendRPSGlobalInitBlocking defines the maximum amount of time to wait for loading a global
+	// ratelimiter's initial data from the network, when a new key is accessed.
+	//
+	// If this time is exceeded, a host-local limit will be used instead until the async load completes.
+	// This fallback limit may be less accurate if load is skewed between hosts.  If your load is
+	// relatively balanced this may be set to 0s to be entirely non-blocking, or use the PerHost RPSStrategy
+	// to disable global load balancing entirely.
+	//
+	//  - KeyName: frontend.RPSGlobalInitBlocking
+	//  - Value type: Duration
+	//  - Default value: 100ms
+	//  - Allowed filters: N/A
+	FrontendRPSGlobalInitBlocking
 
 	// MatchingLongPollExpirationInterval is the long poll expiration interval in the matching service
 	// KeyName: matching.longPollExpirationInterval
@@ -4476,6 +4489,11 @@ var DurationKeys = map[DurationKey]DynamicDuration{
 		KeyName:      "frontend.domainFailoverRefreshInterval",
 		Description:  "DomainFailoverRefreshInterval is the domain failover refresh timer",
 		DefaultValue: time.Second * 10,
+	},
+	FrontendRPSGlobalInitBlocking: DynamicDuration{
+		KeyName:      "frontend.RPSGlobalInitBlocking",
+		Description:  "FrontendRPSGlobalInitBlocking defines the maximum amount of time to wait for loading a global ratelimiter's initial data from the network, when a new key is accessed",
+		DefaultValue: 100 * time.Millisecond, // multiple inits may be occurring in this window, so it should be kept low.
 	},
 	MatchingLongPollExpirationInterval: DynamicDuration{
 		KeyName:      "matching.longPollExpirationInterval",

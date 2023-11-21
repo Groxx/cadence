@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/uber/cadence/common"
@@ -2756,34 +2757,47 @@ const (
 )
 
 // RPSStrategy defines values for the FrontendRPSStrategy dynamic config key.
+//
+// Values must be non-empty, and can optionally contain a ":" divider to support
+// both "use" and "use:shadow" configuring (all of which must not be an empty string).
+//
+// As a caution: RPSStrategy is intentionally Cadence-operator pluggable, so there IS NOT any
+// way to validate the contents beyond "not empty".
+//
+// Any hardcoded strategy strings are just for strategies implemented internally, not all possible ones.
 type RPSStrategy string
 
-// Validate checks the value of an RPSStrategy string.
-// If an error is returned, use the hard-coded default value as a fallback (likely either PerHost or Global).
-func (r RPSStrategy) Validate() error {
-	switch r {
-	case PerHost, PerHostWarmGlobal, GlobalWarmPerHost, Global:
-		return nil
+func (r RPSStrategy) Get() (use RPSStrategy, shadow RPSStrategy, err error) {
+	if r == "" {
+		return "", "", errors.New("RPSStrategy cannot be empty")
 	}
-	return errors.New(fmt.Sprintf("unrecognized RPSStrategy value: %q", r))
+	parts := strings.SplitN(string(r), ":", 2)
+	if len(parts) == 1 {
+		// if parts[0] == "": cannot be true, either string is empty (handled above) or it has a ":" and there are two parts
+		return RPSStrategy(parts[0]), "", nil
+	} else {
+		if parts[0] == "" || parts[1] == "" {
+			// not sure if this is possible tbh
+			return "", "", errors.New(fmt.Sprintf("RPSStrategy cannot have an empty part split by ':': %q -> %q and %q", r, parts[0], parts[1]))
+		}
+		return RPSStrategy(parts[1]), RPSStrategy(parts[2]), nil
+	}
 }
 
 const (
-	// PerHost uses only the per-host / old-style ratelimiter.
-	// This will completely disable global–limiting functionality.
+	// PerHost uses only the simplest per-host implementation (possibly divided by num of hosts in the ring).
+	//
+	// Using only this will completely disable any RPC-based limiting.
 	PerHost RPSStrategy = "per-host"
 
-	// PerHostWarmGlobal uses the per-host ratelimiter to control traffic, but contributes and collects global load information.
-	// This is intended as a temporary state, for validating and smoothly migrating to/from the global ratelimiter.
-	PerHostWarmGlobal RPSStrategy = "per-host-warm-global"
-
-	// GlobalWarmPerHost uses the global ratelimiter, but keeps calling the per-host limiters to collect metrics
-	// on their behavior, and to warm their caches.
-	// This is intended as a temporary state, for validating and smoothly migrating to/from the global ratelimiter.
-	GlobalWarmPerHost RPSStrategy = "global-warm-per-host"
-
-	// Global uses only the global ratelimiter.
-	// Per-host ratelimiters already created may still exist in memory, but will not be used.
+	// Global uses only the global ratelimiter.  See github.com/uber/cadence/common/quotas/global for details.
+	//
+	// Note that this does not wholly disable per-host ratelimiting on a semantic level, as that is used as a fallback
+	// when a global limit is not available either due to no global data existing yet, or FrontendRPSGlobalInitBlocking
+	// being exceeded.
+	//
+	// These ultimate-fallback per-host limiters are not kept warm, so when they are used they may lead to partially
+	// incorrect limiting during the brief window where they warm up (by default 100ms).
 	Global RPSStrategy = "global"
 )
 

@@ -557,6 +557,72 @@ func (mr *_MockClientRecorder) QueryWorkflow(
 	return mr.mock.ctrl.RecordCall(mr.mock, "QueryWorkflow", args...)
 }
 
+// RatelimitStartup responds to a RatelimitStartup call based on the mock expectations. This
+// call will fail if the mock does not expect this call. Use EXPECT to expect
+// a call to this function.
+//
+//	client.EXPECT().RatelimitStartup(gomock.Any(), ...).Return(...)
+//	... := client.RatelimitStartup(...)
+func (m *MockClient) RatelimitStartup(
+	ctx context.Context,
+	_Request *history.RatelimitStartupRequest,
+	opts ...yarpc.CallOption,
+) (success *history.RatelimitStartupResponse, err error) {
+
+	args := []interface{}{ctx, _Request}
+	for _, o := range opts {
+		args = append(args, o)
+	}
+	i := 0
+	ret := m.ctrl.Call(m, "RatelimitStartup", args...)
+	success, _ = ret[i].(*history.RatelimitStartupResponse)
+	i++
+	err, _ = ret[i].(error)
+	return
+}
+
+func (mr *_MockClientRecorder) RatelimitStartup(
+	ctx interface{},
+	_Request interface{},
+	opts ...interface{},
+) *gomock.Call {
+	args := append([]interface{}{ctx, _Request}, opts...)
+	return mr.mock.ctrl.RecordCall(mr.mock, "RatelimitStartup", args...)
+}
+
+// RatelimitUpdate responds to a RatelimitUpdate call based on the mock expectations. This
+// call will fail if the mock does not expect this call. Use EXPECT to expect
+// a call to this function.
+//
+//	client.EXPECT().RatelimitUpdate(gomock.Any(), ...).Return(...)
+//	... := client.RatelimitUpdate(...)
+func (m *MockClient) RatelimitUpdate(
+	ctx context.Context,
+	_Request *history.RatelimitUpdateRequest,
+	opts ...yarpc.CallOption,
+) (success *history.RatelimitUpdateResponse, err error) {
+
+	args := []interface{}{ctx, _Request}
+	for _, o := range opts {
+		args = append(args, o)
+	}
+	i := 0
+	ret := m.ctrl.Call(m, "RatelimitUpdate", args...)
+	success, _ = ret[i].(*history.RatelimitUpdateResponse)
+	i++
+	err, _ = ret[i].(error)
+	return
+}
+
+func (mr *_MockClientRecorder) RatelimitUpdate(
+	ctx interface{},
+	_Request interface{},
+	opts ...interface{},
+) *gomock.Call {
+	args := append([]interface{}{ctx, _Request}, opts...)
+	return mr.mock.ctrl.RecordCall(mr.mock, "RatelimitUpdate", args...)
+}
+
 // ReadDLQMessages responds to a ReadDLQMessages call based on the mock expectations. This
 // call will fail if the mock does not expect this call. Use EXPECT to expect
 // a call to this function.

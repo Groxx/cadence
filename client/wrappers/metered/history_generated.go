@@ -608,3 +608,31 @@ func (c *historyClient) TerminateWorkflowExecution(ctx context.Context, hp1 *typ
 	}
 	return err
 }
+
+func (c *metricClient) RatelimitStartup(ctx context.Context, peer string, request *types.RatelimitStartupRequest, opts ...yarpc.CallOption) (*types.RatelimitStartupResponse, error) {
+	c.metricsClient.IncCounter(metrics.HistoryClientRatelimitStartupScope, metrics.CadenceClientRequests)
+
+	sw := c.metricsClient.StartTimer(metrics.HistoryClientRatelimitStartupScope, metrics.CadenceClientLatency)
+	resp, err := c.client.RatelimitStartup(ctx, peer, request, opts...)
+	sw.Stop()
+
+	if err != nil {
+		c.metricsClient.IncCounter(metrics.HistoryClientRatelimitStartupScope, metrics.CadenceClientFailures)
+	}
+
+	return resp, err
+}
+
+func (c *metricClient) RatelimitUpdate(ctx context.Context, peer string, request *types.RatelimitUpdateRequest, opts ...yarpc.CallOption) (*types.RatelimitUpdateResponse, error) {
+	c.metricsClient.IncCounter(metrics.HistoryClientRatelimitUpdateScope, metrics.CadenceClientRequests)
+
+	sw := c.metricsClient.StartTimer(metrics.HistoryClientRatelimitUpdateScope, metrics.CadenceClientLatency)
+	resp, err := c.client.RatelimitUpdate(ctx, peer, request, opts...)
+	sw.Stop()
+
+	if err != nil {
+		c.metricsClient.IncCounter(metrics.HistoryClientRatelimitUpdateScope, metrics.CadenceClientFailures)
+	}
+
+	return resp, err
+}

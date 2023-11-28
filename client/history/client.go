@@ -1159,6 +1159,30 @@ func (c *clientImpl) GetFailoverInfo(
 	return c.client.GetFailoverInfo(ctx, request, append(opts, yarpc.WithShardKey(peer))...)
 }
 
+func (c *clientImpl) RatelimitStartup(ctx context.Context, peer string, request *types.RatelimitStartupRequest, opts ...yarpc.CallOption) (*types.RatelimitStartupResponse, error) {
+	var response *types.RatelimitStartupResponse
+	err := c.executeWithRedirect(ctx, peer, func(ctx context.Context, peer string) error {
+		ctx, cancel := c.createContext(ctx)
+		defer cancel()
+		var err error
+		response, err = c.client.RatelimitStartup(ctx, peer, request, opts...)
+		return err
+	})
+	return response, err
+}
+
+func (c *clientImpl) RatelimitUpdate(ctx context.Context, peer string, request *types.RatelimitUpdateRequest, opts ...yarpc.CallOption) (*types.RatelimitUpdateResponse, error) {
+	var response *types.RatelimitUpdateResponse
+	err := c.executeWithRedirect(ctx, peer, func(ctx context.Context, peer string) error {
+		ctx, cancel := c.createContext(ctx)
+		defer cancel()
+		var err error
+		response, err = c.client.RatelimitUpdate(ctx, peer, request, opts...)
+		return err
+	})
+	return response, err
+}
+
 func (c *clientImpl) createContext(parent context.Context) (context.Context, context.CancelFunc) {
 	if parent == nil {
 		return context.WithTimeout(context.Background(), c.timeout)

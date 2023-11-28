@@ -24,6 +24,7 @@ package uber.cadence.history.v1;
 
 option go_package = "github.com/uber/cadence/.gen/proto/history/v1;historyv1";
 
+import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
@@ -228,6 +229,9 @@ service HistoryAPI {
 
   // GetFailoverInfo returns information about on-going failover.
   rpc GetFailoverInfo(GetFailoverInfoRequest) returns(GetFailoverInfoResponse);
+
+  rpc RatelimitStartup(RatelimitStartupRequest) returns(RatelimitStartupResponse);
+  rpc RatelimitUpdate(RatelimitUpdateRequest) returns(RatelimitUpdateResponse);
 }
 
 
@@ -739,4 +743,36 @@ message GetFailoverInfoRequest {
 message GetFailoverInfoResponse {
     int32 completed_shard_count = 1;
     repeated int32 pending_shards = 2;
+}
+
+message RatelimitStartupRequest {
+  string caller = 1; // stable-per-process host identifier
+}
+
+message RatelimitUpdateRequest {
+  string caller = 1; // stable-per-process host identifier
+  google.protobuf.Duration last_updated = 2; // time of last push, as observed by caller
+
+  // ratelimit key -> load observed on this key
+  map<string, RatelimitLoad> load = 3;
+}
+
+message RatelimitStartupResponse {
+  map<string, RatelimitAdjustment> adjust = 3; // ratelimit key -> adjustment to make to this key
+}
+
+message RatelimitUpdateResponse {
+  // ratelimit key -> adjustment to make to this key.
+  // the keys returned are wholly controlled by the implementation,
+  // no RPC-level semantics for "exists" vs "does not exist" are implied,
+  // and the keys are not at all required to match the request's keys.
+  map<string, RatelimitAdjustment> adjust = 3;
+}
+
+message RatelimitLoad {
+  google.protobuf.Any data = 1; // ratelimit-plugin-specified data
+}
+
+message RatelimitAdjustment {
+  google.protobuf.Any data = 1; // ratelimit-plugin-specified data
 }

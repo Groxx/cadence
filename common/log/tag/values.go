@@ -408,6 +408,8 @@ var (
 	HistoryClientOperationRespondActivityTaskFailed         = clientOperation("history-respond-activity-task-failed")
 	HistoryClientOperationRespondDecisionTaskCompleted      = clientOperation("history-respond-decision-task-completed")
 	HistoryClientOperationRespondDecisionTaskFailed         = clientOperation("history-respond-decision-task-failed")
+	HistoryClientOperationRatelimitStartup                  = clientOperation("history-ratelimit-startup")
+	HistoryClientOperationRatelimitUpdate                   = clientOperation("history-ratelimit-update")
 
 	MatchingClientOperationAddActivityTask           = clientOperation("matching-add-activity-task")
 	MatchingClientOperationAddDecisionTask           = clientOperation("matching-add-decision-task")

@@ -21,6 +21,11 @@
 package proto
 
 import (
+	"time"
+
+	gogo "github.com/gogo/protobuf/types"
+	"google.golang.org/protobuf/types/known/anypb"
+
 	apiv1 "github.com/uber/cadence-idl/go/proto/api/v1"
 
 	historyv1 "github.com/uber/cadence/.gen/proto/history/v1"
@@ -1582,4 +1587,75 @@ func ToHistoryResetStickyTaskListResponse(t *historyv1.ResetStickyTaskListRespon
 		return nil
 	}
 	return &types.HistoryResetStickyTaskListResponse{}
+}
+
+func FromHistoryRatelimitStartupRequest(t *types.RatelimitStartupRequest) *historyv1.RatelimitStartupRequest {
+	if t == nil {
+		return nil
+	}
+	return &historyv1.RatelimitStartupRequest{
+		Caller: t.Caller,
+	}
+}
+
+func FromHistoryRatelimitUpdateRequest(t *types.RatelimitUpdateRequest) *historyv1.RatelimitUpdateRequest {
+	if t == nil {
+		return nil
+	}
+	return &historyv1.RatelimitUpdateRequest{
+		Caller:      t.Caller,
+		LastUpdated: fromDuration(t.LastUpdated),
+		Load:        fromHistoryRatelimitLoad(t.Load),
+	}
+}
+
+func fromHistoryRatelimitLoad(load map[string]types.RatelimitLoad) map[string]*historyv1.RatelimitLoad {
+	result := make(map[string]*historyv1.RatelimitLoad, len(load))
+	for k, v := range load {
+		result[k] = &historyv1.RatelimitLoad{
+			Data: &anypb.Any{
+				TypeUrl: v.Any.Type,
+				Value:   v.Any.Data,
+			},
+		}
+	}
+	return result
+}
+
+func fromDuration(dur time.Duration) *gogo.Duration {
+	return &gogo.Duration{
+		Seconds: int64(dur.Seconds()),
+		Nanos:   int32(dur.Nanoseconds()),
+	}
+}
+
+func ToHistoryRatelimitStartupResponse(t *historyv1.RatelimitStartupResponse) *types.RatelimitStartupResponse {
+	if t == nil {
+		return nil
+	}
+	return &types.RatelimitStartupResponse{
+		Adjust: toHistoryRatelimitAdjustment(t.Adjust),
+	}
+}
+
+func ToHistoryRatelimitUpdateResponse(t *historyv1.RatelimitUpdateResponse) *types.RatelimitUpdateResponse {
+	if t == nil {
+		return nil
+	}
+	return &types.RatelimitUpdateResponse{
+		Adjust: toHistoryRatelimitAdjustment(t.Adjust),
+	}
+}
+
+func toHistoryRatelimitAdjustment(load map[string]*historyv1.RatelimitAdjustment) map[string]types.RatelimitAdjustment {
+	result := make(map[string]types.RatelimitAdjustment, len(load))
+	for k, v := range load {
+		result[k] = types.RatelimitAdjustment{
+			Any: types.Any{
+				Type: v.Data.GetTypeUrl(),
+				Data: v.Data.GetValue(),
+			},
+		}
+	}
+	return result
 }

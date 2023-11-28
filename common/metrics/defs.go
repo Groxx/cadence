@@ -36,7 +36,7 @@ type (
 
 	// metricDefinition contains the definition for a metric
 	metricDefinition struct {
-		//nolint
+		// nolint
 		metricType       MetricType    // metric type
 		metricName       MetricName    // metric name
 		metricRollupName MetricName    // optional. if non-empty, this name must be used for rolled-up version of this metric
@@ -400,7 +400,8 @@ const (
 	HistoryClientGetReplicationMessagesScope
 	// HistoryClientWfIDCacheScope tracks workflow ID cache metrics
 	HistoryClientWfIDCacheScope
-
+	HistoryClientRatelimitStartupScope
+	HistoryClientRatelimitUpdateScope
 	// MatchingClientPollForDecisionTaskScope tracks RPC calls to matching service
 	MatchingClientPollForDecisionTaskScope
 	// MatchingClientPollForActivityTaskScope tracks RPC calls to matching service

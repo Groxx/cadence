@@ -84,6 +84,42 @@ func (pr PeerResolver) FromHostAddress(hostAddress string) (string, error) {
 	return peer, common.ToServiceTransientError(err)
 }
 
+// FromLoadBalancedRatelimit partitions the ratelimit keys into map[host][]all_limits
+func (pr PeerResolver) SplitFromLoadBalancedRatelimit(ratelimits []string) (map[string][]string, error) {
+	hosts, err := pr.resolver.Members(service.History)
+	if err != nil {
+		// TODO: wrap with error cause when it's safe to do so
+		return nil, common.ToServiceTransientError(err)
+	}
+
+	results := make(map[string][]string, len(hosts))
+	initialCapacity := len(ratelimits) / len(hosts)
+	initialCapacity += initialCapacity / 10 // small buffer to reduce copies
+
+	for _, r := range ratelimits {
+		// figure out the destination for this ratelimit
+		host, err := pr.resolver.LookupByAddress(service.History, r)
+		if err != nil {
+			// TODO: wrap with error cause when it's safe to do so
+			return nil, common.ToServiceTransientError(err)
+		}
+		peer, err := host.GetNamedAddress(pr.namedPort)
+		if err != nil {
+			// TODO: wrap with error cause when it's safe to do so
+			return nil, common.ToServiceTransientError(err)
+		}
+
+		// add to the peer's partition
+		current := results[peer]
+		if len(current) == 0 {
+			current = make([]string, 0, initialCapacity)
+		}
+		current = append(current, r)
+		results[peer] = current
+	}
+	return results, nil
+}
+
 // GetAllPeers returns all history service peers in the cluster ring.
 func (pr PeerResolver) GetAllPeers() ([]string, error) {
 	hosts, err := pr.resolver.Members(service.History)

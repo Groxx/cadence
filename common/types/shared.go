@@ -8187,6 +8187,29 @@ type StickyWorkerUnavailableError struct {
 	Message string `json:"message,required"`
 }
 
+type RatelimitStartupRequest struct {
+	Caller string
+}
+type RatelimitUpdateRequest struct {
+	Caller      string
+	LastUpdated time.Duration
+	Load        map[string]RatelimitLoad
+}
+type RatelimitStartupResponse struct {
+	Adjust map[string]RatelimitAdjustment
+}
+type RatelimitUpdateResponse struct {
+	Adjust map[string]RatelimitAdjustment
+}
+
+type RatelimitLoad struct {
+	Any Any `json:"any,omitempty"`
+}
+
+type RatelimitAdjustment struct {
+	Any Any `json:"any,omitempty"`
+}
+
 // SerializeRequest Serialize an arbitrary request for logging
 // pass in a pointer as a parameter to save space
 func SerializeRequest(request interface{}) (string, error) {

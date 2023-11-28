@@ -24,6 +24,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/uber/cadence/common/membership"
+
 	"go.uber.org/yarpc"
 
 	"github.com/uber/cadence/common/types"
@@ -42,6 +44,7 @@ type clientImpl struct {
 	timeout         time.Duration
 	longPollTimeout time.Duration
 	client          Client
+	resolver        membership.Resolver // TODO: hmmmmm.  substantially different?  use history instead, as it already has a peer?
 }
 
 // NewClient creates a new frontend service TChannel client

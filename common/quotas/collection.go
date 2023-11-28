@@ -26,7 +26,7 @@ import "sync"
 type Collection struct {
 	mu       sync.RWMutex
 	factory  LimiterFactory
-	limiters map[string]Limiter
+	limiters map[string]Limiter // TODO: change to an init-limiter and use a sync-once to init each key, rather than locking the collection
 }
 
 // NewCollection create a new limiter collection.

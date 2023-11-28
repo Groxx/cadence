@@ -198,7 +198,7 @@ $(BIN)/gci: internal/tools/go.mod
 $(BIN)/goimports: internal/tools/go.mod
 	$(call go_build_tool,golang.org/x/tools/cmd/goimports)
 
-$(BIN)/gowrap: go.mod
+$(BIN)/gowrap: go.mod # TODO: fix this
 	$(call go_build_tool,github.com/hexdigest/gowrap/cmd/gowrap)
 
 $(BIN)/revive: internal/tools/go.mod

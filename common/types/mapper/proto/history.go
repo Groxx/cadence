@@ -24,7 +24,6 @@ import (
 	"time"
 
 	gogo "github.com/gogo/protobuf/types"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	apiv1 "github.com/uber/cadence-idl/go/proto/api/v1"
 
@@ -1589,6 +1588,41 @@ func ToHistoryResetStickyTaskListResponse(t *historyv1.ResetStickyTaskListRespon
 	return &types.HistoryResetStickyTaskListResponse{}
 }
 
+func ToHistoryRatelimitStartupRequest(t *historyv1.RatelimitStartupRequest) *types.RatelimitStartupRequest {
+	if t == nil {
+		return nil
+	}
+	return &types.RatelimitStartupRequest{
+		Caller: t.Caller,
+	}
+}
+
+func ToHistoryRatelimitUpdateRequest(t *historyv1.RatelimitUpdateRequest) *types.RatelimitUpdateRequest {
+	if t == nil {
+		return nil
+	}
+
+	return &types.RatelimitUpdateRequest{
+		Caller:      t.Caller,
+		LastUpdated: toDuration(t.LastUpdated),
+		Load:        toHistoryRatelimitLoad(t.Load),
+	}
+}
+
+func toHistoryRatelimitLoad(load map[string]*historyv1.RatelimitLoad) map[string]types.RatelimitLoad {
+	result := make(map[string]types.RatelimitLoad, len(load))
+	for k, v := range load {
+		result[k] = types.RatelimitLoad{
+			Any: types.Any{
+				// nil==empty, same as `result[k] = {}`
+				Type: v.GetData().GetTypeUrl(),
+				Data: v.GetData().GetValue(),
+			},
+		}
+	}
+	return result
+}
+
 func FromHistoryRatelimitStartupRequest(t *types.RatelimitStartupRequest) *historyv1.RatelimitStartupRequest {
 	if t == nil {
 		return nil
@@ -1613,7 +1647,7 @@ func fromHistoryRatelimitLoad(load map[string]types.RatelimitLoad) map[string]*h
 	result := make(map[string]*historyv1.RatelimitLoad, len(load))
 	for k, v := range load {
 		result[k] = &historyv1.RatelimitLoad{
-			Data: &anypb.Any{
+			Data: &gogo.Any{
 				TypeUrl: v.Any.Type,
 				Value:   v.Any.Data,
 			},
@@ -1622,10 +1656,18 @@ func fromHistoryRatelimitLoad(load map[string]types.RatelimitLoad) map[string]*h
 	return result
 }
 
+func toDuration(dur *gogo.Duration) time.Duration {
+	if dur == nil {
+		return 0
+	}
+	return (time.Duration(dur.Seconds) * time.Second) +
+		(time.Duration(dur.Nanos) * time.Nanosecond)
+}
+
 func fromDuration(dur time.Duration) *gogo.Duration {
 	return &gogo.Duration{
 		Seconds: int64(dur.Seconds()),
-		Nanos:   int32(dur.Nanoseconds()),
+		Nanos:   int32(dur % time.Second), // dur.Nanoseconds is just int64(dur), does not help
 	}
 }
 
@@ -1647,9 +1689,40 @@ func ToHistoryRatelimitUpdateResponse(t *historyv1.RatelimitUpdateResponse) *typ
 	}
 }
 
-func toHistoryRatelimitAdjustment(load map[string]*historyv1.RatelimitAdjustment) map[string]types.RatelimitAdjustment {
-	result := make(map[string]types.RatelimitAdjustment, len(load))
-	for k, v := range load {
+func FromHistoryRatelimitStartupResponse(t *types.RatelimitStartupResponse) *historyv1.RatelimitStartupResponse {
+	if t == nil {
+		return nil
+	}
+	return &historyv1.RatelimitStartupResponse{
+		Adjust: fromHistoryRatelimitAdjustment(t.Adjust),
+	}
+}
+
+func FromHistoryRatelimitUpdateResponse(t *types.RatelimitUpdateResponse) *historyv1.RatelimitUpdateResponse {
+	if t == nil {
+		return nil
+	}
+	return &historyv1.RatelimitUpdateResponse{
+		Adjust: fromHistoryRatelimitAdjustment(t.Adjust),
+	}
+}
+
+func fromHistoryRatelimitAdjustment(adjust map[string]types.RatelimitAdjustment) map[string]*historyv1.RatelimitAdjustment {
+	result := make(map[string]*historyv1.RatelimitAdjustment, len(adjust))
+	for k, v := range adjust {
+		result[k] = &historyv1.RatelimitAdjustment{
+			Data: &gogo.Any{
+				TypeUrl: v.Any.Type,
+				Value:   v.Any.Data,
+			},
+		}
+	}
+	return result
+}
+
+func toHistoryRatelimitAdjustment(adjust map[string]*historyv1.RatelimitAdjustment) map[string]types.RatelimitAdjustment {
+	result := make(map[string]types.RatelimitAdjustment, len(adjust))
+	for k, v := range adjust {
 		result[k] = types.RatelimitAdjustment{
 			Any: types.Any{
 				Type: v.Data.GetTypeUrl(),

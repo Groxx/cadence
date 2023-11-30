@@ -2053,6 +2053,45 @@ func (h *handlerImpl) GetFailoverInfo(
 	return resp, nil
 }
 
+func (h *handlerImpl) RatelimitStartup(ctx context.Context, request *types.RatelimitStartupRequest) (resp *types.RatelimitStartupResponse, retError error) {
+	// bleh.  this stuff should really be in a generated wrapper, it's highly regular
+	defer func() { log.CapturePanic(recover(), h.GetLogger(), &retError) }()
+	h.startWG.Wait()
+
+	scope, sw := h.startRequestProfile(ctx, metrics.HistoryRatelimitStartupScope)
+	defer sw.Stop()
+
+	if h.isShuttingDown() {
+		return nil, errShuttingDown
+	}
+
+	var err error
+	// TODO: pass through to aggregator impl
+	if err != nil {
+		return nil, h.error(err, scope, "", "", "")
+	}
+	return resp, nil
+}
+
+func (h *handlerImpl) RatelimitUpdate(ctx context.Context, request *types.RatelimitUpdateRequest) (resp *types.RatelimitUpdateResponse, retError error) {
+	defer func() { log.CapturePanic(recover(), h.GetLogger(), &retError) }()
+	h.startWG.Wait()
+
+	scope, sw := h.startRequestProfile(ctx, metrics.HistoryRatelimitUpdateScope)
+	defer sw.Stop()
+
+	if h.isShuttingDown() {
+		return nil, errShuttingDown
+	}
+
+	var err error
+	// TODO: pass through to aggregator impl
+	if err != nil {
+		return nil, h.error(err, scope, "", "", "")
+	}
+	return resp, nil
+}
+
 // convertError is a helper method to convert ShardOwnershipLostError from persistence layer returned by various
 // HistoryEngine API calls to ShardOwnershipLost error return by HistoryService for client to be redirected to the
 // correct shard.

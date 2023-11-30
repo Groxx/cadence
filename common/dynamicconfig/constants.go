@@ -2775,13 +2775,12 @@ func (r RPSStrategy) Get() (use RPSStrategy, shadow RPSStrategy, err error) {
 	if len(parts) == 1 {
 		// if parts[0] == "": cannot be true, either string is empty (handled above) or it has a ":" and there are two parts
 		return RPSStrategy(parts[0]), "", nil
-	} else {
-		if parts[0] == "" || parts[1] == "" {
-			// not sure if this is possible tbh
-			return "", "", errors.New(fmt.Sprintf("RPSStrategy cannot have an empty part split by ':': %q -> %q and %q", r, parts[0], parts[1]))
-		}
-		return RPSStrategy(parts[1]), RPSStrategy(parts[2]), nil
 	}
+
+	if parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("RPSStrategy cannot have an empty part split by ':': %q -> %q and %q: %w", r, parts[0], parts[1], err)
+	}
+	return RPSStrategy(parts[1]), RPSStrategy(parts[2]), nil
 }
 
 const (

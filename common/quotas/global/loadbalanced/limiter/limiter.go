@@ -26,12 +26,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand"
-	"sync"
 	"time"
 
-	"github.com/google/uuid"
-	"golang.org/x/time/rate"
+	"github.com/uber/cadence/common/dynamicconfig"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/errors"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/limiter/limit"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/limiter/typedmap"
 
 	"github.com/uber/cadence/common/quotas"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/rpc"
@@ -51,77 +51,57 @@ type (
 	// This can be plugged into [github.com/uber/cadence/common/quotas/global] as a
 	// strategy.
 	BalancedCollection struct {
-		// TODO: per key, track and report usage, fall back on lack of info, etc
+		client     rpc.Client
+		updateRate dynamicconfig.DurationPropertyFn
+		fallback   *quotas.Collection
 
 		// usage info, held in a sync.Map because it matches one of its documented "good fit" cases:
 		// write once + read many times per key.
-		usage *TypedMap[string, *BalancedLimit]
+		usage *typedmap.TypedMap[string, *limit.BalancedLimit]
 
-		updates chan update
-
-		// fallback is used for keys that are believed to be unhealthy.
-		// no attempt is made to migrate usage data between fallback and balanced,
-		// so limits may briefly be exceeded due to an empty ratelimit.
-		fallback *quotas.Collection
-
-		client rpc.Client
-
+		// lifecycle ctx, used for background requests
+		ctx     context.Context
+		cancel  func()
 		stopped chan struct{}
-	}
-
-	update struct {
-		key string
-		rps float64
-	}
-
-	BalancedLimit struct {
-		sync.Mutex // all access requires holding the lock
-
-		status string // initializing, updating, failing, etc.  see if we have anything.
-
-		// TODO: usage data cannot be gathered from rate.Limiter, sadly.  so we need to gather it separately.
-		// or find a fork maybe.
-		usage *usage
-
-		limit *rate.Limiter // local-only limiter based on remote data
-
-		lastCollected time.Time // zero if no report sent yet, used to normalize in the common hosts
-		lastUpdated   time.Time // last update time, never zero
-	}
-
-	// usage is a simple usage-tracking mechanism for limiting hosts.
-	//
-	// all it cares about is total since last report.  no attempt is made to address
-	// abnormal spikes within report times, widely-varying behavior across reports,
-	// etc - that kind of logic is left to the common hosts, not the limiting ones.
-	usage struct {
-		rps     float64 // intended ratelimit
-		used    int64   // atomic, reset to zero when a report is gathered
-		refused int64   // atomic, reset to zero when a report is gathered
 	}
 )
 
-func NewBalanced() *BalancedCollection {
-	contents, err := NewTypedMap(func(key string) *BalancedLimit {
-		instance := &BalancedLimit{
-			status: "new",
-			usage:  &usage{},
-			limit:  rate.NewLimiter(1, 1), // will be adjusted
-		}
+// NewBalanced
+//
+// The fallback arg is used for keys that are believed to be unhealthy, but it
+// will be collected for every limit to ensure an immediate response is possible.
+//
+// No attempt is made to migrate usage data between the fallback and balanced,
+// so limits may briefly be exceeded when switching (~1s with current code which
+// always has burst==rps).
+func NewBalanced(client rpc.Client, fallback *quotas.Collection, updateRate dynamicconfig.DurationPropertyFn) *BalancedCollection {
+	contents, err := typedmap.New(func(key string) *limit.BalancedLimit {
+		instance := limit.New(fallback.For(key))
 		return instance
 	})
 	if err != nil {
 		panic(fmt.Sprintf("should be impossible: bad collection type: %v", err))
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &BalancedCollection{
-		usage:    contents,
-		updates:  make(chan update, 100),
-		fallback: nil,
-		stopped:  make(chan struct{}),
+		usage:      contents,
+		fallback:   nil,
+		stopped:    make(chan struct{}),
+		ctx:        ctx,
+		cancel:     cancel,
+		client:     client,
+		updateRate: updateRate,
 	}
 }
 
-func (b *BalancedCollection) Start(ctx context.Context) {
+// Start the collection's background updater, and begin warming the cache.
+//
+// This will block until the ctx is canceled or the initial warm-up request
+// completes, but it does not shut down if those times are exceeded, so set
+// a reasonable blocking-timeout for startup.
+//
+// To stop, call Stop.
+func (b *BalancedCollection) Start(startCtx context.Context) {
 	updater, warmup := make(chan struct{}), make(chan struct{})
 	// wait for sub-goroutines when stopping
 	go func() {
@@ -130,27 +110,41 @@ func (b *BalancedCollection) Start(ctx context.Context) {
 		close(b.stopped)
 	}()
 
-	host := rpc.Host(uuid.New().String())
-
 	// TODO: kick off a client.Startup request
 	go func() {
 		defer close(warmup)
 
+		ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second) // TODO: configurable
 		err := b.client.Startup(ctx, func(load rpc.RetLoad, err error) {
 			if err != nil {
-				// TODO: probably wrong, but it's something
-				for k, v := range load.Allow {
-					if v < 0 {
-						// error loading this key, do something
-					} else {
-						b.adjust(ctx, k, float64(v))
-					}
+				// log, particularly if is-deserialization
+				if errors.IsDeserializationError(err) {
+					// major bug
+					// TODO: be smarter
+					log.Fatal(err)
+				} else if errors.IsRPCError(err) {
+					// expected, yolo?
+				} else {
+					// unexpected!
+					// TODO: be smarter
+					log.Fatal(err)
+				}
+			}
+
+			// TODO: probably wrong, but it's something
+			for k, v := range load.Allow {
+				if v < 0 {
+					// error loading this key?, do something
+				} else {
+					b.usage.Load(k).Update(float64(v))
 				}
 			}
 		})
+		cancel()
+
 		if err != nil {
-			// TODO: log
-			panic(err)
+			// TODO: log or fail startup, this should only be a dev error / incorrect types in serialization.
+			log.Fatal(err)
 		}
 	}()
 
@@ -161,12 +155,12 @@ func (b *BalancedCollection) Start(ctx context.Context) {
 		// wait for warmup for simplicity, so interleaved updates are not possible
 		select {
 		case <-warmup:
-		case <-ctx.Done():
+		case <-b.ctx.Done():
 			return // shutting down, do nothing
 		}
 
-		const updatePeriod time.Duration = 10 * time.Second // TODO: configurable
-		tick := time.NewTicker(updatePeriod)
+		tickRate := b.updateRate()
+		tick := time.NewTicker(tickRate)
 		defer tick.Stop()
 
 		last := time.Now()
@@ -176,6 +170,13 @@ func (b *BalancedCollection) Start(ctx context.Context) {
 			// which is probably preferred - it ensures more regular updates, rather than
 			// trying to reduce calls
 			case <-tick.C:
+				// update tick-rate if it changed
+				newTickRate := b.updateRate()
+				if tickRate != newTickRate {
+					tickRate = newTickRate
+					tick.Reset(newTickRate)
+				}
+
 				// len is an estimate and more may be added while iterating.
 				// avoid a costly re-alloc as nums are expected to be large-ish,
 				// add 10% more space.
@@ -187,146 +188,109 @@ func (b *BalancedCollection) Start(ctx context.Context) {
 				capacity += capacity / 10
 				all := make(map[string]rpc.Load, capacity)
 
-				now := time.Now() // TODO: injectable
-				b.usage.Range(func(k string, v *BalancedLimit) bool {
+				now := time.Now() // TODO: injectable for tests?
+				b.usage.Range(func(k string, v *limit.BalancedLimit) bool {
+					used, refused, usingFallback := v.Collect()
+					_ = usingFallback // TODO: interesting for metrics
 					all[k] = rpc.Load{
-						Allowed:  v.usage.used,
-						Rejected: v.usage.refused,
+						Allowed:  used,
+						Rejected: refused,
 					}
-					v.lastCollected = now
 					return true
 				})
 
-				// push to common hosts
-				// leave parallelizing / etc to the client?
-				err := b.client.Update(ctx, rpc.PushLoad{
-					Host:   host,
-					Period: now.Sub(last),
-					Load:   all,
-				}, func(load rpc.RetLoad, err error) {
+				// push to common hosts.
+				// client parallelizes and calls callback as many times as there are hosts to contact,
+				// and returns after all are complete.
+				ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second) // TODO: configurable
+				err := b.client.Update(ctx, now.Sub(last), all, func(request map[string]rpc.Load, load rpc.RetLoad, err error) {
 					if err != nil {
-						// TODO: stuff?
-						return
+						// log, particularly if is-deserialization
+						if errors.IsDeserializationError(err) {
+							// major bug
+							// TODO: be smarter
+							log.Fatal(err)
+						} else if errors.IsRPCError(err) {
+							// largely expected, yolo?
+						} else {
+							// unexpected!
+							// TODO: be smarter
+							log.Fatal(err)
+						}
 					}
+
 					for k, v := range load.Allow {
 						if v < 0 {
 							// error loading this key, do something
+							b.usage.Load(k).FailedUpdate()
 						} else {
-							b.adjust(ctx, k, float64(v))
+							b.usage.Load(k).Update(float64(v))
 						}
 					}
+
+					// mark all non-returned limits as failures.
+					// TODO: push this to to something pluggable?  better semantics should be possible
+					for k := range request {
+						if _, ok := load.Allow[k]; ok {
+							// handled above
+							continue
+						}
+
+						// requested but not returned, bump the fallback fuse
+						b.usage.Load(k).FailedUpdate()
+					}
 				})
+				cancel()
 
 				if err != nil {
-					// TODO: log
+					for k := range all {
+						// data requested but no request performed, bump the fallback fuse.
+						// if a response is loaded successfully, it'll resume using the fancy limit.
+						b.usage.Load(k).FailedUpdate()
+					}
+
+					// log, particularly if is-deserialization
+					if errors.IsDeserializationError(err) {
+						// major bug
+						// TODO: be smarter
+						log.Fatal(err)
+					} else if errors.IsRPCError(err) {
+						// unexpected when healthy and pretty bad since the whole attempt failed
+						// last-updated time is now incorrect, but... eh, seems harmless.
+					} else {
+						// unexpected!
+						// TODO: be smarter
+						log.Fatal(err)
+					}
+				}
+
+				if err != nil {
+					// TODO: log, this should only be a dev error / incorrect types in serialization.
 					log.Fatal(err)
 				}
 
 				// and loop
 				last = now
-			case <-ctx.Done():
+			case <-b.ctx.Done():
 				return
 			}
 		}
 	}()
+
+	// wait for warmup until ctx expires, but everything continues if that
+	// time is passed.
+	select {
+	case <-startCtx.Done(): // startup timed out
+	case <-warmup: // startup worked
+	}
 }
 
 func (b *BalancedCollection) Stop(ctx context.Context) error {
+	b.cancel()
 	select {
 	case err := <-ctx.Done():
 		return fmt.Errorf("timed out while stopping: %w", err)
 	case <-b.stopped:
 		return nil
 	}
-}
-
-func (b *BalancedCollection) allow(key string) (allowed bool) {
-	val := b.usage.Load(key)
-	val.Lock()
-	defer val.Unlock()
-
-	allowed = val.limit.Allow()
-	if allowed {
-		val.usage.used++
-	} else {
-		val.usage.refused++
-	}
-	return allowed
-}
-
-func (b *BalancedCollection) adjust(ctx context.Context, key string, rps float64) {
-	val := b.usage.Load(key)
-	val.Lock()
-	defer val.Unlock()
-	val.init_locked(ctx, func(rps float64) {
-		select {
-		case b.updates <- update{key: key, rps: rps}: // pushed to update queue
-		default: // buffer exceeded, drop the update and alert
-			// TODO: metrics, this is risky.  >100 pending updates blocked on init.
-		}
-	})
-
-	val.lastUpdated = time.Now() // always update, even if load is unchanged
-	if val.limit.Limit() == rate.Limit(rps) {
-		return
-	}
-	val.limit.SetLimit(rate.Limit(rps))
-	val.limit.SetBurst(int(rps))
-	val.usage.rps = rps
-}
-
-// each calls the underlying [sync.Map.Range] (i.e. identical semantics), and
-// holds the *BalancedLimit lock during the callback.
-//
-// The *BalancedLimit MUST NOT be retained beyond the callback's scope.
-func (b *BalancedCollection) each(f func(key string, limit *BalancedLimit) bool) {
-	b.usage.Range(func(k string, v *BalancedLimit) bool {
-		v.Lock()
-		defer v.Unlock()
-		return f(k, v)
-	})
-}
-
-// init_locked will perform one-time init, e.g. to load the initial value of a limiter.
-// the lock must be held while this is called.
-func (b *BalancedLimit) init_locked(ctx context.Context, async func(rps float64)) {
-	if b.status != "" {
-		return
-	}
-	b.status = "initializing" // one-time init occurring
-
-	initialized := make(chan float64)
-	go func() {
-		defer close(initialized) // failures and timeouts lead to zero, treated as uninitialized
-
-		// TODO: rpc init
-		select {
-		case <-time.After(time.Duration(rand.Intn(200)) * time.Millisecond):
-			select {
-			case initialized <- 5:
-			// sync update to still-waiting init, nothing left to do
-			default:
-				// caller went away, update async to avoid deadlock
-				async(5)
-			}
-		case <-ctx.Done():
-		}
-	}()
-
-	t := time.NewTimer(100 * time.Millisecond) // TODO: configurable
-	defer t.Stop()
-
-	rps, read := float64(0), false
-	select {
-	case <-t.C:
-	case rps, read = <-initialized:
-	}
-
-	if read && rps > 0 {
-		// fully initialized, nothing to do
-		return
-	}
-
-	// pending, use fallback limit
-	// TODO: update limits
 }

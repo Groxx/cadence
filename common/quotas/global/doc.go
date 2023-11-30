@@ -62,10 +62,9 @@ package global
 
 import (
 	"fmt"
-	// for docs
+
 	"github.com/uber/cadence/common/dynamicconfig"
 	"github.com/uber/cadence/common/quotas"
-	_ "github.com/uber/cadence/common/quotas"
 )
 
 // TODO: naaaaming

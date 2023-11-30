@@ -255,3 +255,13 @@ func (g GRPCHandler) TerminateWorkflowExecution(ctx context.Context, request *hi
 	err := g.h.TerminateWorkflowExecution(ctx, proto.ToHistoryTerminateWorkflowExecutionRequest(request))
 	return &historyv1.TerminateWorkflowExecutionResponse{}, proto.FromError(err)
 }
+
+func (g grpcHandler) RatelimitStartup(ctx context.Context, request *historyv1.RatelimitStartupRequest) (*historyv1.RatelimitStartupResponse, error) {
+	response, err := g.h.RatelimitStartup(ctx, proto.ToHistoryRatelimitStartupRequest(request))
+	return proto.FromHistoryRatelimitStartupResponse(response), proto.FromError(err)
+}
+
+func (g grpcHandler) RatelimitUpdate(ctx context.Context, request *historyv1.RatelimitUpdateRequest) (*historyv1.RatelimitUpdateResponse, error) {
+	response, err := g.h.RatelimitUpdate(ctx, proto.ToHistoryRatelimitUpdateRequest(request))
+	return proto.FromHistoryRatelimitUpdateResponse(response), proto.FromError(err)
+}

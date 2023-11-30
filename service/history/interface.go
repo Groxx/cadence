@@ -35,9 +35,9 @@ import (
 type Handler interface {
 	// Do not use embeded methods, otherwise, we got the following error from gowrap
 	// and we only get this error from history/interface.go, not sure why
-	//failed to parse interface declaration: Daemon: target declaration not found
-	//service/history/interface.go:22: running "gowrap": exit status 1
-	//common.Daemon
+	// failed to parse interface declaration: Daemon: target declaration not found
+	// service/history/interface.go:22: running "gowrap": exit status 1
+	// common.Daemon
 	Start()
 	Stop()
 
@@ -86,4 +86,6 @@ type Handler interface {
 	SyncShardStatus(context.Context, *types.SyncShardStatusRequest) error
 	TerminateWorkflowExecution(context.Context, *types.HistoryTerminateWorkflowExecutionRequest) error
 	GetFailoverInfo(context.Context, *types.GetFailoverInfoRequest) (*types.GetFailoverInfoResponse, error)
+	RatelimitStartup(context.Context, *types.RatelimitStartupRequest) (*types.RatelimitStartupResponse, error)
+	RatelimitUpdate(context.Context, *types.RatelimitUpdateRequest) (*types.RatelimitUpdateResponse, error)
 }

@@ -1084,6 +1084,10 @@ const (
 	HistoryRespondCrossClusterTasksCompletedScope
 	// HistoryGetFailoverInfoScope tracks HistoryGetFailoverInfo API calls received by service
 	HistoryGetFailoverInfoScope
+	// HistoryRatelimitStartupScope tracks RatelimitStartup API calls received by service
+	HistoryRatelimitStartupScope
+	// HistoryRatelimitUpdateScope tracks RatelimitUpdate API calls received by service
+	HistoryRatelimitUpdateScope
 	// TaskPriorityAssignerScope is the scope used by all metric emitted by task priority assigner
 	TaskPriorityAssignerScope
 	// TransferQueueProcessorScope is the scope used by all metric emitted by transfer queue processor
@@ -1829,6 +1833,8 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		HistoryGetCrossClusterTasksScope:                                {operation: "GetCrossClusterTasks"},
 		HistoryRespondCrossClusterTasksCompletedScope:                   {operation: "RespondCrossClusterTasksCompleted"},
 		HistoryGetFailoverInfoScope:                                     {operation: "GetFailoverInfo"},
+		HistoryRatelimitStartupScope:                                    {operation: "RatelimitStartup"},
+		HistoryRatelimitUpdateScope:                                     {operation: "RatelimitUpdate"},
 		TaskPriorityAssignerScope:                                       {operation: "TaskPriorityAssigner"},
 		TransferQueueProcessorScope:                                     {operation: "TransferQueueProcessor"},
 		TransferActiveQueueProcessorScope:                               {operation: "TransferActiveQueueProcessor"},

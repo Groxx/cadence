@@ -1382,6 +1382,40 @@ func FromHistoryRatelimitUpdateRequest(t *types.RatelimitUpdateRequest) *history
 		// TODO
 	}
 }
+func ToHistoryRatelimitStartupRequest(t *history.RatelimitStartupRequest) *types.RatelimitStartupRequest {
+	if t == nil {
+		return nil
+	}
+	return &types.RatelimitStartupRequest{
+		// TODO
+	}
+}
+func ToHistoryRatelimitUpdateRequest(t *history.RatelimitUpdateRequest) *types.RatelimitUpdateRequest {
+	if t == nil {
+		return nil
+	}
+	return &types.RatelimitUpdateRequest{
+		// TODO
+	}
+}
+
+func FromHistoryRatelimitStartupResponse(t *types.RatelimitStartupResponse) *history.RatelimitStartupResponse {
+	if t == nil {
+		return nil
+	}
+	return &history.RatelimitStartupResponse{
+		// TODO
+	}
+}
+func FromHistoryRatelimitUpdateResponse(t *types.RatelimitUpdateResponse) *history.RatelimitUpdateResponse {
+	if t == nil {
+		return nil
+	}
+	return &history.RatelimitUpdateResponse{
+		// TODO
+	}
+}
+
 func ToHistoryRatelimitStartupResponse(t *history.RatelimitStartupResponse) *types.RatelimitStartupResponse {
 	if t == nil {
 		return nil

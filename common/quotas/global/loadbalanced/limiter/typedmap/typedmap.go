@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package limiter
+package typedmap
 
 import (
 	"fmt"
@@ -36,18 +36,24 @@ import (
 type TypedMap[Key comparable, Value any] struct {
 	contents sync.Map
 	create   func(key Key) Value
-	len      int64 // atomic
+	len      int64
 }
 
-// NewTypedMap makes a new typed sync.Map that creates values as needed.
+// New makes a new typed sync.Map that creates values as needed.
 //
-// Value must be a pointer or interface type, as otherwise there is no real purpose to using sync.Map.
+// Value must be a pointer or interface type, as otherwise there is no real purpose to using this sync.Map-based tool.
 //
-// create will be called when creating a new value, possibly multiple times.  It should be "immediate" to reduce storage races.
-func NewTypedMap[Key comparable, Value any](create func(key Key) Value) (*TypedMap[Key, Value], error) {
+// create will be called when creating a new value, possibly multiple times.
+// It should return ASAP to reduce the window for storage races.
+func New[Key comparable, Value any](create func(key Key) Value) (*TypedMap[Key, Value], error) {
 	var zero Value
-	kind := reflect.TypeOf(zero).Kind()
-	if kind != reflect.Pointer && kind != reflect.Interface {
+	vtype := reflect.TypeOf(zero)
+	isInterface := vtype == nil                                 // nil interfaces do this, and zero is nil
+	isPointer := isInterface || vtype.Kind() == reflect.Pointer // vtype.Kind panics if nil
+	if !isInterface && !isPointer {
+		// using a non-pointer-type would mean copying on every load, making this object pointless.
+		// unfortunately this cannot currently be expressed with type constraints, as there is no
+		// way to describe e.g. "a struct with any keys" or "a map of any type".
 		return nil, fmt.Errorf("must use an interface or pointer type with TypedMap: %T", zero)
 	}
 	return &TypedMap[Key, Value]{

@@ -20,21 +20,39 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package global
+package errors
 
-import (
-	"context"
-
-	"github.com/uber/cadence/common/quotas"
-)
+import "errors"
 
 type (
-	Policy interface {
-		Allow(info quotas.Info) bool
-	}
-	Client interface {
-		Update(ctx context.Context, data any) (result any)
-	}
+	rpcError             struct{ error }
+	deserializationError struct{ error }
 )
 
-var _ quotas.Policy = (Policy)(nil)
+func (r *rpcError) Unwrap() error             { return r.error }
+func (d *deserializationError) Unwrap() error { return d.error }
+
+// IsRPCError returns true if an error came from an RPC request, not
+// something in this package.  These are expected to some degree.
+func IsRPCError(err error) bool {
+	var target *rpcError
+	return errors.As(err, &target)
+}
+
+// IsDeserializationError returns true if an error was due to deserialization
+// issues, which should imply some kind of significant logical flaw.
+func IsDeserializationError(err error) bool {
+	var target *deserializationError
+	return errors.As(err, &target)
+}
+
+func ErrFromRPC(err error) error {
+	return &rpcError{
+		error: err,
+	}
+}
+func ErrFromDeserialization(err error) error {
+	return &deserializationError{
+		error: err,
+	}
+}

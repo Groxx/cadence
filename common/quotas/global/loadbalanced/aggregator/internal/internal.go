@@ -88,6 +88,13 @@ func (l *Limit) Rotate() {
 	defer l.mut.Unlock()
 	l.previous = l.current
 	l.current, _ = typedmap.NewZero[string, *HostRecord]() // TODO: hmm.  err is a problem isn't it.
+
+	// TODO: forward all past-current to new-current, increment an idle-fuse?
+	// could use as:
+	// - idle==0   -> true rps (always count)
+	// - idle<max  -> historical rps (allow max(this, current-remaining), assuming it is still valid)
+	// - idle>=max -> too old, garbage collect
+
 }
 
 func (h *HostSeen) Observe(now time.Time) {
@@ -116,7 +123,7 @@ func (h *HostRecord) Snapshot() (allowed, rejected float64) {
 	return h.allowed, h.rejected
 }
 
-func weight(prev, current float64) float64 {
+func weight(prev float64, current float64) float64 {
 	if prev == 0 {
 		return prev
 	}

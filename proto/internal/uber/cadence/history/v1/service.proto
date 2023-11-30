@@ -24,7 +24,6 @@ package uber.cadence.history.v1;
 
 option go_package = "github.com/uber/cadence/.gen/proto/history/v1;historyv1";
 
-import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
@@ -737,12 +736,12 @@ message RespondCrossClusterTasksCompletedResponse {
 }
 
 message GetFailoverInfoRequest {
-    string domain_id = 1;
+  string domain_id = 1;
 }
 
 message GetFailoverInfoResponse {
-    int32 completed_shard_count = 1;
-    repeated int32 pending_shards = 2;
+  int32 completed_shard_count = 1;
+  repeated int32 pending_shards = 2;
 }
 
 message RatelimitStartupRequest {
@@ -753,26 +752,57 @@ message RatelimitUpdateRequest {
   string caller = 1; // stable-per-process host identifier
   google.protobuf.Duration last_updated = 2; // time of last push, as observed by caller
 
-  // ratelimit key -> load observed on this key
-  map<string, RatelimitLoad> load = 3;
+  // impl-specific data.
+  // likely either:
+  // - map<ratelimit-key-string, something>
+  // - list<something>
+  //
+  // this is a single blob rather than a collection to save on
+  // repeated serialization of the type name, and to allow impls
+  // to choose whatever structures are most-convenient for them.
+  Any data = 3;
 }
 
 message RatelimitStartupResponse {
-  map<string, RatelimitAdjustment> adjust = 3; // ratelimit key -> adjustment to make to this key
+  // impl-specific data.
+  //
+  // likely either:
+  // - map<ratelimit-key-string, something>
+  // - list<something>
+  //
+  // this is a single blob rather than a collection to save on
+  // repeated serialization of the type name, and to allow impls
+  // to choose whatever structures are most-convenient for them.
+  Any data = 1;
 }
 
 message RatelimitUpdateResponse {
-  // ratelimit key -> adjustment to make to this key.
-  // the keys returned are wholly controlled by the implementation,
-  // no RPC-level semantics for "exists" vs "does not exist" are implied,
-  // and the keys are not at all required to match the request's keys.
-  map<string, RatelimitAdjustment> adjust = 3;
+  // impl-specific data.
+  //
+  // likely either:
+  // - map<ratelimit-key-string, something>
+  // - list<something>
+  //
+  // this is a single blob rather than a collection to save on
+  // repeated serialization of the type name, and to allow impls
+  // to choose whatever structures are most-convenient for them.
+  Any data = 1;
 }
 
-message RatelimitLoad {
-  google.protobuf.Any data = 1; // ratelimit-plugin-specified data
-}
-
-message RatelimitAdjustment {
-  google.protobuf.Any data = 1; // ratelimit-plugin-specified data
+// Any is a logical duplicate of google.protobuf.Any, but is intentionally
+// breaking compatibility because it will not be directly used as an Any in our
+// high-level RPC mappers.
+//
+// The intent of the type is the same, but it is not intended to be directly
+// compatible with google.protobuf.Any - this blob is RPC-type agnostic by
+// design (as the underlying data may be transported over proto or thrift), and
+// the data-bytes may or may not be proto-encoded.
+message Any {
+  // Type-string describing value's contents, and intentionally avoiding the
+  // name "type" as it is often a special term.
+  // This should be a hard-coded string of some kind.
+  string type_id = 1;
+  // Arbitrarily-encoded bytes, to be deserialized by a runtime implementation.
+  // The contents are described by type_id.
+  bytes value = 2;
 }

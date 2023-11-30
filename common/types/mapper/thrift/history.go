@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/uber/cadence/.gen/go/history"
+	"github.com/uber/cadence/.gen/go/shared"
 	"github.com/uber/cadence/common/types"
 )
 
@@ -1373,7 +1374,7 @@ func FromHistoryRatelimitStartupRequest(t *types.RatelimitStartupRequest) *histo
 		return nil
 	}
 	return &history.RatelimitStartupRequest{
-		Caller: ptr(t.Caller),
+		Caller: &t.Caller,
 	}
 }
 func FromHistoryRatelimitUpdateRequest(t *types.RatelimitUpdateRequest) *history.RatelimitUpdateRequest {
@@ -1381,24 +1382,15 @@ func FromHistoryRatelimitUpdateRequest(t *types.RatelimitUpdateRequest) *history
 		return nil
 	}
 	return &history.RatelimitUpdateRequest{
-		Caller:      ptr(t.Caller),
+		Caller:      &t.Caller,
 		LastUpdated: fromDuration(t.LastUpdated),
-		Load:        fromHistoryRatelimitLoad(t.Load),
+		Data: &shared.Any{
+			TypeID: &t.Data.TypeID,
+			Value:  t.Data.Value,
+		},
 	}
 }
 
-func fromHistoryRatelimitLoad(load map[string]types.RatelimitLoad) map[string]*history.RatelimitLoad {
-	result := make(map[string]*history.RatelimitLoad, len(load))
-	for k, v := range load {
-		result[k] = &history.RatelimitLoad{
-			Any: &history.Any{
-				Type: ptr(v.Any.Type),
-				Data: v.Any.Data,
-			},
-		}
-	}
-	return result
-}
 func ToHistoryRatelimitStartupRequest(t *history.RatelimitStartupRequest) *types.RatelimitStartupRequest {
 	if t == nil {
 		return nil
@@ -1414,7 +1406,10 @@ func ToHistoryRatelimitUpdateRequest(t *history.RatelimitUpdateRequest) *types.R
 	return &types.RatelimitUpdateRequest{
 		Caller:      t.GetCaller(),
 		LastUpdated: toDuration(t.LastUpdated),
-		Load:        toHistoryRatelimitLoad(t.Load),
+		Data: types.Any{
+			TypeID: orzero(orzero(orzero(t).Data).TypeID),
+			Value:  orzero(orzero(t).Data).Value,
+		},
 	}
 }
 
@@ -1434,40 +1429,16 @@ func fromDuration(dur time.Duration) *string {
 	return &result
 }
 
-func toHistoryRatelimitLoad(load map[string]*history.RatelimitLoad) map[string]types.RatelimitLoad {
-	result := make(map[string]types.RatelimitLoad, len(load))
-	for k, v := range load {
-		result[k] = types.RatelimitLoad{
-			Any: types.Any{
-				// nil==empty, same as `result[k] = {}`
-				Type: orzero(orzero(orzero(v).Any).Type),
-				Data: orzero(orzero(v).Any).Data,
-			},
-		}
-	}
-	return result
-}
-
 func FromHistoryRatelimitStartupResponse(t *types.RatelimitStartupResponse) *history.RatelimitStartupResponse {
 	if t == nil {
 		return nil
 	}
 	return &history.RatelimitStartupResponse{
-		Adjust: fromHistoryRatelimitAdjustment(t.Adjust),
+		Data: &shared.Any{
+			TypeID: &t.Data.TypeID,
+			Value:  t.Data.Value,
+		},
 	}
-}
-
-func fromHistoryRatelimitAdjustment(adjust map[string]types.RatelimitAdjustment) map[string]*history.RatelimitAdjustment {
-	result := make(map[string]*history.RatelimitAdjustment, len(adjust))
-	for k, v := range adjust {
-		result[k] = &history.RatelimitAdjustment{
-			Any: &history.Any{
-				Type: ptr(v.Any.Type),
-				Data: v.Any.Data,
-			},
-		}
-	}
-	return result
 }
 
 func FromHistoryRatelimitUpdateResponse(t *types.RatelimitUpdateResponse) *history.RatelimitUpdateResponse {
@@ -1475,7 +1446,10 @@ func FromHistoryRatelimitUpdateResponse(t *types.RatelimitUpdateResponse) *histo
 		return nil
 	}
 	return &history.RatelimitUpdateResponse{
-		Adjust: fromHistoryRatelimitAdjustment(t.Adjust),
+		Data: &shared.Any{
+			TypeID: &t.Data.TypeID,
+			Value:  t.Data.Value,
+		},
 	}
 }
 
@@ -1484,20 +1458,11 @@ func ToHistoryRatelimitStartupResponse(t *history.RatelimitStartupResponse) *typ
 		return nil
 	}
 	return &types.RatelimitStartupResponse{
-		Adjust: toHistoryRatelimitAdjustment(t.Adjust),
+		Data: types.Any{
+			TypeID: orzero(orzero(orzero(t).Data).TypeID),
+			Value:  orzero(orzero(t).Data).Value,
+		},
 	}
-}
-func toHistoryRatelimitAdjustment(adjust map[string]*history.RatelimitAdjustment) map[string]types.RatelimitAdjustment {
-	result := make(map[string]types.RatelimitAdjustment, len(adjust))
-	for k, v := range adjust {
-		result[k] = types.RatelimitAdjustment{
-			Any: types.Any{
-				Type: orzero(orzero(orzero(v).Any).Type),
-				Data: orzero(orzero(v).Any).Data,
-			},
-		}
-	}
-	return result
 }
 
 func ToHistoryRatelimitUpdateResponse(t *history.RatelimitUpdateResponse) *types.RatelimitUpdateResponse {
@@ -1505,7 +1470,10 @@ func ToHistoryRatelimitUpdateResponse(t *history.RatelimitUpdateResponse) *types
 		return nil
 	}
 	return &types.RatelimitUpdateResponse{
-		Adjust: toHistoryRatelimitAdjustment(t.Adjust),
+		Data: types.Any{
+			TypeID: orzero(orzero(orzero(t).Data).TypeID),
+			Value:  orzero(orzero(t).Data).Value,
+		},
 	}
 }
 
@@ -1519,9 +1487,4 @@ func orzero[T any](maybe *T) T {
 		return zero
 	}
 	return *maybe
-}
-
-// ptr makes a pointer to (a copy of) the argument
-func ptr[T any](val T) *T {
-	return &val
 }

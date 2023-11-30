@@ -103,7 +103,6 @@ type (
 		GetHostName() string
 
 		// loggers
-
 		GetLogger() log.Logger
 		GetThrottledLogger() log.Logger
 

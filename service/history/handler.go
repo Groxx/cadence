@@ -42,6 +42,8 @@ import (
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/persistence"
 	"github.com/uber/cadence/common/quotas"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/rpc"
 	"github.com/uber/cadence/common/service"
 	"github.com/uber/cadence/common/types"
 	"github.com/uber/cadence/common/types/mapper/proto"
@@ -73,6 +75,7 @@ type (
 		replicationTaskFetchers  replication.TaskFetchers
 		queueTaskProcessor       task.Processor
 		failoverCoordinator      failover.Coordinator
+		ratelimitAgg             *aggregator.Agg
 	}
 )
 
@@ -102,6 +105,7 @@ func NewHandler(
 		config:          config,
 		tokenSerializer: common.NewJSONTaskTokenSerializer(),
 		rateLimiter:     quotas.NewDynamicRateLimiter(config.RPS.AsFloat64()),
+		ratelimitAgg:    resource.GetRatelimitAggregator(),
 	}
 
 	// prevent us from trying to serve requests before shard controller is started and ready
@@ -176,6 +180,7 @@ func (h *handlerImpl) Start() {
 	if h.config.EnableGracefulFailover() {
 		h.failoverCoordinator.Start()
 	}
+	h.ratelimitAgg.Start()
 
 	h.controller.Start()
 
@@ -191,6 +196,15 @@ func (h *handlerImpl) Stop() {
 	h.controller.Stop()
 	h.historyEventNotifier.Stop()
 	h.failoverCoordinator.Stop()
+
+	// TODO: raise this limit if we implement draining
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := h.ratelimitAgg.Stop(ctx)
+	if err != nil {
+		h.GetLogger().Error("failed to shut down ratelimit aggregator quickly", tag.Error(err))
+		// non-fatal because it'll still stop eventually / the process will go away
+	}
 }
 
 // PrepareToStop starts graceful traffic drain in preparation for shutdown
@@ -2065,10 +2079,13 @@ func (h *handlerImpl) RatelimitStartup(ctx context.Context, request *types.Ratel
 		return nil, errShuttingDown
 	}
 
-	var err error
-	// TODO: pass through to aggregator impl
+	all := h.ratelimitAgg.GetAll(request.Caller)
+	data, err := rpc.AllowResponseToAny(all)
 	if err != nil {
 		return nil, h.error(err, scope, "", "", "")
+	}
+	resp = &types.RatelimitStartupResponse{
+		Data: data,
 	}
 	return resp, nil
 }
@@ -2084,10 +2101,23 @@ func (h *handlerImpl) RatelimitUpdate(ctx context.Context, request *types.Rateli
 		return nil, errShuttingDown
 	}
 
-	var err error
-	// TODO: pass through to aggregator impl
+	// perform the update
+	// TODO: push (de)serialization into the agg-API, it should be implementation-decided
+	updateData, err := rpc.AnyToUpdateRequest(request.Data)
 	if err != nil {
 		return nil, h.error(err, scope, "", "", "")
+	}
+
+	h.ratelimitAgg.Update(request.Caller, request.LastUpdated, updateData)
+
+	// retrieve all (now updated) rps data
+	all := h.ratelimitAgg.GetAll(request.Caller)
+	respondData, err := rpc.AllowResponseToAny(all)
+	if err != nil {
+		return nil, h.error(err, scope, "", "", "")
+	}
+	resp = &types.RatelimitUpdateResponse{
+		Data: respondData,
 	}
 	return resp, nil
 }

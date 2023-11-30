@@ -76,7 +76,6 @@ import (
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator/internal"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/rpc"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/typedmap"
-	"github.com/uber/cadence/common/types"
 )
 
 /*
@@ -126,17 +125,17 @@ type (
 	}
 )
 
-func New(rps dynamicconfig.IntPropertyFn, updateRate dynamicconfig.DurationPropertyFn) *Agg {
+func New(rps dynamicconfig.IntPropertyFn, updateRate dynamicconfig.DurationPropertyFn) (*Agg, error) {
 	limits, err := typedmap.New(func(key string) *internal.Limit {
 		return internal.NewLimit(rps)
 	})
 	if err != nil {
-		panic(fmt.Sprintf("should be impossible: bad collection type: %v", err))
+		return nil, fmt.Errorf("should be impossible: bad collection type: %v", err)
 	}
 
 	lastseen, err := typedmap.NewZero[string, *internal.HostSeen]()
 	if err != nil {
-		panic(fmt.Sprintf("should be impossible: bad collection type: %v", err))
+		return nil, fmt.Errorf("should be impossible: bad collection type: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -147,7 +146,7 @@ func New(rps dynamicconfig.IntPropertyFn, updateRate dynamicconfig.DurationPrope
 		ctx:           ctx,
 		cancel:        cancel,
 		stopped:       make(chan struct{}),
-	}
+	}, nil
 }
 
 func (a *Agg) Start() {
@@ -205,26 +204,25 @@ func (a *Agg) rotate() {
 }
 
 // Update adds load information for the passed keys to this aggregator.
-func (a *Agg) Update(host string, elapsed time.Duration, load map[string]types.RatelimitLoad) {
+func (a *Agg) Update(host string, elapsed time.Duration, load rpc.AnyUpdateRequest) {
 	// refresh the host-seen record
 	a.observeHost(host)
 
-	for limit, data := range load {
+	for limit, data := range load.Load {
 		_, _, current := a.limits.Load(limit).Snapshot()
 		thishost := current.Load(host)
-		_ = data // TODO: pull from data
-		allowed := 1.0
-		rejected := 1.0
-		thishost.Update(allowed, rejected, elapsed)
+		thishost.Update(float64(data.Allowed), float64(data.Rejected), elapsed)
 	}
 }
 
 // Get retrieves the known load / desired RPS for this host for this key, as a read-only operation.
-func (a *Agg) Get(host string, keys []string) map[string]types.RatelimitAdjustment {
+func (a *Agg) Get(host string, keys []string) rpc.AnyAllowResponse {
 	// refresh the host-seen record
 	a.observeHost(host)
 
-	result := make(map[string]types.RatelimitAdjustment, len(keys))
+	result := rpc.AnyAllowResponse{
+		Allow: make(map[string]float64, len(keys)),
+	}
 	for _, limit := range keys {
 		rps, previous, current := a.limits.Load(limit).Snapshot()
 
@@ -241,10 +239,7 @@ func (a *Agg) Get(host string, keys []string) map[string]types.RatelimitAdjustme
 			continue
 		}
 
-		forRPC := rpc.AdjustmentToAny(allowed)
-		result[limit] = types.RatelimitAdjustment{
-			Any: forRPC,
-		}
+		result.Allow[limit] = allowed
 	}
 
 	return result
@@ -379,21 +374,20 @@ func (a *Agg) getLimit(host string, rps float64, current, previous *typedmap.Typ
 	return 0, "new host, previous over budget"
 }
 
-func (a *Agg) GetAll(host string) map[string]types.RatelimitAdjustment {
+func (a *Agg) GetAll(host string) rpc.AnyAllowResponse {
 	a.observeHost(host)
 
 	// allocate space plus a bit of buffer for additions while ranging
-	result := make(map[string]types.RatelimitAdjustment, int(float64(a.limits.Len())*1.1))
+	result := rpc.AnyAllowResponse{
+		Allow: make(map[string]float64, int(float64(a.limits.Len())*1.1)),
+	}
 	a.limits.Range(func(k string, v *internal.Limit) bool {
 		rps, previous, current := v.Snapshot()
 
 		allowed, reason := a.getLimit(host, rps, current, previous)
 		_ = reason // TODO: metrics for sure
 
-		forRPC := rpc.AdjustmentToAny(allowed) // TODO: hmm.  feels bad in here maybe?
-		result[k] = types.RatelimitAdjustment{
-			Any: forRPC,
-		}
+		result.Allow[k] = allowed
 		return true
 	})
 

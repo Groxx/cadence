@@ -25,6 +25,8 @@ import (
 
 	"github.com/golang/mock/gomock"
 
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator"
+
 	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/resource"
 	"github.com/uber/cadence/service/history/events"
@@ -55,4 +57,7 @@ func NewTest(
 // GetEventCache for testing
 func (s *Test) GetEventCache() events.Cache {
 	return s.EventCache
+}
+func (s *Test) GetRatelimitAggregator() *aggregator.Agg {
+	panic("TODO: not yet implemented for tests")
 }

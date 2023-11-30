@@ -8193,21 +8193,13 @@ type RatelimitStartupRequest struct {
 type RatelimitUpdateRequest struct {
 	Caller      string
 	LastUpdated time.Duration
-	Load        map[string]RatelimitLoad
+	Data        Any
 }
 type RatelimitStartupResponse struct {
-	Adjust map[string]RatelimitAdjustment
+	Data Any
 }
 type RatelimitUpdateResponse struct {
-	Adjust map[string]RatelimitAdjustment
-}
-
-type RatelimitLoad struct {
-	Any Any `json:"any,omitempty"`
-}
-
-type RatelimitAdjustment struct {
-	Any Any `json:"any,omitempty"`
+	Data Any
 }
 
 // SerializeRequest Serialize an arbitrary request for logging

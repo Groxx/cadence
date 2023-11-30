@@ -114,22 +114,21 @@ import (
 	"github.com/uber/cadence/common/types"
 )
 
-const LoadbalancedAnyRequestType = "cadence:loadbalanced:request"
-const LoadbalancedAnyResponseType = "cadence:loadbalanced:response"
+const AnyUpdateRequestTypeID = "cadence:loadbalanced:update_request"
+const AnyAllowResponseTypeID = "cadence:loadbalanced:response"
 
+// serialized into types.Any, JSON format must remain stable
 type (
-	LoadbalancedAnyRequest struct {
+	AnyUpdateRequest struct {
+		Load map[string]Metrics `json:"data,omitempty"`
+	}
+	Metrics struct {
 		Allowed  int `json:"allowed,omitempty"`
 		Rejected int `json:"rejected,omitempty"`
 	}
-	LoadbalancedAnyResponse struct {
-		Allow float64 `json:"allow,omitempty"`
+	AnyAllowResponse struct {
+		Allow map[string]float64 `json:"allow,omitempty"`
 	}
-)
-
-// type check, structure must match
-var (
-	_ = LoadbalancedAnyRequest(Load{})
 )
 
 type (
@@ -153,7 +152,7 @@ type (
 		//
 		// To retrieve initial data when this host is starting up / from a blank slate,
 		// use Startup instead.
-		Update(ctx context.Context, period time.Duration, load map[string]Load, results func(request map[string]Load, response RetLoad, err error)) error
+		Update(ctx context.Context, period time.Duration, load AnyUpdateRequest, results func(request AnyUpdateRequest, response *AnyAllowResponse, err error)) error
 
 		// Startup performs concurrent calls to all aggregating peers to load initial
 		// data at service startup, to reduce the need to rely on possibly-incorrect
@@ -166,16 +165,16 @@ type (
 		// The passed context only applies to the underlying RPC calls, not the
 		// callbacks - if you need to address cancellation in your callbacks, check in
 		// them by hand (e.g. use a context derived from the one sent to Startup).
-		Startup(ctx context.Context, results func(batch RetLoad, err error)) error
+		Startup(ctx context.Context, results func(batch *AnyAllowResponse, err error)) error
 	}
 
 	Host string // random UUID specified at startup, as membership.HostInfo does not seem guaranteed unique
 
 	// PushLoad allows extremely simple load reporting, no accounting for spikiness / etc.
 	PushLoad struct {
-		Host   Host            // random UUID at startup
-		Period time.Duration   // Non-zero.  How long since the last reporting, or since service startup / RPC-inbound allowed.
-		Load   map[string]Load // Request data per ratelimit key to this host. (May be useful to include multiple periods if the value changed)
+		Host   Host               // random UUID at startup
+		Period time.Duration      // Non-zero.  How long since the last reporting, or since service startup / RPC-inbound allowed.
+		Load   map[string]Metrics // Request data per ratelimit key to this host. (May be useful to include multiple periods if the value changed)
 	}
 	// Load info for one key
 	Load struct {
@@ -198,8 +197,8 @@ type (
 
 var _ Client = (*client)(nil)
 
-func (c *client) Update(ctx context.Context, period time.Duration, load map[string]Load, results func(request map[string]Load, response RetLoad, err error)) error {
-	batches, err := c.shard(period, load)
+func (c *client) Update(ctx context.Context, period time.Duration, load AnyUpdateRequest, results func(request AnyUpdateRequest, response *AnyAllowResponse, err error)) error {
+	batches, err := c.shard(load)
 	if err != nil {
 		// should only happen if peers are unavailable, individual requests are handled other ways
 		return fmt.Errorf("unable to shard ratelimit update data: %w", err)
@@ -214,7 +213,7 @@ func (c *client) Update(ctx context.Context, period time.Duration, load map[stri
 	g.SetLimit(100)      // TODO: limited concurrency?  configurable?
 	for peerAddress, batch := range batches {
 		g.Go(func() error {
-			push, err := serializeLoad(batch)
+			push, err := UpdateRequestToAny(batch)
 			if err != nil {
 				// serialization is treated as a fatal coding error, it should never happen outside dev-ing.
 				return err
@@ -223,15 +222,20 @@ func (c *client) Update(ctx context.Context, period time.Duration, load map[stri
 			result, err := c.history.RatelimitUpdate(ctx, peerAddress, &types.RatelimitUpdateRequest{
 				Caller:      string(c.thisHost),
 				LastUpdated: period,
-				Load:        push, // TODO: make this the Any type, not a map containing them, should save tons of data on network and moderate cpu
+				Data:        push, // TODO: make this the Any type, not a map containing them, should save tons of data on network and moderate cpu
 			})
 			if err != nil {
-				results(load, RetLoad{}, errors.ErrFromRPC(fmt.Errorf("ratelimit update request: %w", err)))
+				results(load, nil, errors.ErrFromRPC(fmt.Errorf("ratelimit update request: %w", err)))
 				return nil
 			}
 
-			batch, err := deserializeAdjustments(result.Adjust)
-			results(load, batch, err) // both can be non-empty, for partial success
+			resp, err := AnyToAllowResponse(result.Data)
+			if err != nil {
+				results(load, nil, err)
+				return nil
+			}
+
+			results(batch, &resp, nil)
 			return nil
 		})
 	}
@@ -243,7 +247,7 @@ func (c *client) Update(ctx context.Context, period time.Duration, load map[stri
 	)
 }
 
-func (c *client) Startup(ctx context.Context, results func(batch RetLoad, err error)) error {
+func (c *client) Startup(ctx context.Context, results func(batch *AnyAllowResponse, err error)) error {
 	peers, err := c.resolver.GetAllPeers()
 	if err != nil {
 		return errors.ErrFromRPC(fmt.Errorf("unable begin ratelimit-startup request, cannot get all peers: %w", err))
@@ -257,12 +261,17 @@ func (c *client) Startup(ctx context.Context, results func(batch RetLoad, err er
 				Caller: string(c.thisHost),
 			})
 			if err != nil {
-				results(RetLoad{}, errors.ErrFromRPC(fmt.Errorf("ratelimit startup request: %w", err)))
+				results(nil, errors.ErrFromRPC(fmt.Errorf("ratelimit startup request: %w", err)))
 				return nil
 			}
 
-			batch, err := deserializeAdjustments(result.Adjust)
-			results(batch, err) // both can be non-empty, for partial success
+			resp, err := AnyToAllowResponse(result.Data)
+			if err != nil {
+				results(nil, err)
+				return nil
+			}
+
+			results(&resp, nil)
 			return nil
 		})
 	}
@@ -278,22 +287,20 @@ func (c *client) Startup(ctx context.Context, results func(batch RetLoad, err er
 // and synchronously calls the callback for each one before returning.
 //
 // if an error is returned, no callbacks will be performed.
-func (c *client) shard(period time.Duration, load map[string]Load) (map[string]PushLoad, error) {
-	byPeers, err := c.resolver.SplitFromLoadBalancedRatelimit(keys(load))
+func (c *client) shard(r AnyUpdateRequest) (map[string]AnyUpdateRequest, error) {
+	byPeers, err := c.resolver.SplitFromLoadBalancedRatelimit(keys(r.Load))
 	if err != nil {
 		return nil, errors.ErrFromRPC(fmt.Errorf("unable to shard ratelimits to hosts: %w", err))
 	}
-	results := make(map[string]PushLoad, len(byPeers))
+	results := make(map[string]AnyUpdateRequest, len(byPeers))
 	for peerAddress, ratelimits := range byPeers {
-		batch := make(map[string]Load, len(ratelimits))
+		batch := AnyUpdateRequest{
+			Load: make(map[string]Metrics, len(ratelimits)),
+		}
 		for _, key := range ratelimits {
-			batch[key] = load[key]
+			batch.Load[key] = r.Load[key]
 		}
-		results[peerAddress] = PushLoad{
-			Host:   c.thisHost,
-			Period: period,
-			Load:   batch,
-		}
+		results[peerAddress] = batch
 	}
 	return results, nil
 }
@@ -317,57 +324,6 @@ func doesNotError(format string, err error) error {
 	return fmt.Errorf("coding error: "+format+": %w", err)
 }
 
-func serializeLoad(batch PushLoad) (map[string]types.RatelimitLoad, error) {
-	load := make(map[string]types.RatelimitLoad, len(batch.Load))
-	for k, v := range batch.Load {
-		data, err := json.Marshal(LoadbalancedAnyRequest(v))
-		if err != nil {
-			// serialization is treated as a fatal error, it should never happen outside dev-ing
-			return nil, fmt.Errorf("serializing key %q: %w", k, err)
-		}
-
-		load[k] = types.RatelimitLoad{
-			Any: types.Any{
-				Type: LoadbalancedAnyRequestType,
-				Data: data,
-			},
-		}
-	}
-	return load, nil
-}
-
-// deserializeAdjustments decodes the any-contents of a ratelimit adjustment response,
-// while attempting to be tolerant of errors.
-//
-// both results may be non-empty, reflecting partial success, but this should not happen in practice,
-// and is likely only possible with non-strictly-defined RPC data (which is inherently dangerous).
-// in such a case however, the first error will be wrapped, and the total number will be counted.
-func deserializeAdjustments(result map[string]types.RatelimitAdjustment) (RetLoad, error) {
-	// TODO: this should be pluggable, but it's fine for now
-	var batch RetLoad
-	var firstErr error
-	var otherErrs int
-	for k, v := range result {
-		allow, err := AnyToAdjustment(v.Any)
-		if err != nil {
-			if firstErr != nil {
-				otherErrs++
-			} else {
-				firstErr = fmt.Errorf("bad data in key %q, err: %w", k, err)
-			}
-
-			continue // try other keys, in case they work
-		}
-
-		// valid data, save it
-		batch.Allow[k] = int(allow)
-	}
-	if firstErr != nil && otherErrs > 0 {
-		firstErr = fmt.Errorf("encountered %v other errors, first: %w", otherErrs, firstErr)
-	}
-	return batch, firstErr
-}
-
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -375,40 +331,40 @@ func min(a, b int) int {
 	return b
 }
 
-func AdjustmentToAny(allow float64) types.Any {
-	obj := LoadbalancedAnyResponse{
-		Allow: allow,
-	}
-	data, err := json.Marshal(obj)
+func AnyToAllowResponse(a types.Any) (AnyAllowResponse, error) {
+	return deserializeTo[AnyAllowResponse](a, AnyAllowResponseTypeID)
+}
+func AnyToUpdateRequest(a types.Any) (AnyUpdateRequest, error) {
+	return deserializeTo[AnyUpdateRequest](a, AnyUpdateRequestTypeID)
+}
+func UpdateRequestToAny(r AnyUpdateRequest) (types.Any, error) {
+	return serializeTo(r, AnyUpdateRequestTypeID)
+}
+func AllowResponseToAny(r AnyAllowResponse) (types.Any, error) {
+	return serializeTo(r, AnyAllowResponseTypeID)
+}
+func serializeTo[T any](r T, typeID string) (types.Any, error) {
+	data, err := json.Marshal(r)
 	if err != nil {
-		panic(fmt.Errorf("should not be possible: LoadbalancedAnyResponse failed to JSON-serialize: %w", err))
+		return types.Any{}, fmt.Errorf("should not be possible: %T failed to JSON-serialize: %w", r, err)
 	}
 	return types.Any{
-		Type: LoadbalancedAnyResponseType,
-		Data: data,
-	}
+		TypeID: typeID,
+		Value:  data,
+	}, nil
 }
-
-func AnyToAdjustment(a types.Any) (float64, error) {
-	if a.Type != LoadbalancedAnyResponseType {
-		return 0, errors.ErrFromDeserialization(
-			fmt.Errorf("wrong Any.Type %q, should be %q", a.Type, LoadbalancedAnyResponseType),
+func deserializeTo[T any](a types.Any, typeID string) (T, error) {
+	var out T
+	if a.TypeID != typeID {
+		return out, errors.ErrFromDeserialization(
+			fmt.Errorf("wrong Any.TypeID %q for type %T, should be %q", a.TypeID, out, typeID),
 		)
 	}
-
-	var out LoadbalancedAnyResponse
-	err := json.Unmarshal(a.Data, &out)
+	err := json.Unmarshal(a.Value, &out)
 	if err != nil {
-		return 0, errors.ErrFromDeserialization(
-			fmt.Errorf("decoding error for type %q, data: %.100v", a.Type, a.Data),
+		return out, errors.ErrFromDeserialization(
+			fmt.Errorf("decoding error for Any.TypeID %q for type %T, data: %.100v", a.TypeID, out, a.Value),
 		)
 	}
-	return out.Allow, nil
-}
-
-func RequestToAny(r LoadbalancedAnyRequest) types.Any {
-
-}
-func AnyToRequest(a types.Any) (LoadbalancedAnyRequest, error) {
-
+	return out, nil
 }

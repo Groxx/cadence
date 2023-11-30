@@ -23,25 +23,24 @@
 package types
 
 // Any is a generic-serialized-data container, analogous to google.protobuf.Any
+// but intentionally not implementing its API.
 type Any struct {
-	// Type string, structure unspecified.
-	// Deserializers must know what types they support and how to interpret them.
+	// TypeID string, structure unspecified but URLs are a good starting point.
 	//
-	// However, generally speaking: type strings MUST be stable identifiers of
-	// types, and not be impacted by renaming / rearranging.
+	// Deserializers must know what types they support and how to interpret them.
+	// Generally speaking: type strings MUST be stable identifiers of types, and
+	// not be impacted by renaming / rearranging.
 	//
 	// This means that:
 	//  - hardcoded strings mapped to types in code are the safest, and are
 	//    STRONGLY preferred.
-	//  - RPC type names SHOULD be safe, but also they SHOULD explicitly state
-	//    if they are used in this way, as otherwise-safe renames cannot be done.
+	//  - RPC type names (e.g. protobuf urls) SHOULD be safe, but also they
+	//    SHOULD explicitly state if they are used in this way, as
+	//    otherwise-safe renames cannot be done.
 	//  - reflect.Type.Name and reflect.Type.PkgPath or similar MUST NOT be used,
 	//    as they are extremely easy to modify accidentally and unsafely.
-	Type string `json:"type,omitempty"`
+	TypeID string `json:"type_id,omitempty"`
 
-	// Data for the specified Type.
-	//
-	// RPC-specific encoding / compression / etc has been removed, so this will
-	// match the provider's bytes exactly.
-	Data []byte `json:"data,omitempty"`
+	// Value (bytes) for the specified TypeID-specified type
+	Value []byte `json:"value,omitempty"`
 }

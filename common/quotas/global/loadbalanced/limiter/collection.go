@@ -160,7 +160,7 @@ func (b *BalancedCollection) Start(startCtx context.Context) error {
 }
 
 func (b *BalancedCollection) warmup(ctx context.Context) error {
-	return b.client.Startup(ctx, func(load rpc.RetLoad, err error) {
+	return b.client.Startup(ctx, func(batch *rpc.AnyAllowResponse, err error) {
 		if err != nil {
 			// log, particularly if is-deserialization
 			if errors.IsDeserializationError(err) {
@@ -177,11 +177,11 @@ func (b *BalancedCollection) warmup(ctx context.Context) error {
 		}
 
 		// TODO: probably wrong, but it's something
-		for k, v := range load.Allow {
+		for k, v := range batch.Allow {
 			if v < 0 {
 				// error loading this key?, do something
 			} else {
-				b.usage.Load(k).Update(float64(v))
+				b.usage.Load(k).Update(v)
 			}
 		}
 	})
@@ -222,13 +222,15 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 			// time + the change may be larger.
 			capacity := b.usage.Len()
 			capacity += capacity / 10
-			all := make(map[string]rpc.Load, capacity)
+			all := rpc.AnyUpdateRequest{
+				Load: make(map[string]rpc.Metrics, capacity),
+			}
 
 			now := b.now()
 			b.usage.Range(func(k string, v *internal.BalancedLimit) bool {
 				used, refused, usingFallback := v.Collect()
-				_ = usingFallback // TODO: interesting for metrics
-				all[k] = rpc.Load{
+				_ = usingFallback // TODO: interesting for metrics?
+				all.Load[k] = rpc.Metrics{
 					Allowed:  used,
 					Rejected: refused,
 				}
@@ -239,7 +241,7 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 			// client parallelizes and calls callback as many times as there are hosts to contact,
 			// and returns after all are complete.
 			ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second) // TODO: configurable
-			err := b.client.Update(ctx, now.Sub(last), all, func(request map[string]rpc.Load, load rpc.RetLoad, err error) {
+			err := b.client.Update(ctx, now.Sub(last), all, func(request rpc.AnyUpdateRequest, batch *rpc.AnyAllowResponse, err error) {
 				if err != nil {
 					// log, particularly if is-deserialization
 					if errors.IsDeserializationError(err) {
@@ -255,19 +257,19 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 					}
 				}
 
-				for k, v := range load.Allow {
+				for k, v := range batch.Allow {
 					if v < 0 {
 						// error loading this key, do something
 						b.usage.Load(k).FailedUpdate()
 					} else {
-						b.usage.Load(k).Update(float64(v))
+						b.usage.Load(k).Update(v)
 					}
 				}
 
 				// mark all non-returned limits as failures.
 				// TODO: push this to to something pluggable?  better semantics should be possible
-				for k := range request {
-					if _, ok := load.Allow[k]; ok {
+				for k := range request.Load {
+					if _, ok := batch.Allow[k]; ok {
 						// handled above
 						continue
 					}
@@ -279,7 +281,7 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 			cancel()
 
 			if err != nil {
-				for k := range all {
+				for k := range all.Load {
 					// data requested but no request performed, bump the fallback fuse.
 					// if a response is loaded successfully, it'll resume using the fancy limit.
 					b.usage.Load(k).FailedUpdate()

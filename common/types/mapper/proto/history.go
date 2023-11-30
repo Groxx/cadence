@@ -1605,22 +1605,11 @@ func ToHistoryRatelimitUpdateRequest(t *historyv1.RatelimitUpdateRequest) *types
 	return &types.RatelimitUpdateRequest{
 		Caller:      t.Caller,
 		LastUpdated: toDuration(t.LastUpdated),
-		Load:        toHistoryRatelimitLoad(t.Load),
+		Data: types.Any{
+			TypeID: t.GetData().GetTypeId(),
+			Value:  t.GetData().GetValue(),
+		},
 	}
-}
-
-func toHistoryRatelimitLoad(load map[string]*historyv1.RatelimitLoad) map[string]types.RatelimitLoad {
-	result := make(map[string]types.RatelimitLoad, len(load))
-	for k, v := range load {
-		result[k] = types.RatelimitLoad{
-			Any: types.Any{
-				// nil==empty, same as `result[k] = {}`
-				Type: v.GetData().GetTypeUrl(),
-				Data: v.GetData().GetValue(),
-			},
-		}
-	}
-	return result
 }
 
 func FromHistoryRatelimitStartupRequest(t *types.RatelimitStartupRequest) *historyv1.RatelimitStartupRequest {
@@ -1639,21 +1628,11 @@ func FromHistoryRatelimitUpdateRequest(t *types.RatelimitUpdateRequest) *history
 	return &historyv1.RatelimitUpdateRequest{
 		Caller:      t.Caller,
 		LastUpdated: fromDuration(t.LastUpdated),
-		Load:        fromHistoryRatelimitLoad(t.Load),
+		Data: &historyv1.Any{
+			TypeId: t.Data.TypeID,
+			Value:  t.Data.Value,
+		},
 	}
-}
-
-func fromHistoryRatelimitLoad(load map[string]types.RatelimitLoad) map[string]*historyv1.RatelimitLoad {
-	result := make(map[string]*historyv1.RatelimitLoad, len(load))
-	for k, v := range load {
-		result[k] = &historyv1.RatelimitLoad{
-			Data: &gogo.Any{
-				TypeUrl: v.Any.Type,
-				Value:   v.Any.Data,
-			},
-		}
-	}
-	return result
 }
 
 func toDuration(dur *gogo.Duration) time.Duration {
@@ -1676,7 +1655,10 @@ func ToHistoryRatelimitStartupResponse(t *historyv1.RatelimitStartupResponse) *t
 		return nil
 	}
 	return &types.RatelimitStartupResponse{
-		Adjust: toHistoryRatelimitAdjustment(t.Adjust),
+		Data: types.Any{
+			TypeID: t.GetData().GetTypeId(),
+			Value:  t.GetData().GetValue(),
+		},
 	}
 }
 
@@ -1685,7 +1667,10 @@ func ToHistoryRatelimitUpdateResponse(t *historyv1.RatelimitUpdateResponse) *typ
 		return nil
 	}
 	return &types.RatelimitUpdateResponse{
-		Adjust: toHistoryRatelimitAdjustment(t.Adjust),
+		Data: types.Any{
+			TypeID: t.GetData().GetTypeId(),
+			Value:  t.GetData().GetValue(),
+		},
 	}
 }
 
@@ -1694,7 +1679,10 @@ func FromHistoryRatelimitStartupResponse(t *types.RatelimitStartupResponse) *his
 		return nil
 	}
 	return &historyv1.RatelimitStartupResponse{
-		Adjust: fromHistoryRatelimitAdjustment(t.Adjust),
+		Data: &historyv1.Any{
+			TypeId: t.Data.TypeID,
+			Value:  t.Data.Value,
+		},
 	}
 }
 
@@ -1703,32 +1691,9 @@ func FromHistoryRatelimitUpdateResponse(t *types.RatelimitUpdateResponse) *histo
 		return nil
 	}
 	return &historyv1.RatelimitUpdateResponse{
-		Adjust: fromHistoryRatelimitAdjustment(t.Adjust),
+		Data: &historyv1.Any{
+			TypeId: t.Data.TypeID,
+			Value:  t.Data.Value,
+		},
 	}
-}
-
-func fromHistoryRatelimitAdjustment(adjust map[string]types.RatelimitAdjustment) map[string]*historyv1.RatelimitAdjustment {
-	result := make(map[string]*historyv1.RatelimitAdjustment, len(adjust))
-	for k, v := range adjust {
-		result[k] = &historyv1.RatelimitAdjustment{
-			Data: &gogo.Any{
-				TypeUrl: v.Any.Type,
-				Value:   v.Any.Data,
-			},
-		}
-	}
-	return result
-}
-
-func toHistoryRatelimitAdjustment(adjust map[string]*historyv1.RatelimitAdjustment) map[string]types.RatelimitAdjustment {
-	result := make(map[string]types.RatelimitAdjustment, len(adjust))
-	for k, v := range adjust {
-		result[k] = types.RatelimitAdjustment{
-			Any: types.Any{
-				Type: v.Data.GetTypeUrl(),
-				Data: v.Data.GetValue(),
-			},
-		}
-	}
-	return result
 }

@@ -21,7 +21,10 @@
 package resource
 
 import (
+	"fmt"
 	"sync/atomic"
+
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator"
 
 	"github.com/uber/cadence/common"
 	"github.com/uber/cadence/common/log/tag"
@@ -35,13 +38,15 @@ import (
 type Resource interface {
 	resource.Resource
 	GetEventCache() events.Cache
+	GetRatelimitAggregator() *aggregator.Agg
 }
 
 type resourceImpl struct {
 	status int32
 
 	resource.Resource
-	eventCache events.Cache
+	eventCache   events.Cache
+	ratelimitAgg *aggregator.Agg
 }
 
 // Start starts all resources
@@ -77,6 +82,10 @@ func (h *resourceImpl) Stop() {
 // GetEventCache return event cache
 func (h *resourceImpl) GetEventCache() events.Cache {
 	return h.eventCache
+}
+
+func (h *resourceImpl) GetRatelimitAggregator() *aggregator.Agg {
+	return h.ratelimitAgg
 }
 
 // New create a new resource containing common history dependencies
@@ -124,9 +133,16 @@ func New(
 		serviceResource.GetDomainCache(),
 	)
 
+	var agg *aggregator.Agg
+	agg, err = aggregator.New(nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create ratelimit aggregator: %w", err)
+	}
+
 	historyResource = &resourceImpl{
-		Resource:   serviceResource,
-		eventCache: eventCache,
+		Resource:     serviceResource,
+		eventCache:   eventCache,
+		ratelimitAgg: agg,
 	}
 	return
 }

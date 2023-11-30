@@ -21,6 +21,8 @@
 package thrift
 
 import (
+	"time"
+
 	"github.com/uber/cadence/.gen/go/history"
 	"github.com/uber/cadence/common/types"
 )
@@ -1371,7 +1373,7 @@ func FromHistoryRatelimitStartupRequest(t *types.RatelimitStartupRequest) *histo
 		return nil
 	}
 	return &history.RatelimitStartupRequest{
-		// TODO
+		Caller: ptr(t.Caller),
 	}
 }
 func FromHistoryRatelimitUpdateRequest(t *types.RatelimitUpdateRequest) *history.RatelimitUpdateRequest {
@@ -1379,15 +1381,30 @@ func FromHistoryRatelimitUpdateRequest(t *types.RatelimitUpdateRequest) *history
 		return nil
 	}
 	return &history.RatelimitUpdateRequest{
-		// TODO
+		Caller:      ptr(t.Caller),
+		LastUpdated: fromDuration(t.LastUpdated),
+		Load:        fromHistoryRatelimitLoad(t.Load),
 	}
+}
+
+func fromHistoryRatelimitLoad(load map[string]types.RatelimitLoad) map[string]*history.RatelimitLoad {
+	result := make(map[string]*history.RatelimitLoad, len(load))
+	for k, v := range load {
+		result[k] = &history.RatelimitLoad{
+			Any: &history.Any{
+				Type: ptr(v.Any.Type),
+				Data: v.Any.Data,
+			},
+		}
+	}
+	return result
 }
 func ToHistoryRatelimitStartupRequest(t *history.RatelimitStartupRequest) *types.RatelimitStartupRequest {
 	if t == nil {
 		return nil
 	}
 	return &types.RatelimitStartupRequest{
-		// TODO
+		Caller: t.GetCaller(),
 	}
 }
 func ToHistoryRatelimitUpdateRequest(t *history.RatelimitUpdateRequest) *types.RatelimitUpdateRequest {
@@ -1395,8 +1412,40 @@ func ToHistoryRatelimitUpdateRequest(t *history.RatelimitUpdateRequest) *types.R
 		return nil
 	}
 	return &types.RatelimitUpdateRequest{
-		// TODO
+		Caller:      t.GetCaller(),
+		LastUpdated: toDuration(t.LastUpdated),
+		Load:        toHistoryRatelimitLoad(t.Load),
 	}
+}
+
+func toDuration(dur *string) time.Duration {
+	if dur == nil {
+		return 0
+	}
+	result, err := time.ParseDuration(*dur)
+	if err != nil {
+		return 0 // TODO: I would really like to standardize on having error responses in these mappers...
+	}
+	return result
+}
+
+func fromDuration(dur time.Duration) *string {
+	result := dur.String()
+	return &result
+}
+
+func toHistoryRatelimitLoad(load map[string]*history.RatelimitLoad) map[string]types.RatelimitLoad {
+	result := make(map[string]types.RatelimitLoad, len(load))
+	for k, v := range load {
+		result[k] = types.RatelimitLoad{
+			Any: types.Any{
+				// nil==empty, same as `result[k] = {}`
+				Type: orzero(orzero(orzero(v).Any).Type),
+				Data: orzero(orzero(v).Any).Data,
+			},
+		}
+	}
+	return result
 }
 
 func FromHistoryRatelimitStartupResponse(t *types.RatelimitStartupResponse) *history.RatelimitStartupResponse {
@@ -1404,15 +1453,29 @@ func FromHistoryRatelimitStartupResponse(t *types.RatelimitStartupResponse) *his
 		return nil
 	}
 	return &history.RatelimitStartupResponse{
-		// TODO
+		Adjust: fromHistoryRatelimitAdjustment(t.Adjust),
 	}
 }
+
+func fromHistoryRatelimitAdjustment(adjust map[string]types.RatelimitAdjustment) map[string]*history.RatelimitAdjustment {
+	result := make(map[string]*history.RatelimitAdjustment, len(adjust))
+	for k, v := range adjust {
+		result[k] = &history.RatelimitAdjustment{
+			Any: &history.Any{
+				Type: ptr(v.Any.Type),
+				Data: v.Any.Data,
+			},
+		}
+	}
+	return result
+}
+
 func FromHistoryRatelimitUpdateResponse(t *types.RatelimitUpdateResponse) *history.RatelimitUpdateResponse {
 	if t == nil {
 		return nil
 	}
 	return &history.RatelimitUpdateResponse{
-		// TODO
+		Adjust: fromHistoryRatelimitAdjustment(t.Adjust),
 	}
 }
 
@@ -1421,14 +1484,44 @@ func ToHistoryRatelimitStartupResponse(t *history.RatelimitStartupResponse) *typ
 		return nil
 	}
 	return &types.RatelimitStartupResponse{
-		// TODO
+		Adjust: toHistoryRatelimitAdjustment(t.Adjust),
 	}
 }
+func toHistoryRatelimitAdjustment(adjust map[string]*history.RatelimitAdjustment) map[string]types.RatelimitAdjustment {
+	result := make(map[string]types.RatelimitAdjustment, len(adjust))
+	for k, v := range adjust {
+		result[k] = types.RatelimitAdjustment{
+			Any: types.Any{
+				Type: orzero(orzero(orzero(v).Any).Type),
+				Data: orzero(orzero(v).Any).Data,
+			},
+		}
+	}
+	return result
+}
+
 func ToHistoryRatelimitUpdateResponse(t *history.RatelimitUpdateResponse) *types.RatelimitUpdateResponse {
 	if t == nil {
 		return nil
 	}
 	return &types.RatelimitUpdateResponse{
-		// TODO
+		Adjust: toHistoryRatelimitAdjustment(t.Adjust),
 	}
+}
+
+// orzero is a dereference-or-zero-value helper.
+//
+// proto-generated code has `thing.GetField()` which does
+// the same thing in a more chaining-friendly way.
+func orzero[T any](maybe *T) T {
+	if maybe == nil {
+		var zero T
+		return zero
+	}
+	return *maybe
+}
+
+// ptr makes a pointer to (a copy of) the argument
+func ptr[T any](val T) *T {
+	return &val
 }

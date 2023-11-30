@@ -114,32 +114,58 @@ import (
 	"github.com/uber/cadence/common/types"
 )
 
-const _loadbalancedAnyRequestType = "cadence:loadbalanced:request"
-const _loadbalancedAnyResponseType = "cadence:loadbalanced:response"
+const LoadbalancedAnyRequestType = "cadence:loadbalanced:request"
+const LoadbalancedAnyResponseType = "cadence:loadbalanced:response"
+
+type (
+	LoadbalancedAnyRequest struct {
+		Allowed  int `json:"allowed,omitempty"`
+		Rejected int `json:"rejected,omitempty"`
+	}
+	LoadbalancedAnyResponse struct {
+		Allow float64 `json:"allow,omitempty"`
+	}
+)
+
+// type check, structure must match
+var (
+	_ = LoadbalancedAnyRequest(Load{})
+)
 
 type (
 	Client interface {
-		// Update pushes bulk info and updates limits based on the response.
-		// RetLoad data is returned via the callback as common-hosts respond,
-		// but the call blocks until all resulting calls have completed.
+		// Update performs concurrent calls to all aggregating peers to send load info
+		// and retrieve new, aggregated load info from the rest of the cluster.
+		// This is intended to be called periodically in the background per process,
+		// not synchronously or concurrently.
 		//
-		// Results will contain RetLoad data from _all_ common hosts, and a complete batch
-		// should represent all currently-known keys for this host in the cluster.
+		// Each peer's response is delivered via the callback, on a random goroutine.
+		// Update will return after all responses AND all callbacks have completed.
 		//
-		// Any missing keys should be considered lost state by common hosts, and the previous
-		// RPS should be used until an update spreads the knowledge to the cluster again.
-		// This allows common-hosts to shut down and lose state with minimal impact.  Limiting
-		// hosts can pre-warm their data via Startup.
+		// Any keys requested but not returned, or previously returned but not now,
+		// should be considered lost state by the aggregating peers, and the previous
+		// RPS should be used until knowledge of that key spreads through the cluster again.
+		// This allows aggregating peers to shut down and lose state with minimal impact.
+		//
+		// The passed context only applies to the underlying RPC calls, not the
+		// callbacks - if you need to address cancellation in your callbacks, check in
+		// them by hand (e.g. use a context derived from the one sent to Update).
+		//
+		// To retrieve initial data when this host is starting up / from a blank slate,
+		// use Startup instead.
 		Update(ctx context.Context, period time.Duration, load map[string]Load, results func(request map[string]Load, response RetLoad, err error)) error
 
-		// Startup requests that all common-hosts return data for this limiting-host,
-		// intended to be called during service startup or when warming from zero at runtime.
+		// Startup performs concurrent calls to all aggregating peers to load initial
+		// data at service startup, to reduce the need to rely on possibly-incorrect
+		// fallback logic.  Unlike Update, performing this call does not directly imply
+		// that the caller has received zero requests since the last call.
 		//
-		// Unlike Update, this call does not imply that the caller has not received
-		// any requests - it's just pre-warming its empty state.
+		// Each peer's response is delivered via the callback, on a random goroutine.
+		// Startup will return after all responses AND all callbacks have completed.
 		//
-		// Results are distributed via callback as they come in, to speed up partial responses.
-		// The call blocks until all responses are received.
+		// The passed context only applies to the underlying RPC calls, not the
+		// callbacks - if you need to address cancellation in your callbacks, check in
+		// them by hand (e.g. use a context derived from the one sent to Startup).
 		Startup(ctx context.Context, results func(batch RetLoad, err error)) error
 	}
 
@@ -173,9 +199,20 @@ type (
 var _ Client = (*client)(nil)
 
 func (c *client) Update(ctx context.Context, period time.Duration, load map[string]Load, results func(request map[string]Load, response RetLoad, err error)) error {
+	batches, err := c.shard(period, load)
+	if err != nil {
+		// should only happen if peers are unavailable, individual requests are handled other ways
+		return fmt.Errorf("unable to shard ratelimit update data: %w", err)
+	}
+
+	if ctx.Err() != nil {
+		// worth checking before spawning a bunch of costly goroutines that may achieve nothing.
+		return fmt.Errorf("unable to start ratelimit update requests, canceled: %w", ctx.Err())
+	}
+
 	var g errgroup.Group // TODO: needs panic resistance
 	g.SetLimit(100)      // TODO: limited concurrency?  configurable?
-	err := c.shard(period, load, func(peerAddress string, batch PushLoad) {
+	for peerAddress, batch := range batches {
 		g.Go(func() error {
 			push, err := serializeLoad(batch)
 			if err != nil {
@@ -186,7 +223,7 @@ func (c *client) Update(ctx context.Context, period time.Duration, load map[stri
 			result, err := c.history.RatelimitUpdate(ctx, peerAddress, &types.RatelimitUpdateRequest{
 				Caller:      string(c.thisHost),
 				LastUpdated: period,
-				Load:        push,
+				Load:        push, // TODO: make this the Any type, not a map containing them, should save tons of data on network and moderate cpu
 			})
 			if err != nil {
 				results(load, RetLoad{}, errors.ErrFromRPC(fmt.Errorf("ratelimit update request: %w", err)))
@@ -197,10 +234,6 @@ func (c *client) Update(ctx context.Context, period time.Duration, load map[stri
 			results(load, batch, err) // both can be non-empty, for partial success
 			return nil
 		})
-	})
-	if err != nil {
-		// should only happen if peers are unavailable, individual requests are handled other ways
-		return fmt.Errorf("unable to begin ratelimit-startup request: %w", err)
 	}
 
 	// always nil, wrap with doesNotError for troubleshooting if something happens
@@ -211,9 +244,14 @@ func (c *client) Update(ctx context.Context, period time.Duration, load map[stri
 }
 
 func (c *client) Startup(ctx context.Context, results func(batch RetLoad, err error)) error {
+	peers, err := c.resolver.GetAllPeers()
+	if err != nil {
+		return errors.ErrFromRPC(fmt.Errorf("unable begin ratelimit-startup request, cannot get all peers: %w", err))
+	}
+
 	var g errgroup.Group // TODO: needs panic resistance
-	g.SetLimit(100)      // TODO: limited concurrency?  configurable?
-	err := c.initAllPeers(func(peerAddress string, batch PushLoad) {
+	g.SetLimit(100)      // TODO: configurable?  this is an upper limit, so no need to make it precise.
+	for _, peerAddress := range peers {
 		g.Go(func() error {
 			result, err := c.history.RatelimitStartup(ctx, peerAddress, &types.RatelimitStartupRequest{
 				Caller: string(c.thisHost),
@@ -227,11 +265,6 @@ func (c *client) Startup(ctx context.Context, results func(batch RetLoad, err er
 			results(batch, err) // both can be non-empty, for partial success
 			return nil
 		})
-	})
-	if err != nil {
-		// should only happen if peers are unavailable and no requests were sent,
-		// individual requests are handled via callback
-		return fmt.Errorf("unable to begin ratelimit-startup request: %w", err)
 	}
 
 	// always nil, doesNotError for troubleshooting if something happens
@@ -241,47 +274,28 @@ func (c *client) Startup(ctx context.Context, results func(batch RetLoad, err er
 	)
 }
 
-// initAllPeers sets up an empty request for each peer in the ratelimit ring,
-// and synchronously calls the callback for each one before returning.
-//
-// if an error is returned, no callbacks will be performed.
-func (c *client) initAllPeers(cb func(peerAddress string, batch PushLoad)) error {
-	// send empty requests to all hosts, to pre-load with all data
-	peers, err := c.resolver.GetAllPeers()
-	if err != nil {
-		return errors.ErrFromRPC(fmt.Errorf("unable to get all peers: %w", err))
-	}
-	for _, peerAddress := range peers {
-		cb(peerAddress, PushLoad{
-			Host:   c.thisHost,
-			Period: 0,
-			Load:   nil,
-		})
-	}
-	return nil
-}
-
 // shard splits load-requests by ratelimit-keys for each peer in the ratelimit ring,
 // and synchronously calls the callback for each one before returning.
 //
 // if an error is returned, no callbacks will be performed.
-func (c *client) shard(period time.Duration, load map[string]Load, cb func(peerAddress string, batch PushLoad)) error {
+func (c *client) shard(period time.Duration, load map[string]Load) (map[string]PushLoad, error) {
 	byPeers, err := c.resolver.SplitFromLoadBalancedRatelimit(keys(load))
 	if err != nil {
-		return errors.ErrFromRPC(fmt.Errorf("unable to shard ratelimits to hosts: %w", err))
+		return nil, errors.ErrFromRPC(fmt.Errorf("unable to shard ratelimits to hosts: %w", err))
 	}
+	results := make(map[string]PushLoad, len(byPeers))
 	for peerAddress, ratelimits := range byPeers {
 		batch := make(map[string]Load, len(ratelimits))
 		for _, key := range ratelimits {
 			batch[key] = load[key]
 		}
-		cb(peerAddress, PushLoad{
+		results[peerAddress] = PushLoad{
 			Host:   c.thisHost,
 			Period: period,
 			Load:   batch,
-		})
+		}
 	}
-	return nil
+	return results, nil
 }
 
 func keys[K comparable, V any](data map[K]V) []K {
@@ -306,7 +320,7 @@ func doesNotError(format string, err error) error {
 func serializeLoad(batch PushLoad) (map[string]types.RatelimitLoad, error) {
 	load := make(map[string]types.RatelimitLoad, len(batch.Load))
 	for k, v := range batch.Load {
-		data, err := json.Marshal(v)
+		data, err := json.Marshal(LoadbalancedAnyRequest(v))
 		if err != nil {
 			// serialization is treated as a fatal error, it should never happen outside dev-ing
 			return nil, fmt.Errorf("serializing key %q: %w", k, err)
@@ -314,7 +328,7 @@ func serializeLoad(batch PushLoad) (map[string]types.RatelimitLoad, error) {
 
 		load[k] = types.RatelimitLoad{
 			Any: types.Any{
-				Type: _loadbalancedAnyRequestType,
+				Type: LoadbalancedAnyRequestType,
 				Data: data,
 			},
 		}
@@ -329,43 +343,72 @@ func serializeLoad(batch PushLoad) (map[string]types.RatelimitLoad, error) {
 // and is likely only possible with non-strictly-defined RPC data (which is inherently dangerous).
 // in such a case however, the first error will be wrapped, and the total number will be counted.
 func deserializeAdjustments(result map[string]types.RatelimitAdjustment) (RetLoad, error) {
+	// TODO: this should be pluggable, but it's fine for now
 	var batch RetLoad
 	var firstErr error
 	var otherErrs int
 	for k, v := range result {
-		if v.Any.Type != _loadbalancedAnyResponseType {
-			if firstErr != nil {
-				otherErrs++
-			} else {
-				firstErr = errors.ErrFromDeserialization(fmt.Errorf(
-					"wrong type %q for key %q",
-					v.Any.Type, k,
-				))
-			}
-
-			continue // try other keys, in case they work
-		}
-
-		var out struct{ Allow float64 }
-		err := json.Unmarshal(v.Any.Data, &out)
+		allow, err := AnyToAdjustment(v.Any)
 		if err != nil {
 			if firstErr != nil {
 				otherErrs++
 			} else {
-				firstErr = errors.ErrFromDeserialization(fmt.Errorf(
-					"decoding error for type %q of key %q, data: %.100v",
-					v.Any.Type, k, v.Any.Data,
-				))
+				firstErr = fmt.Errorf("bad data in key %q, err: %w", k, err)
 			}
 
 			continue // try other keys, in case they work
 		}
 
 		// valid data, save it
-		batch.Allow[k] = int(out.Allow)
+		batch.Allow[k] = int(allow)
 	}
 	if firstErr != nil && otherErrs > 0 {
 		firstErr = fmt.Errorf("encountered %v other errors, first: %w", otherErrs, firstErr)
 	}
 	return batch, firstErr
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func AdjustmentToAny(allow float64) types.Any {
+	obj := LoadbalancedAnyResponse{
+		Allow: allow,
+	}
+	data, err := json.Marshal(obj)
+	if err != nil {
+		panic(fmt.Errorf("should not be possible: LoadbalancedAnyResponse failed to JSON-serialize: %w", err))
+	}
+	return types.Any{
+		Type: LoadbalancedAnyResponseType,
+		Data: data,
+	}
+}
+
+func AnyToAdjustment(a types.Any) (float64, error) {
+	if a.Type != LoadbalancedAnyResponseType {
+		return 0, errors.ErrFromDeserialization(
+			fmt.Errorf("wrong Any.Type %q, should be %q", a.Type, LoadbalancedAnyResponseType),
+		)
+	}
+
+	var out LoadbalancedAnyResponse
+	err := json.Unmarshal(a.Data, &out)
+	if err != nil {
+		return 0, errors.ErrFromDeserialization(
+			fmt.Errorf("decoding error for type %q, data: %.100v", a.Type, a.Data),
+		)
+	}
+	return out.Allow, nil
+}
+
+func RequestToAny(r LoadbalancedAnyRequest) types.Any {
+
+}
+func AnyToRequest(a types.Any) (LoadbalancedAnyRequest, error) {
+
 }

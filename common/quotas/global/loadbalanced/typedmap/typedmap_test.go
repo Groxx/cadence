@@ -24,6 +24,7 @@ package typedmap
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -61,19 +62,28 @@ func TestNotRacy(t *testing.T) {
 	count := atomic.NewInt64(0)
 	m, err := New(func(key string) *string {
 		s := key
-		s += strconv.Itoa(int(count.Load())) // just to be recognizable
+		s += "-"
+		s += strconv.Itoa(int(count.Inc())) // just to be recognizable
 		return &s
 	})
 	require.NoError(t, err)
 
 	var g errgroup.Group
-	for i := 0; i < 100; i++ {
+	const loops = 100
+	for i := 0; i < loops; i++ {
 		i := i
 		g.Go(func() error {
 			v := m.Load(strconv.Itoa(i))
 			assert.NotEmpty(t, *v) // nils also asserted by crashing
 			return nil
 		})
+		// try to load the same key multiple times
+		g.Go(func() error {
+			v := m.Load(strconv.Itoa(i))
+			assert.NotEmpty(t, *v)
+			return nil
+		})
+		// range over it while reading/writing
 		g.Go(func() error {
 			m.Range(func(k string, v *string) bool {
 				assert.NotEmpty(t, k)
@@ -84,4 +94,43 @@ func TestNotRacy(t *testing.T) {
 		})
 	}
 	require.NoError(t, g.Wait())
+
+	// sanity-check to show decent concurrency:
+	// - out-of-order inits (count is higher and lower than key)
+	// - duplicate inits (counts higher than 100)
+	same, higher, lower, max := 0, 0, 0, int64(0)
+	m.Range(func(k string, v *string) bool {
+		parts := strings.SplitN(*v, "-", 2)
+
+		// sanity check that keys and values stay associated
+		assert.Equal(t, k, parts[0], "key %q and first part of value must match: %q", k, *v)
+
+		if parts[0] == parts[1] {
+			same++
+		} else if parts[0] < parts[1] {
+			higher++
+		} else {
+			lower++
+		}
+
+		vint, err := strconv.ParseInt(parts[1], 10, 64)
+		assert.NoError(t, err, "count-%v should be parse-able as an int", parts[1])
+		if vint > max { // hacky numeric sort
+			max = vint
+		}
+		return true
+	})
+
+	assert.True(t, loops <= max, "loops %v <= max %v", loops, max)
+	assert.True(t, max <= count.Load(), "max %v <= count %v", max, count.Load())
+	t.Logf(
+		"Metrics:\n"+
+			"\tSame (1=>1-1):        %v\n"+
+			"\tHigher (5=>5-100):    %v\n"+
+			"\tLower (100=>100-5):   %v\n"+
+			"\tNumber of iterations: %v\n"+
+			"\tHighest saved create: %v\n"+ // same or higher than iterations
+			"\tTotal num of creates: %v", // same or higher than creates
+		same, higher, lower, loops, max, count.Load(),
+	)
 }

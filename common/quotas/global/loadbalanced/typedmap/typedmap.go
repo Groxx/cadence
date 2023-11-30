@@ -30,18 +30,29 @@ import (
 )
 
 // TypedMap adds type safety around a sync.Map, and:
-//   - auto-inits values to the type's zero value, as a pointer
+//   - implicitly constructs values as needed, not relying on zero values
 //   - simplifies the API a bit because not all methods are in use
 //   - tracks length
+//
+// Value must be an interface, pointer, or map type, as otherwise there is no
+// real purpose to using this sync.Map-based tool.
 type TypedMap[Key comparable, Value any] struct {
 	contents sync.Map
 	create   func(key Key) Value
 	len      int64
 }
 
+func NewZero[Key comparable, Value any]() (*TypedMap[Key, Value], error) {
+	return New(func(key Key) Value {
+		var zero Value
+		return zero
+	})
+}
+
 // New makes a new typed sync.Map that creates values as needed.
 //
-// Value must be a pointer or interface type, as otherwise there is no real purpose to using this sync.Map-based tool.
+// Value must be an interface, pointer, or map type, as otherwise there is no
+// real purpose to using this sync.Map-based tool.
 //
 // create will be called when creating a new value, possibly multiple times.
 // It should return ASAP to reduce the window for storage races.
@@ -50,11 +61,12 @@ func New[Key comparable, Value any](create func(key Key) Value) (*TypedMap[Key, 
 	vtype := reflect.TypeOf(zero)
 	isInterface := vtype == nil                                 // nil interfaces do this, and zero is nil
 	isPointer := isInterface || vtype.Kind() == reflect.Pointer // vtype.Kind panics if nil
-	if !isInterface && !isPointer {
+	isMap := isInterface || vtype.Kind() == reflect.Map
+	if !(isInterface || isPointer || isMap) {
 		// using a non-pointer-type would mean copying on every load, making this object pointless.
 		// unfortunately this cannot currently be expressed with type constraints, as there is no
 		// way to describe e.g. "a struct with any keys" or "a map of any type".
-		return nil, fmt.Errorf("must use an interface or pointer type with TypedMap: %T", zero)
+		return nil, fmt.Errorf("must use an interface, pointer, or map type with TypedMap: %T", zero)
 	}
 	return &TypedMap[Key, Value]{
 		contents: sync.Map{},
@@ -69,12 +81,30 @@ func (t *TypedMap[Key, Value]) Load(key Key) Value {
 	if loaded {
 		return val.(Value)
 	}
-	val, loaded = t.contents.LoadOrStore(key, t.create(key))
+	created := t.create(key)
+	val, loaded = t.contents.LoadOrStore(key, created)
 	if !loaded {
 		// stored a new value
 		atomic.AddInt64(&t.len, 1)
 	}
 	return val.(Value)
+}
+
+// Try will load the current Value for a key, or return false if it did not exist.
+// This will NOT initialize the key if it does not exist, it just directly calls
+// the underlying Load on the sync.Map
+func (t *TypedMap[Key, Value]) Try(key Key) (Value, bool) {
+	v, ok := t.contents.Load(key)
+	return v.(Value), ok
+}
+
+// Delete calls LoadAndDelete on the underlying sync.Map, and has the same semantics.
+// This can be called concurrently with Range, and it updates length.
+func (t *TypedMap[Key, Value]) Delete(k Key) {
+	_, loaded := t.contents.LoadAndDelete(k)
+	if loaded {
+		atomic.AddInt64(&t.len, -1)
+	}
 }
 
 // Range calls Range on the underlying sync.Map, and has the same semantics.

@@ -20,10 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/*
-Package internal protects these types' concurrency primitives and other
-internals from accidents.
-*/
+// Package internal protects these types' concurrency primitives and other internals from accidents.
 package internal
 
 import (

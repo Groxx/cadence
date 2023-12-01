@@ -20,85 +20,34 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/*
-Package rpc is used by both limiter and aggregator, so this is broken out to prevent cycles.
-
-The types here are used in the data blob field of the ratelimiter IDL.
-*/
+// Package rpc is used by both limiter and aggregator, so this is broken out to prevent cycles.
 package rpc
 
-// TODO: some kind of self-healing ring ideally.... yea?
-// TODO: preload data that might come to this host if the ring changes?  or will that require the whole ring?
-// consistent hash ring should mean just +1 host worth of data.  "inheritable" basically.  filter before pushing.
-//
-// ringpop-go has this semantic, but not our wrapper.
-// could modify, but for now just yolo.
-//
-// separately: ringpop-go is surprisingly slow.
-//  - 100 hosts + 1000 keys + 1 host per key = 0.2ms for 8 cpu (our wrapper does this)
-//  - scales linearly with N hosts per key
-//  - farmhash on its own is low-double-digits of nanoseconds per key, ringpop is 200,000.
-//    - 20,000 for hashing 1k keys, so 10x more for 100 hosts?
-//    - not absurd I guess.  though seems high for a red/black tree walk for next-highest node.
-//  - so we can expect a full filter to take about 1ms of cpu.
-//
-// costly!  possibly even worth caching, evict when the ring changes.
-//
-//
 /*
-	back-of-envelope calc to sanity check:
-	- 100 limiting hosts
-	- 100 common hosts
-	- 1000 ratelimit keys per limit-type (domains)
-	- 3 limit-types (user/worker/search)
-	- 1/s check-ins
-	- 0.2ms for 8 cpu (call it 2s)
-	---------
-	that means:
-	- 1 limiting host spends 2ms per second to send (0.2% budget)
-	- 100 common hosts spend 2ms to respond = 200ms per second (20% budget)
-	so this will consume 20% of a core in the common hosts, just due to ringpop.
-	-----
-	so:
-	- limiting hosts do whatever, it's cheap
-	- common hosts need to cache key/host pairs, evict on ring changes.
-	  (pays for itself quickly.)
-	-----
-	alternately, return all to limiting host, have it filter:
-	- 4ms per second (0.4% cpu budget)
-	- 100x more data
-	- not cache friendly
-	- very limiter-friendly, all available all the time
-*/
-/*
-	everyone stores everything, limiters collect from everyone?
-	- everyone pushes/pulls all data every period
-	- 100x more data for limiters to pull, commons to return
-	- commons are dumb, trivially replaced by redis
-	- losing a common host means that host just has nothing.  all others still exist, still replicating data.
-	- ... pretty sticky?  also high bandwidth, lots of small shifting, can't checksum to compare.  just average to get real values.
-*/
-/*
-	ringpop to get 3 hosts, 3x data, average between?
-	- 3x cpu per limiter, 6ms (0.6% budget)
-	- 3x cpu per common, 600ms (60% budget)
-	  - really needs cache here
-	- missing data is just ignored, present is averaged as it's just a replica
-*/
-/*
-	No, thinking I should:
-	- send all we have observed
-	- reply with all matching (no common-host cost, minimal data)
-	- allow tuning "when no data, allow `(RPS/N-hosts) * configurable`".
-	  - we'll probably use 2x internally, to be tolerant of moves for a period.
-	  - this may cut spikes, but that's probably a good thing
 
-	...
-	What can I do with pre-warmed data?  Anything beyond "allow [that fallback]"?
-	- Can reject when over / act like muttley, reject N% / beyond Nps on the assumption that
-	  we are merely changing frontends.
-	- I kinda like the "can use N% of remaining quota" which allows higher and lower than [that fallback]
-	  - this could be based on N hosts in *zone*...
+back-of-envelope calc to sanity check performance needs:
+- 100 limiting hosts
+- 100 aggregating hosts
+- 1000 ratelimit keys per limit-type (domains)
+- 3 limit-types (user/worker/search)
+- 1/s check-in
+- 0.2ms for 8 cpu (call it 2ms 1 cpu) to get a single ringpop host for each key
+
+that means, if aggregating hosts do ringpop stuff:
+- 1 limiting host spends 2ms per second to send (0.2% budget)
+- 100 aggregating hosts spend 2ms to respond = 200ms per second with 100 limiters (20% budget)
+
+so this will consume 20% of a core in the aggregating hosts, just due to ringpop.
+ouch.
+
+---
+
+so:
+- limiting hosts do whatever, it's cheap.
+- aggregating hosts need be concerned about how they return data.
+  - cache key/host pairs, evict on ring changes?  it'll pay off quickly.
+  - filter to caller's keys?  efficient but does not spread load before needed.
+  - don't filter responses, return everything?  100x more data tho.
 */
 
 import (
@@ -106,6 +55,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/uber/cadence/common/log"
+	"github.com/uber/cadence/common/metrics"
 
 	"golang.org/x/sync/errgroup"
 
@@ -170,32 +124,32 @@ type (
 
 	Host string // random UUID specified at startup, as membership.HostInfo does not seem guaranteed unique
 
-	// PushLoad allows extremely simple load reporting, no accounting for spikiness / etc.
-	PushLoad struct {
-		Host   Host               // random UUID at startup
-		Period time.Duration      // Non-zero.  How long since the last reporting, or since service startup / RPC-inbound allowed.
-		Load   map[string]Metrics // Request data per ratelimit key to this host. (May be useful to include multiple periods if the value changed)
-	}
-	// Load info for one key
-	Load struct {
-		Allowed  int // How many requests were Allowed
-		Rejected int // How many requests were Rejected
-	}
-	// RetLoad defines how many requests to allow per key for this Host
-	RetLoad struct {
-		Host   Host           // implied == self, remove soon
-		Allow  map[string]int // Map of ratelimit keys to RPS
-		Remove []string       // List of keys that are no longer owned by this host (from PushLoad)
-	}
-
 	client struct {
 		history  history.Client
 		resolver history.PeerResolver
 		thisHost Host
+
+		logger log.Logger
+		scope  metrics.Scope
 	}
 )
 
 var _ Client = (*client)(nil)
+
+func New(
+	historyClient history.Client,
+	resolver history.PeerResolver,
+	logger log.Logger,
+	scope metrics.Scope,
+) Client {
+	return &client{
+		history:  historyClient,
+		resolver: resolver,
+		thisHost: Host(uuid.New().String()), // TODO: descriptive would be better?  but it works, unique ensures correctness.
+		logger:   logger,
+		scope:    scope,
+	}
+}
 
 func (c *client) Update(ctx context.Context, period time.Duration, load AnyUpdateRequest, results func(request AnyUpdateRequest, response *AnyAllowResponse, err error)) error {
 	batches, err := c.shard(load)
@@ -209,10 +163,12 @@ func (c *client) Update(ctx context.Context, period time.Duration, load AnyUpdat
 		return fmt.Errorf("unable to start ratelimit update requests, canceled: %w", ctx.Err())
 	}
 
-	var g errgroup.Group // TODO: needs panic resistance
-	g.SetLimit(100)      // TODO: limited concurrency?  configurable?
+	var g errgroup.Group
+	g.SetLimit(100) // TODO: limited concurrency?  configurable?
 	for peerAddress, batch := range batches {
 		g.Go(func() error {
+			defer func() { log.CapturePanic(recover(), c.logger, nil) }() // todo: describe what failed? is stack enough?
+
 			push, err := UpdateRequestToAny(batch)
 			if err != nil {
 				// serialization is treated as a fatal coding error, it should never happen outside dev-ing.
@@ -253,10 +209,12 @@ func (c *client) Startup(ctx context.Context, results func(batch *AnyAllowRespon
 		return errors.ErrFromRPC(fmt.Errorf("unable begin ratelimit-startup request, cannot get all peers: %w", err))
 	}
 
-	var g errgroup.Group // TODO: needs panic resistance
-	g.SetLimit(100)      // TODO: configurable?  this is an upper limit, so no need to make it precise.
+	var g errgroup.Group
+	g.SetLimit(100) // TODO: configurable?  this is an upper limit, so no need to make it precise.
 	for _, peerAddress := range peers {
 		g.Go(func() error {
+			defer func() { log.CapturePanic(recover(), c.logger, nil) }() // todo: describe what failed? is stack enough?
+
 			result, err := c.history.RatelimitStartup(ctx, peerAddress, &types.RatelimitStartupRequest{
 				Caller: string(c.thisHost),
 			})

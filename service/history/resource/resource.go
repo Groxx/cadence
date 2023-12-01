@@ -23,6 +23,10 @@ package resource
 import (
 	"fmt"
 	"sync/atomic"
+	"time"
+
+	"github.com/uber/cadence/common/dynamicconfig"
+	"github.com/uber/cadence/common/metrics"
 
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator"
 
@@ -133,7 +137,18 @@ func New(
 		serviceResource.GetDomainCache(),
 	)
 
-	agg, err := aggregator.New(nil, nil)
+	agg, err := aggregator.New(
+		// TODO: make a real config
+		func(opts ...dynamicconfig.FilterOption) int {
+			return 10
+		},
+		// TODO: make a real config
+		func(opts ...dynamicconfig.FilterOption) time.Duration {
+			return 10 * time.Second
+		},
+		params.Logger,
+		params.MetricsClient.Scope(metrics.HistoryRatelimitStartupScope), // TODO: need new scope const / double check purpose of scope
+	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create ratelimit aggregator: %w", err)
 	}

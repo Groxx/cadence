@@ -20,51 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/*
-Package aggregator blah
-
-TODO: deserialize types.Any data, maintain a small sliding window of data per key, report back to callers.
-
-strategy might be:
-  - keep 10 (configurable) reporting periods (10s, configurable) in a cyclic buffer
-  - per non-zero + per host in buffer, compute num of total requests per host (weight allow vs block?)
-  - next update request updates data, recomputes host's share of requests, returns
-
-start simple but high mem?
-  - keep per-host data for N periods
-  - new reports go into newest bucket, are ignored
-  - take last 3 periods, compute weighted average of total traffic for this host (50%, 25%, 25%) ignoring its own zeros (sum others across zeros)
-  - return max(1/N hosts, weight) to always allow a minimum through.  pool will re-balance soon.
-  - ... make sure already-allowed is tracked so others do not exceed?
-
-how do I handle "burst -> new host -> burst -> new host -> burst"?
-  - across N periods, this would say "3 hosts each used 1/3rd" and the new 4th host gets a minimum of 1/N
-  - next period, 4th host gets 50% as older 3 hosts had no activity (beyond time cutoff?)
-  - next period, 4th host gets 75%
-  - next period, 4th host gets 100%?
-
-maybe:
-  - compute total from previous N periods
-  - compute proportion of latest update that this update would have consumed (can be >100%)
-  - subtract already-used-this-period proportion from other updates
-  - return whatever is left
-
-this period: zeros are possible, as is 100%
-next period: it'll get whatever proportion it contributed to last time
-
-bah!  where do limits get considered, not just proportion?
-
-eeehhhh... see what muttley does.  that can probably be copied directly.
-
-muttley!
-- aggregates exactly like I'm doing here
-- returns only "drop %" information to limiting-frontends
-- limiting-frontends do not run rate.Limiter instances at all!  they just allow spikes through, fix it on the next 3s cycle.
-- every limiting-frontend gets the same % because that's fine for this kind of calc
-
-so yea, we don't want to mimic that.  we'd rather reject traffic than allow infinite spikes.
-*/
-
 package aggregator
 
 import (
@@ -73,6 +28,9 @@ import (
 	"time"
 
 	"github.com/uber/cadence/common/dynamicconfig"
+	"github.com/uber/cadence/common/log"
+	"github.com/uber/cadence/common/log/tag"
+	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator/internal"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/rpc"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/typedmap"
@@ -111,21 +69,29 @@ type (
 
 		// used to estimate number of frontend hosts
 		// TODO: replace with frontend ringpop resolver for a much more accurate count
-		hostsLastSeen *typedmap.TypedMap[string, *internal.HostSeen]
+		hostsLastSeen *internal.HostSeen
+		rotateRate    dynamicconfig.DurationPropertyFn
 
-		rotateRate dynamicconfig.DurationPropertyFn
-
-		// for tests
-		now func() time.Time
+		logger log.Logger
+		scope  metrics.Scope
 
 		// lifecycle management
 		ctx     context.Context
 		cancel  func()
 		stopped chan struct{}
+
+		// for tests
+		now             func() time.Time
+		hostObservedTTL time.Duration
 	}
 )
 
-func New(rps dynamicconfig.IntPropertyFn, updateRate dynamicconfig.DurationPropertyFn) (Agg, error) {
+func New(
+	rps dynamicconfig.IntPropertyFn,
+	updateRate dynamicconfig.DurationPropertyFn,
+	logger log.Logger,
+	scope metrics.Scope,
+) (Agg, error) {
 	limits, err := typedmap.New(func(key string) *internal.Limit {
 		return internal.NewLimit(rps)
 	})
@@ -133,26 +99,28 @@ func New(rps dynamicconfig.IntPropertyFn, updateRate dynamicconfig.DurationPrope
 		return nil, fmt.Errorf("should be impossible: bad collection type: %v", err)
 	}
 
-	lastseen, err := typedmap.NewZero[string, *internal.HostSeen]()
-	if err != nil {
-		return nil, fmt.Errorf("should be impossible: bad collection type: %v", err)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	return &agg{
 		limits:        limits,
-		hostsLastSeen: lastseen,
+		hostsLastSeen: internal.NewHostSeen(),
 		rotateRate:    updateRate,
-		ctx:           ctx,
-		cancel:        cancel,
-		stopped:       make(chan struct{}),
+
+		logger: logger.WithTags(tag.ComponentLoadbalancedRatelimiter),
+		scope:  scope, // TODO: tag
+
+		ctx:     ctx,
+		cancel:  cancel,
+		stopped: make(chan struct{}),
+
+		now:             time.Now,
+		hostObservedTTL: time.Minute, // TODO: dynamic config?
 	}, nil
 }
 
 func (a *agg) Start() {
 	go func() {
+		defer func() { log.CapturePanic(recover(), a.logger, nil) }() // todo: describe what failed? is stack enough?
 		defer close(a.stopped)
-		// TODO: panic safety
 
 		tickRate := a.rotateRate()
 		tick := time.NewTicker(tickRate)
@@ -187,38 +155,31 @@ func (a *agg) Stop(ctx context.Context) error {
 }
 
 func (a *agg) rotate() {
-	// switch ratelimit buckets
+	// begin a new round of limits
 	a.limits.Range(func(k string, v *internal.Limit) bool {
 		v.Rotate()
 		return true
 	})
 
 	// prune known limiting hosts
-	now := a.now()
-	a.hostsLastSeen.Range(func(k string, v *internal.HostSeen) bool {
-		if v.LastObserved(now) > time.Minute { // TODO: configurable
-			a.hostsLastSeen.Delete(k)
-		}
-		return true
-	})
+	a.hostsLastSeen.GC(a.now(), a.hostObservedTTL)
 }
 
 // Update adds load information for the passed keys to this aggregator.
 func (a *agg) Update(host string, elapsed time.Duration, load rpc.AnyUpdateRequest) {
 	// refresh the host-seen record
-	a.observeHost(host)
+	a.hostsLastSeen.Observe(host, a.now())
 
-	for limit, data := range load.Load {
-		_, _, current := a.limits.Load(limit).Snapshot()
-		thishost := current.Load(host)
-		thishost.Update(float64(data.Allowed), float64(data.Rejected), elapsed)
+	for key, data := range load.Load {
+		limit := a.limits.Load(key)
+		limit.Update(host, float64(data.Allowed), float64(data.Rejected), elapsed)
 	}
 }
 
 // Get retrieves the known load / desired RPS for this host for this key, as a read-only operation.
 func (a *agg) Get(host string, keys []string) rpc.AnyAllowResponse {
 	// refresh the host-seen record
-	a.observeHost(host)
+	a.hostsLastSeen.Observe(host, a.now())
 
 	result := rpc.AnyAllowResponse{
 		Allow: make(map[string]float64, len(keys)),
@@ -226,7 +187,7 @@ func (a *agg) Get(host string, keys []string) rpc.AnyAllowResponse {
 	for _, limit := range keys {
 		rps, previous, current := a.limits.Load(limit).Snapshot()
 
-		if previous.Len() == 0 {
+		if len(previous) == 0 {
 			// warming up, return nothing
 			continue
 		}
@@ -245,19 +206,14 @@ func (a *agg) Get(host string, keys []string) rpc.AnyAllowResponse {
 	return result
 }
 
-func (a *agg) observeHost(host string) {
-	seen := a.hostsLastSeen.Load(host)
-	seen.Observe(a.now())
-}
-
-func (a *agg) getLimit(host string, rps float64, current, previous *typedmap.TypedMap[string, *internal.HostRecord]) (allowed float64, reason string) {
+func (a *agg) getLimit(host string, rps float64, current, previous map[string]internal.HostRecord) (allowed float64, reason string) {
 	previousTotalRPS := 0.0
 	previousThisHostRPS := 0.0
 	previousZeroHosts := 0
 	previousNonzeroHosts := 0
 	// keep track of how many hosts we've seen, for estimation later
-	previousHostnames := make(map[string]struct{}, previous.Len())
-	previous.Range(func(k string, v *internal.HostRecord) bool {
+	previousHostnames := make(map[string]struct{}, len(previous))
+	for k, v := range previous {
 		previousHostnames[k] = struct{}{}
 
 		allowed, rejected := v.Snapshot()
@@ -272,8 +228,7 @@ func (a *agg) getLimit(host string, rps float64, current, previous *typedmap.Typ
 			previousThisHostRPS = sum
 		}
 		previousTotalRPS += sum
-		return true
-	})
+	}
 
 	if len(previousHostnames) == 0 || previousTotalRPS == 0 {
 		return -1, "no data yet"
@@ -294,17 +249,15 @@ func (a *agg) getLimit(host string, rps float64, current, previous *typedmap.Typ
 	previousUnusedRPS := max(0, rps-previousTotalRPS)
 	updatingTotalRPS := 0.0
 	// keep track of how many hosts we've in this bucket
-	updatingHostnames := make(map[string]struct{}, current.Len())
-	current.Range(func(k string, v *internal.HostRecord) bool {
+	updatingHostnames := make(map[string]struct{}, len(current))
+	for k, v := range current {
 		updatingHostnames[k] = struct{}{}
 
 		allowed, rejected := v.Snapshot()
 		updatingTotalRPS += allowed + rejected
 
 		// TODO: scale to estimate by next rotation?
-
-		return true
-	})
+	}
 
 	// safety cutoff if we appear already over-budget.
 	if updatingTotalRPS >= rps {
@@ -375,7 +328,7 @@ func (a *agg) getLimit(host string, rps float64, current, previous *typedmap.Typ
 }
 
 func (a *agg) GetAll(host string) rpc.AnyAllowResponse {
-	a.observeHost(host)
+	a.hostsLastSeen.Observe(host, a.now())
 
 	// allocate space plus a bit of buffer for additions while ranging
 	result := rpc.AnyAllowResponse{

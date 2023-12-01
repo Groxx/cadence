@@ -25,16 +25,17 @@ package limiter
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/uber/cadence/common/dynamicconfig"
+	"github.com/uber/cadence/common/log"
+	"github.com/uber/cadence/common/log/tag"
+	"github.com/uber/cadence/common/metrics"
+	"github.com/uber/cadence/common/quotas"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/errors"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/limiter/internal"
-	"github.com/uber/cadence/common/quotas/global/loadbalanced/typedmap"
-
-	"github.com/uber/cadence/common/quotas"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/rpc"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/typedmap"
 )
 
 type (
@@ -49,11 +50,14 @@ type (
 	// the request balance.
 	//
 	// This can be plugged into [github.com/uber/cadence/common/quotas/global] as a
-	// strategy.
+	// strategy (once made pluggable).
 	BalancedCollection struct {
 		client     rpc.Client
 		updateRate dynamicconfig.DurationPropertyFn
 		fallback   *quotas.Collection
+
+		logger log.Logger
+		scope  metrics.Scope
 
 		// usage info, held in a sync.Map because it matches one of its documented "good fit" cases:
 		// write once + read many times per key.
@@ -66,6 +70,8 @@ type (
 
 		// now exists largely for tests, elsewhere it is always time.Now
 		now func() time.Time
+		// warmupTimeout exists largely for tests, in prod it's hardcoded
+		warmupTimeout time.Duration
 	}
 )
 
@@ -77,7 +83,13 @@ type (
 // No attempt is made to migrate usage data between the fallback and balanced,
 // so limits may briefly be exceeded when switching (~1s with current code which
 // always has burst==rps).
-func NewBalanced(client rpc.Client, fallback *quotas.Collection, updateRate dynamicconfig.DurationPropertyFn) *BalancedCollection {
+func NewBalanced(
+	client rpc.Client,
+	fallback *quotas.Collection,
+	updateRate dynamicconfig.DurationPropertyFn,
+	logger log.Logger,
+	scope metrics.Scope,
+) *BalancedCollection {
 	contents, err := typedmap.New(func(key string) *internal.BalancedLimit {
 		instance := internal.New(fallback.For(key))
 		return instance
@@ -89,14 +101,19 @@ func NewBalanced(client rpc.Client, fallback *quotas.Collection, updateRate dyna
 	return &BalancedCollection{
 		usage:      contents,
 		fallback:   fallback,
-		stopped:    make(chan struct{}),
-		ctx:        ctx,
-		cancel:     cancel,
 		client:     client,
 		updateRate: updateRate,
 
+		logger: logger.WithTags(tag.ComponentLoadbalancedRatelimiter),
+		scope:  scope, // TODO: tag it
+
+		stopped: make(chan struct{}),
+		ctx:     ctx,
+		cancel:  cancel,
+
 		// override externally in tests
-		now: time.Now,
+		now:           time.Now,
+		warmupTimeout: 10 * time.Second, // TODO: dynamic config?
 	}
 }
 
@@ -116,26 +133,27 @@ func (b *BalancedCollection) Start(startCtx context.Context) error {
 	updater, warmup := make(chan struct{}), make(chan struct{})
 	// wait for sub-goroutines when stopping
 	go func() {
+		defer func() { log.CapturePanic(recover(), b.logger, nil) }() // should definitely not happen
 		<-updater
 		<-warmup
 		close(b.stopped)
 	}()
 
-	// TODO: kick off a client.Startup request
 	go func() {
+		defer func() { log.CapturePanic(recover(), b.logger, nil) }() // todo: describe what failed? is stack enough?
 		defer close(warmup)
 
-		ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second) // TODO: configurable
+		ctx, cancel := context.WithTimeout(b.ctx, b.warmupTimeout)
 		defer cancel()
 		err := b.warmup(ctx)
 		if err != nil {
 			// TODO: log or fail startup, this should only be a dev error / incorrect types in serialization.
-			log.Fatal(err)
+			b.logger.Error("failed to warm up in 10 seconds", tag.Error(err))
 		}
 	}()
 
-	// TODO: periodically collect and push updates
 	go func() {
+		defer func() { log.CapturePanic(recover(), b.logger, nil) }() // todo: describe what failed? is stack enough?
 		defer close(updater)
 
 		// wait for warmup for simplicity, so interleaved updates are not possible
@@ -162,24 +180,19 @@ func (b *BalancedCollection) Start(startCtx context.Context) error {
 func (b *BalancedCollection) warmup(ctx context.Context) error {
 	return b.client.Startup(ctx, func(batch *rpc.AnyAllowResponse, err error) {
 		if err != nil {
-			// log, particularly if is-deserialization
-			if errors.IsDeserializationError(err) {
-				// major bug
-				// TODO: be smarter
-				log.Fatal(err)
-			} else if errors.IsRPCError(err) {
-				// expected, yolo?
+			if errors.IsRPCError(err) {
+				// basically expected but potentially concerning
+				b.logger.Warn("rpc error during warmup", tag.Error(err))
 			} else {
-				// unexpected!
-				// TODO: be smarter
-				log.Fatal(err)
+				// unrecognized or serialization, either way should not happen
+				b.logger.Error("other error during warmup", tag.Error(err))
 			}
 		}
 
-		// TODO: probably wrong, but it's something
 		for k, v := range batch.Allow {
 			if v < 0 {
-				// error loading this key?, do something
+				// should never happen
+				b.logger.Error("negative rps", tag.Error(err), tag.Key(k), tag.Value(v))
 			} else {
 				b.usage.Load(k).Update(v)
 			}
@@ -243,17 +256,12 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 			ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second) // TODO: configurable
 			err := b.client.Update(ctx, now.Sub(last), all, func(request rpc.AnyUpdateRequest, batch *rpc.AnyAllowResponse, err error) {
 				if err != nil {
-					// log, particularly if is-deserialization
-					if errors.IsDeserializationError(err) {
-						// major bug
-						// TODO: be smarter
-						log.Fatal(err)
-					} else if errors.IsRPCError(err) {
-						// largely expected, yolo?
+					if errors.IsRPCError(err) {
+						// basically expected but potentially a problem
+						b.logger.Warn("rpc error during update", tag.Error(err))
 					} else {
-						// unexpected!
-						// TODO: be smarter
-						log.Fatal(err)
+						// unrecognized or serialization, either way should not happen
+						b.logger.Error("other error during update", tag.Error(err))
 					}
 				}
 
@@ -281,30 +289,14 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 			cancel()
 
 			if err != nil {
+				// should not happen, this would mean e.g. no ringpop
+				b.logger.Error("unable to perform update request", tag.Error(err))
+
 				for k := range all.Load {
 					// data requested but no request performed, bump the fallback fuse.
 					// if a response is loaded successfully, it'll resume using the fancy limit.
 					b.usage.Load(k).FailedUpdate()
 				}
-
-				// log, particularly if is-deserialization
-				if errors.IsDeserializationError(err) {
-					// major bug
-					// TODO: be smarter
-					log.Fatal(err)
-				} else if errors.IsRPCError(err) {
-					// unexpected when healthy and pretty bad since the whole attempt failed
-					// last-updated time is now incorrect, but... eh, seems harmless.
-				} else {
-					// unexpected!
-					// TODO: be smarter
-					log.Fatal(err)
-				}
-			}
-
-			if err != nil {
-				// TODO: log, this should only be a dev error / incorrect types in serialization.
-				log.Fatal(err)
 			}
 
 			// and loop

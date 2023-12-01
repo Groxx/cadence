@@ -36,7 +36,8 @@ type (
 	// Test is the test implementation used for testing
 	Test struct {
 		*resource.Test
-		EventCache *events.MockCache
+		EventCache          *events.MockCache
+		RatelimitAggregator *aggregator.MockAgg
 	}
 )
 
@@ -49,8 +50,9 @@ func NewTest(
 	serviceMetricsIndex metrics.ServiceIdx,
 ) *Test {
 	return &Test{
-		Test:       resource.NewTest(t, controller, serviceMetricsIndex),
-		EventCache: events.NewMockCache(controller),
+		Test:                resource.NewTest(t, controller, serviceMetricsIndex),
+		EventCache:          events.NewMockCache(controller),
+		RatelimitAggregator: aggregator.NewMockAgg(controller),
 	}
 }
 
@@ -58,6 +60,4 @@ func NewTest(
 func (s *Test) GetEventCache() events.Cache {
 	return s.EventCache
 }
-func (s *Test) GetRatelimitAggregator() *aggregator.Agg {
-	panic("TODO: not yet implemented for tests")
-}
+func (s *Test) GetRatelimitAggregator() aggregator.Agg { return s.RatelimitAggregator }

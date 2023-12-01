@@ -106,7 +106,7 @@ agg decides:
 */
 
 type (
-	Agg struct {
+	agg struct {
 		limits *typedmap.TypedMap[string, *internal.Limit]
 
 		// used to estimate number of frontend hosts
@@ -125,7 +125,7 @@ type (
 	}
 )
 
-func New(rps dynamicconfig.IntPropertyFn, updateRate dynamicconfig.DurationPropertyFn) (*Agg, error) {
+func New(rps dynamicconfig.IntPropertyFn, updateRate dynamicconfig.DurationPropertyFn) (Agg, error) {
 	limits, err := typedmap.New(func(key string) *internal.Limit {
 		return internal.NewLimit(rps)
 	})
@@ -139,7 +139,7 @@ func New(rps dynamicconfig.IntPropertyFn, updateRate dynamicconfig.DurationPrope
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Agg{
+	return &agg{
 		limits:        limits,
 		hostsLastSeen: lastseen,
 		rotateRate:    updateRate,
@@ -149,7 +149,7 @@ func New(rps dynamicconfig.IntPropertyFn, updateRate dynamicconfig.DurationPrope
 	}, nil
 }
 
-func (a *Agg) Start() {
+func (a *agg) Start() {
 	go func() {
 		defer close(a.stopped)
 		// TODO: panic safety
@@ -176,7 +176,7 @@ func (a *Agg) Start() {
 	}()
 }
 
-func (a *Agg) Stop(ctx context.Context) error {
+func (a *agg) Stop(ctx context.Context) error {
 	a.cancel()
 	select {
 	case <-a.stopped:
@@ -186,7 +186,7 @@ func (a *Agg) Stop(ctx context.Context) error {
 	}
 }
 
-func (a *Agg) rotate() {
+func (a *agg) rotate() {
 	// switch ratelimit buckets
 	a.limits.Range(func(k string, v *internal.Limit) bool {
 		v.Rotate()
@@ -204,7 +204,7 @@ func (a *Agg) rotate() {
 }
 
 // Update adds load information for the passed keys to this aggregator.
-func (a *Agg) Update(host string, elapsed time.Duration, load rpc.AnyUpdateRequest) {
+func (a *agg) Update(host string, elapsed time.Duration, load rpc.AnyUpdateRequest) {
 	// refresh the host-seen record
 	a.observeHost(host)
 
@@ -216,7 +216,7 @@ func (a *Agg) Update(host string, elapsed time.Duration, load rpc.AnyUpdateReque
 }
 
 // Get retrieves the known load / desired RPS for this host for this key, as a read-only operation.
-func (a *Agg) Get(host string, keys []string) rpc.AnyAllowResponse {
+func (a *agg) Get(host string, keys []string) rpc.AnyAllowResponse {
 	// refresh the host-seen record
 	a.observeHost(host)
 
@@ -245,12 +245,12 @@ func (a *Agg) Get(host string, keys []string) rpc.AnyAllowResponse {
 	return result
 }
 
-func (a *Agg) observeHost(host string) {
+func (a *agg) observeHost(host string) {
 	seen := a.hostsLastSeen.Load(host)
 	seen.Observe(a.now())
 }
 
-func (a *Agg) getLimit(host string, rps float64, current, previous *typedmap.TypedMap[string, *internal.HostRecord]) (allowed float64, reason string) {
+func (a *agg) getLimit(host string, rps float64, current, previous *typedmap.TypedMap[string, *internal.HostRecord]) (allowed float64, reason string) {
 	previousTotalRPS := 0.0
 	previousThisHostRPS := 0.0
 	previousZeroHosts := 0
@@ -374,7 +374,7 @@ func (a *Agg) getLimit(host string, rps float64, current, previous *typedmap.Typ
 	return 0, "new host, previous over budget"
 }
 
-func (a *Agg) GetAll(host string) rpc.AnyAllowResponse {
+func (a *agg) GetAll(host string) rpc.AnyAllowResponse {
 	a.observeHost(host)
 
 	// allocate space plus a bit of buffer for additions while ranging

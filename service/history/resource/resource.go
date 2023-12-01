@@ -38,7 +38,7 @@ import (
 type Resource interface {
 	resource.Resource
 	GetEventCache() events.Cache
-	GetRatelimitAggregator() *aggregator.Agg
+	GetRatelimitAggregator() aggregator.Agg
 }
 
 type resourceImpl struct {
@@ -46,7 +46,7 @@ type resourceImpl struct {
 
 	resource.Resource
 	eventCache   events.Cache
-	ratelimitAgg *aggregator.Agg
+	ratelimitAgg aggregator.Agg
 }
 
 // Start starts all resources
@@ -84,7 +84,7 @@ func (h *resourceImpl) GetEventCache() events.Cache {
 	return h.eventCache
 }
 
-func (h *resourceImpl) GetRatelimitAggregator() *aggregator.Agg {
+func (h *resourceImpl) GetRatelimitAggregator() aggregator.Agg {
 	return h.ratelimitAgg
 }
 
@@ -133,8 +133,7 @@ func New(
 		serviceResource.GetDomainCache(),
 	)
 
-	var agg *aggregator.Agg
-	agg, err = aggregator.New(nil, nil)
+	agg, err := aggregator.New(nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create ratelimit aggregator: %w", err)
 	}

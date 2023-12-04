@@ -256,7 +256,7 @@ func (a *agg) getLimit(host string, rps float64, current, previous map[string]in
 		allowed, rejected := v.Snapshot()
 		updatingTotalRPS += allowed + rejected
 
-		// TODO: scale to estimate by next rotation?
+		// TODO: scale to estimate by time until next rotation?
 	}
 
 	// safety cutoff if we appear already over-budget.
@@ -330,8 +330,8 @@ func (a *agg) getLimit(host string, rps float64, current, previous map[string]in
 func (a *agg) GetAll(host string) rpc.AnyAllowResponse {
 	a.hostsLastSeen.Observe(host, a.now())
 
-	// allocate space plus a bit of buffer for additions while ranging
 	result := rpc.AnyAllowResponse{
+		// allocate space plus a bit of buffer for additions while ranging
 		Allow: make(map[string]float64, int(float64(a.limits.Len())*1.1)),
 	}
 	a.limits.Range(func(k string, v *internal.Limit) bool {

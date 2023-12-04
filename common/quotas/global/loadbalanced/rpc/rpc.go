@@ -131,6 +131,8 @@ type (
 
 		logger log.Logger
 		scope  metrics.Scope
+
+		maxConcurrency int
 	}
 )
 
@@ -143,11 +145,12 @@ func New(
 	scope metrics.Scope,
 ) Client {
 	return &client{
-		history:  historyClient,
-		resolver: resolver,
-		thisHost: Host(uuid.New().String()), // TODO: descriptive would be better?  but it works, unique ensures correctness.
-		logger:   logger,
-		scope:    scope,
+		history:        historyClient,
+		resolver:       resolver,
+		thisHost:       Host(uuid.New().String()), // TODO: descriptive would be better?  but it works, unique ensures correctness.
+		logger:         logger,
+		scope:          scope,
+		maxConcurrency: 100, // TODO: dynamic config?  GOMAXPROCS?  it's just an upper limit...
 	}
 }
 
@@ -164,7 +167,7 @@ func (c *client) Update(ctx context.Context, period time.Duration, load AnyUpdat
 	}
 
 	var g errgroup.Group
-	g.SetLimit(100) // TODO: limited concurrency?  configurable?
+	g.SetLimit(c.maxConcurrency)
 	for peerAddress, batch := range batches {
 		g.Go(func() error {
 			defer func() { log.CapturePanic(recover(), c.logger, nil) }() // todo: describe what failed? is stack enough?
@@ -210,7 +213,7 @@ func (c *client) Startup(ctx context.Context, results func(batch *AnyAllowRespon
 	}
 
 	var g errgroup.Group
-	g.SetLimit(100) // TODO: configurable?  this is an upper limit, so no need to make it precise.
+	g.SetLimit(c.maxConcurrency)
 	for _, peerAddress := range peers {
 		g.Go(func() error {
 			defer func() { log.CapturePanic(recover(), c.logger, nil) }() // todo: describe what failed? is stack enough?

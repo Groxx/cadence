@@ -74,7 +74,7 @@ func TestNotRacy(t *testing.T) {
 		i := i
 		g.Go(func() error {
 			v := m.Load(strconv.Itoa(i))
-			assert.NotEmpty(t, *v) // nils also asserted by crashing
+			assert.NotEmpty(t, *v) // "never nil" also asserted by crashing
 			return nil
 		})
 		// try to load the same key multiple times

@@ -25,6 +25,9 @@ package limiter
 import (
 	"context"
 	"fmt"
+	"github.com/uber/cadence/common/clock"
+	"golang.org/x/time/rate"
+	"testing"
 	"time"
 
 	"github.com/uber/cadence/common/dynamicconfig"
@@ -69,11 +72,15 @@ type (
 		stopped chan struct{}
 
 		// now exists largely for tests, elsewhere it is always time.Now
-		now func() time.Time
+		now          func() time.Time
+		updateTicker clock.TickSource
 		// warmupTimeout exists largely for tests, in prod it's hardcoded
 		warmupTimeout time.Duration
 	}
 )
+
+// TODO: need to change this to a more limiter-friendly thing
+var _ quotas.CollectionIface = (*BalancedCollection)(nil)
 
 // NewBalanced
 //
@@ -113,7 +120,18 @@ func NewBalanced(
 
 		// override externally in tests
 		now:           time.Now,
-		warmupTimeout: 10 * time.Second, // TODO: dynamic config?
+		updateTicker:  clock.NewRealTickSource(time.Hour), // TODO: inf
+		warmupTimeout: 10 * time.Second,                   // TODO: dynamic config?
+	}
+}
+
+func (b *BalancedCollection) TestOverrides(t *testing.T, now func() time.Time, updateTicker clock.TickSource) {
+	t.Helper()
+	if now != nil {
+		b.now = now
+	}
+	if updateTicker != nil {
+		b.updateTicker = updateTicker
 	}
 }
 
@@ -143,13 +161,22 @@ func (b *BalancedCollection) Start(startCtx context.Context) error {
 		defer func() { log.CapturePanic(recover(), b.logger, nil) }() // todo: describe what failed? is stack enough?
 		defer close(warmup)
 
+		deadline, ok := startCtx.Deadline()
+		var timeout time.Duration
+		if ok {
+			timeout = deadline.Sub(b.now())
+		}
+
 		ctx, cancel := context.WithTimeout(b.ctx, b.warmupTimeout)
 		defer cancel()
 		err := b.warmup(ctx)
 		if err != nil {
 			// TODO: log or fail startup, this should only be a dev error / incorrect types in serialization.
-			b.logger.Error("failed to warm up in 10 seconds", tag.Error(err))
+			b.logger.Error("failed to warm up before timeout/cancel",
+				tag.Dynamic("timeout", timeout.Round(time.Millisecond).String()),
+				tag.Error(err))
 		}
+		b.logger.Debug("warmup complete")
 	}()
 
 	go func() {
@@ -209,21 +236,24 @@ func (b *BalancedCollection) warmup(ctx context.Context) error {
 // To stop this loop, call Stop().
 func (b *BalancedCollection) backgroundUpdateLoop() {
 	tickRate := b.updateRate()
-	tick := time.NewTicker(tickRate)
-	defer tick.Stop()
 
+	logger := b.logger.WithTags(tag.Dynamic("limiter", "update"))
+	logger.Debug("update loop starting")
+
+	b.updateTicker.Reset(tickRate)
 	last := b.now()
 	for {
 		select {
 		// tick.C occurs every period regardless of time spent waiting on a response,
 		// which is probably preferred - it ensures more regular updates, rather than
 		// trying to reduce calls
-		case <-tick.C:
+		case <-b.updateTicker.Chan():
+			logger.Debug("update tick")
 			// update tick-rate if it changed
 			newTickRate := b.updateRate()
 			if tickRate != newTickRate {
 				tickRate = newTickRate
-				tick.Reset(newTickRate)
+				b.updateTicker.Reset(newTickRate)
 			}
 
 			// len is an estimate and more may be added while iterating.
@@ -243,6 +273,9 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 			b.usage.Range(func(k string, v *internal.BalancedLimit) bool {
 				used, refused, usingFallback := v.Collect()
 				_ = usingFallback // TODO: interesting for metrics?
+				if used+refused == 0 {
+					return true // no requests -> no update sent
+				}
 				all.Load[k] = rpc.Metrics{
 					Allowed:  used,
 					Rejected: refused,
@@ -250,18 +283,26 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 				return true
 			})
 
+			logger.Debug("found keys to update",
+				tag.Dynamic("num", len(all.Load)),
+				tag.Dynamic("all", all.Load))
+
 			// push to common hosts.
 			// client parallelizes and calls callback as many times as there are hosts to contact,
 			// and returns after all are complete.
 			ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second) // TODO: configurable
 			err := b.client.Update(ctx, now.Sub(last), all, func(request rpc.AnyUpdateRequest, batch *rpc.AnyAllowResponse, err error) {
+				logger.Debug("update callback",
+					tag.Error(err),
+					tag.Dynamic("request keys", len(request.Load)),
+					tag.Dynamic("response keys", len(batch.Allow)))
 				if err != nil {
 					if errors.IsRPCError(err) {
 						// basically expected but potentially a problem
-						b.logger.Warn("rpc error during update", tag.Error(err))
+						logger.Warn("rpc error during update", tag.Error(err))
 					} else {
 						// unrecognized or serialization, either way should not happen
-						b.logger.Error("other error during update", tag.Error(err))
+						logger.Error("other error during update", tag.Error(err))
 					}
 				}
 
@@ -290,7 +331,7 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 
 			if err != nil {
 				// should not happen, this would mean e.g. no ringpop
-				b.logger.Error("unable to perform update request", tag.Error(err))
+				logger.Error("unable to perform update request", tag.Error(err))
 
 				for k := range all.Load {
 					// data requested but no request performed, bump the fallback fuse.
@@ -302,6 +343,7 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 			// and loop
 			last = now
 		case <-b.ctx.Done():
+			logger.Debug("shutting down update loop")
 			return
 		}
 	}
@@ -317,6 +359,7 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 // still stop ASAP.
 func (b *BalancedCollection) Stop(ctx context.Context) error {
 	b.cancel()
+	b.updateTicker.Stop()
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("timed out while stopping: %w", ctx.Err())
@@ -324,3 +367,19 @@ func (b *BalancedCollection) Stop(ctx context.Context) error {
 		return nil
 	}
 }
+
+func (b *BalancedCollection) For(key string) quotas.Limiter {
+	return &allowonlylimiter{
+		wrapped: b.usage.Load(key),
+	}
+}
+
+type allowonlylimiter struct{ wrapped quotas.AllowLimiter }
+
+var _ quotas.Limiter = (*allowonlylimiter)(nil)
+
+func (a *allowonlylimiter) Allow() bool                    { return a.wrapped.Allow() }
+func (a *allowonlylimiter) Wait(ctx context.Context) error { panic("not implemented") }
+func (a *allowonlylimiter) Reserve() *rate.Reservation     { panic("not implemented") }
+
+var _ clock.TimeSource

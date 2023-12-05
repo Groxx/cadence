@@ -22,6 +22,11 @@ package quotas
 
 import "sync"
 
+// TODO: ... upcast for fancy limiter?  hm.  dislike half-impl panicky things.
+type CollectionIface interface {
+	For(key string) Limiter
+}
+
 // Collection stores a map of limiters by key
 type Collection struct {
 	mu       sync.RWMutex

@@ -22,6 +22,8 @@
 
 package quotas
 
+//go:generate mockgen -package $GOPACKAGE -source $GOFILE -destination interfaces_mock.go -self_package github.com/uber/cadence/common/quotas
+
 import (
 	"context"
 
@@ -37,6 +39,16 @@ type RPSKeyFunc func(key string) float64
 // Info corresponds to information required to determine rate limits
 type Info struct {
 	Domain string
+}
+
+// AllowLimiter defines the most-basic ratelimiter, which does not allow
+// Wait/Reserve.  Those are useful for task processing, but are not currently
+// used for client-request limiting.
+type AllowLimiter interface {
+	// Allow attempts to allow a request to go through. The method returns
+	// immediately with a true or false indicating if the request can make
+	// progress
+	Allow() bool
 }
 
 // Limiter corresponds to basic rate limiting functionality.

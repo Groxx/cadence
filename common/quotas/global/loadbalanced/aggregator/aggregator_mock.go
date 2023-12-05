@@ -36,7 +36,7 @@ import (
 	rpc "github.com/uber/cadence/common/quotas/global/loadbalanced/rpc"
 )
 
-// MockAgg is a mock of Agg interface.
+// MockAgg is a mock of Aggregator interface.
 type MockAgg struct {
 	ctrl     *gomock.Controller
 	recorder *MockAggMockRecorder

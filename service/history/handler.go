@@ -75,7 +75,7 @@ type (
 		replicationTaskFetchers  replication.TaskFetchers
 		queueTaskProcessor       task.Processor
 		failoverCoordinator      failover.Coordinator
-		ratelimitAgg             aggregator.Agg
+		ratelimitAgg             aggregator.Aggregator
 	}
 )
 

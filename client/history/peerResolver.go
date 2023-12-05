@@ -98,7 +98,7 @@ func (pr PeerResolver) SplitFromLoadBalancedRatelimit(ratelimits []string) (map[
 
 	for _, r := range ratelimits {
 		// figure out the destination for this ratelimit
-		host, err := pr.resolver.LookupByAddress(service.History, r)
+		host, err := pr.resolver.Lookup(service.History, r)
 		if err != nil {
 			// TODO: wrap with error cause when it's safe to do so
 			return nil, common.ToServiceTransientError(err)

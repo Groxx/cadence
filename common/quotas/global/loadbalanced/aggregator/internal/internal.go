@@ -34,9 +34,9 @@ type (
 	Limit struct {
 		mut sync.Mutex
 
-		rps      func() float64         // target rps across all hosts
-		previous map[string]*HostRecord // previous (full) bucket of data
-		current  map[string]*HostRecord // current (incomplete) bucket of data, being filled
+		rps      func() float64        // target rps across all hosts
+		previous map[string]HostRecord // previous (full) bucket of data
+		current  map[string]HostRecord // current (incomplete) bucket of data, being filled
 	}
 	// HostRecord is NOT protected against concurrent actions.
 	// Other methods must be used if you are operating on a pointer type.
@@ -55,8 +55,8 @@ type (
 func NewLimit(rps dynamicconfig.IntPropertyFn) *Limit {
 	return &Limit{
 		rps:      rps.AsFloat64(),
-		previous: make(map[string]*HostRecord),
-		current:  make(map[string]*HostRecord),
+		previous: make(map[string]HostRecord),
+		current:  make(map[string]HostRecord),
 	}
 }
 func NewHostSeen() *HostSeen {
@@ -75,7 +75,7 @@ func (l *Limit) Rotate() {
 	l.mut.Lock()
 	defer l.mut.Unlock()
 	l.previous = l.current
-	l.current = make(map[string]*HostRecord, len(l.previous))
+	l.current = make(map[string]HostRecord, len(l.previous))
 
 	// TODO: forward all past-current to new-current, increment an idle-fuse?
 	// could use as:
@@ -86,7 +86,7 @@ func (l *Limit) Rotate() {
 func (l *Limit) Update(host string, allowed, rejected float64, elapsed time.Duration) {
 	l.mut.Lock()
 	defer l.mut.Unlock()
-	l.current[host].Update(allowed, rejected, elapsed)
+	l.current[host] = l.current[host].Update(allowed, rejected, elapsed)
 }
 
 func (h *HostSeen) Observe(host string, now time.Time) {
@@ -114,26 +114,27 @@ func (h *HostSeen) Len() int {
 	return len(h.last)
 }
 
-func (h *HostRecord) Update(allowed, rejected float64, elapsed time.Duration) {
+func (h HostRecord) Update(allowed, rejected float64, elapsed time.Duration) HostRecord {
 	h.allowed = weight(h.allowed, allowed/elapsed.Seconds())
 	h.rejected = weight(h.rejected, rejected/elapsed.Seconds())
+	return h
 }
-func (h *HostRecord) Snapshot() (allowed, rejected float64) {
+func (h HostRecord) Snapshot() (allowed, rejected float64) {
 	return h.allowed, h.rejected
 }
 
 func weight(prev float64, current float64) float64 {
 	if prev == 0 {
-		return prev
+		return current
 	}
 	// update so newer data has 75% of the weight with each update
 	return (prev * 0.25) + (current * 0.75)
 }
 
-func snapshotHostRecords(m map[string]*HostRecord) map[string]HostRecord {
+func snapshotHostRecords(m map[string]HostRecord) map[string]HostRecord {
 	out := make(map[string]HostRecord, len(m))
 	for k, v := range m {
-		out[k] = *v
+		out[k] = v
 	}
 	return out
 }

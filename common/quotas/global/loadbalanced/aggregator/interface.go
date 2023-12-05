@@ -35,7 +35,7 @@ import (
 //go:generate mockgen -package $GOPACKAGE -source $GOFILE -destination aggregator_mock.go -self_package github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator
 
 type (
-	Agg interface {
+	Aggregator interface {
 		Start()
 		Stop(ctx context.Context) error
 

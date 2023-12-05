@@ -42,7 +42,7 @@ import (
 type Resource interface {
 	resource.Resource
 	GetEventCache() events.Cache
-	GetRatelimitAggregator() aggregator.Agg
+	GetRatelimitAggregator() aggregator.Aggregator
 }
 
 type resourceImpl struct {
@@ -50,7 +50,7 @@ type resourceImpl struct {
 
 	resource.Resource
 	eventCache   events.Cache
-	ratelimitAgg aggregator.Agg
+	ratelimitAgg aggregator.Aggregator
 }
 
 // Start starts all resources
@@ -88,7 +88,7 @@ func (h *resourceImpl) GetEventCache() events.Cache {
 	return h.eventCache
 }
 
-func (h *resourceImpl) GetRatelimitAggregator() aggregator.Agg {
+func (h *resourceImpl) GetRatelimitAggregator() aggregator.Aggregator {
 	return h.ratelimitAgg
 }
 

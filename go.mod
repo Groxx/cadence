@@ -50,6 +50,7 @@ require (
 	go.uber.org/cadence v0.19.0
 	go.uber.org/config v1.4.0
 	go.uber.org/fx v1.13.1
+	go.uber.org/goleak v1.3.0
 	go.uber.org/multierr v1.6.0
 	go.uber.org/thriftrw v1.29.2
 	go.uber.org/yarpc v1.70.3

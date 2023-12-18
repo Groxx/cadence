@@ -34,7 +34,7 @@ import (
 	_ "github.com/gogo/protobuf/protoc-gen-gofast"
 	_ "go.uber.org/yarpc/encoding/protobuf/protoc-gen-yarpc-go"
 
-	// goimports, but enforces grouping
+	// forces one import-order pattern
 	_ "github.com/NonLogicalDev/gofancyimports/cmd/gofancyimports"
 
 	// mockgen for generating mocks

@@ -183,8 +183,8 @@ $(BIN)/enumer: internal/tools/go.mod
 $(BIN)/goimports: internal/tools/go.mod
 	$(call go_build_tool,golang.org/x/tools/cmd/goimports)
 
-$(BIN)/goimports-reviser: internal/tools/go.mod
-	$(call go_build_tool,github.com/incu6us/goimports-reviser/v3,goimports-reviser)
+$(BIN)/gofancyimports: internal/tools/go.mod
+	$(call go_build_tool,github.com/NonLogicalDev/gofancyimports/cmd/gofancyimports)
 
 $(BIN)/gowrap: go.mod
 	$(call go_build_tool,github.com/hexdigest/gowrap/cmd/gowrap)
@@ -356,9 +356,9 @@ $(BUILD)/lint: $(LINT_SRC) $(BIN)/revive | $(BUILD)
 MAYBE_TOUCH_COPYRIGHT=
 
 # use FRESH_ALL_SRC so it won't miss any generated files produced earlier.
-$(BUILD)/fmt: $(ALL_SRC) $(BIN)/goimports $(BIN)/goimports-reviser | $(BUILD)
+$(BUILD)/fmt: $(ALL_SRC) $(BIN)/goimports $(BIN)/gofancyimports | $(BUILD)
 	$Q echo "grouping imports..."
-	$Q $(BIN)/goimports-reviser $(FRESH_ALL_SRC)
+	$Q $(BIN)/gofancyimports fix --local github.com/uber/cadence/ --write $(FRESH_ALL_SRC)
 	$Q # reviser does not -w code, so also run goimports
 	$Q echo "formatting..."
 	$Q $(BIN)/goimports -local "github.com/uber/cadence" -w $(FRESH_ALL_SRC)

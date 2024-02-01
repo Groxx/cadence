@@ -115,9 +115,10 @@ func (h *HostSeen) Len() int {
 }
 
 func (h HostRecord) Update(allowed, rejected float64, elapsed time.Duration) HostRecord {
-	h.allowed = weight(h.allowed, allowed/elapsed.Seconds())
-	h.rejected = weight(h.rejected, rejected/elapsed.Seconds())
-	return h
+	dup := h
+	dup.allowed = weight(h.allowed, allowed/elapsed.Seconds())
+	dup.rejected = weight(h.rejected, rejected/elapsed.Seconds())
+	return dup
 }
 func (h HostRecord) Snapshot() (allowed, rejected float64) {
 	return h.allowed, h.rejected

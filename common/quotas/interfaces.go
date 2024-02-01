@@ -22,8 +22,6 @@
 
 package quotas
 
-//go:generate mockgen -package $GOPACKAGE -source $GOFILE -destination interfaces_mock.go -self_package github.com/uber/cadence/common/quotas
-
 import (
 	"context"
 

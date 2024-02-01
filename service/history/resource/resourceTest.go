@@ -25,9 +25,8 @@ import (
 
 	"github.com/golang/mock/gomock"
 
-	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator"
-
 	"github.com/uber/cadence/common/metrics"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator"
 	"github.com/uber/cadence/common/resource"
 	"github.com/uber/cadence/service/history/events"
 )
@@ -37,7 +36,7 @@ type (
 	Test struct {
 		*resource.Test
 		EventCache          *events.MockCache
-		RatelimitAggregator *aggregator.MockAgg
+		RatelimitAggregator *aggregator.MockAggregator
 	}
 )
 
@@ -52,7 +51,7 @@ func NewTest(
 	return &Test{
 		Test:                resource.NewTest(t, controller, serviceMetricsIndex),
 		EventCache:          events.NewMockCache(controller),
-		RatelimitAggregator: aggregator.NewMockAgg(controller),
+		RatelimitAggregator: aggregator.NewMockAggregator(controller),
 	}
 }
 
@@ -60,4 +59,4 @@ func NewTest(
 func (s *Test) GetEventCache() events.Cache {
 	return s.EventCache
 }
-func (s *Test) GetRatelimitAggregator() aggregator.Agg { return s.RatelimitAggregator }
+func (s *Test) GetRatelimitAggregator() aggregator.Aggregator { return s.RatelimitAggregator }

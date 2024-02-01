@@ -24,10 +24,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/uber/cadence/common/membership"
-
 	"go.uber.org/yarpc"
 
+	"github.com/uber/cadence/common/membership"
 	"github.com/uber/cadence/common/types"
 )
 

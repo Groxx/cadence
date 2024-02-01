@@ -25,13 +25,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/uber/cadence/common/dynamicconfig"
-	"github.com/uber/cadence/common/metrics"
-
-	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator"
-
 	"github.com/uber/cadence/common"
+	"github.com/uber/cadence/common/dynamicconfig"
 	"github.com/uber/cadence/common/log/tag"
+	"github.com/uber/cadence/common/metrics"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator"
 	"github.com/uber/cadence/common/resource"
 	"github.com/uber/cadence/common/service"
 	"github.com/uber/cadence/service/history/config"

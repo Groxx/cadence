@@ -57,13 +57,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/uber/cadence/common/log"
-	"github.com/uber/cadence/common/metrics"
-
+	"go.uber.org/yarpc"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/uber/cadence/client/history"
+	"github.com/uber/cadence/common/log"
+	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/errors"
 	"github.com/uber/cadence/common/types"
 )
@@ -178,11 +177,11 @@ func (c *client) Update(ctx context.Context, period time.Duration, load AnyUpdat
 				return err
 			}
 
-			result, err := c.history.RatelimitUpdate(ctx, peerAddress, &types.RatelimitUpdateRequest{
+			result, err := c.history.RatelimitUpdate(ctx, &types.RatelimitUpdateRequest{
 				Caller:      string(c.thisHost),
 				LastUpdated: period,
 				Data:        push, // TODO: make this the Any type, not a map containing them, should save tons of data on network and moderate cpu
-			})
+			}, yarpc.WithShardKey(peerAddress))
 			if err != nil {
 				results(load, nil, errors.ErrFromRPC(fmt.Errorf("ratelimit update request: %w", err)))
 				return nil
@@ -218,9 +217,9 @@ func (c *client) Startup(ctx context.Context, results func(batch *AnyAllowRespon
 		g.Go(func() error {
 			defer func() { log.CapturePanic(recover(), c.logger, nil) }() // todo: describe what failed? is stack enough?
 
-			result, err := c.history.RatelimitStartup(ctx, peerAddress, &types.RatelimitStartupRequest{
+			result, err := c.history.RatelimitStartup(ctx, &types.RatelimitStartupRequest{
 				Caller: string(c.thisHost),
-			})
+			}, yarpc.WithShardKey(peerAddress))
 			if err != nil {
 				results(nil, errors.ErrFromRPC(fmt.Errorf("ratelimit startup request: %w", err)))
 				return nil

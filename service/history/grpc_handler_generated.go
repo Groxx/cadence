@@ -121,6 +121,16 @@ func (g GRPCHandler) QueryWorkflow(ctx context.Context, request *historyv1.Query
 	return proto.FromHistoryQueryWorkflowResponse(response), proto.FromError(err)
 }
 
+func (g GRPCHandler) RatelimitStartup(ctx context.Context, request *historyv1.RatelimitStartupRequest) (*historyv1.RatelimitStartupResponse, error) {
+	response, err := g.h.RatelimitStartup(ctx, proto.ToHistoryRatelimitStartupRequest(request))
+	return proto.FromHistoryRatelimitStartupResponse(response), proto.FromError(err)
+}
+
+func (g GRPCHandler) RatelimitUpdate(ctx context.Context, request *historyv1.RatelimitUpdateRequest) (*historyv1.RatelimitUpdateResponse, error) {
+	response, err := g.h.RatelimitUpdate(ctx, proto.ToHistoryRatelimitUpdateRequest(request))
+	return proto.FromHistoryRatelimitUpdateResponse(response), proto.FromError(err)
+}
+
 func (g GRPCHandler) ReadDLQMessages(ctx context.Context, request *historyv1.ReadDLQMessagesRequest) (*historyv1.ReadDLQMessagesResponse, error) {
 	response, err := g.h.ReadDLQMessages(ctx, proto.ToHistoryReadDLQMessagesRequest(request))
 	return proto.FromHistoryReadDLQMessagesResponse(response), proto.FromError(err)
@@ -254,14 +264,4 @@ func (g GRPCHandler) SyncShardStatus(ctx context.Context, request *historyv1.Syn
 func (g GRPCHandler) TerminateWorkflowExecution(ctx context.Context, request *historyv1.TerminateWorkflowExecutionRequest) (*historyv1.TerminateWorkflowExecutionResponse, error) {
 	err := g.h.TerminateWorkflowExecution(ctx, proto.ToHistoryTerminateWorkflowExecutionRequest(request))
 	return &historyv1.TerminateWorkflowExecutionResponse{}, proto.FromError(err)
-}
-
-func (g grpcHandler) RatelimitStartup(ctx context.Context, request *historyv1.RatelimitStartupRequest) (*historyv1.RatelimitStartupResponse, error) {
-	response, err := g.h.RatelimitStartup(ctx, proto.ToHistoryRatelimitStartupRequest(request))
-	return proto.FromHistoryRatelimitStartupResponse(response), proto.FromError(err)
-}
-
-func (g grpcHandler) RatelimitUpdate(ctx context.Context, request *historyv1.RatelimitUpdateRequest) (*historyv1.RatelimitUpdateResponse, error) {
-	response, err := g.h.RatelimitUpdate(ctx, proto.ToHistoryRatelimitUpdateRequest(request))
-	return proto.FromHistoryRatelimitUpdateResponse(response), proto.FromError(err)
 }

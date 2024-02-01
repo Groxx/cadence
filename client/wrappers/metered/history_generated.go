@@ -258,6 +258,32 @@ func (c *historyClient) QueryWorkflow(ctx context.Context, hp1 *types.HistoryQue
 	return hp2, err
 }
 
+func (c *historyClient) RatelimitStartup(ctx context.Context, request *types.RatelimitStartupRequest, opts ...yarpc.CallOption) (rp1 *types.RatelimitStartupResponse, err error) {
+	c.metricsClient.IncCounter(metrics.HistoryClientRatelimitStartupScope, metrics.CadenceClientRequests)
+
+	sw := c.metricsClient.StartTimer(metrics.HistoryClientRatelimitStartupScope, metrics.CadenceClientLatency)
+	rp1, err = c.client.RatelimitStartup(ctx, request, opts...)
+	sw.Stop()
+
+	if err != nil {
+		c.metricsClient.IncCounter(metrics.HistoryClientRatelimitStartupScope, metrics.CadenceClientFailures)
+	}
+	return rp1, err
+}
+
+func (c *historyClient) RatelimitUpdate(ctx context.Context, request *types.RatelimitUpdateRequest, opts ...yarpc.CallOption) (rp1 *types.RatelimitUpdateResponse, err error) {
+	c.metricsClient.IncCounter(metrics.HistoryClientRatelimitUpdateScope, metrics.CadenceClientRequests)
+
+	sw := c.metricsClient.StartTimer(metrics.HistoryClientRatelimitUpdateScope, metrics.CadenceClientLatency)
+	rp1, err = c.client.RatelimitUpdate(ctx, request, opts...)
+	sw.Stop()
+
+	if err != nil {
+		c.metricsClient.IncCounter(metrics.HistoryClientRatelimitUpdateScope, metrics.CadenceClientFailures)
+	}
+	return rp1, err
+}
+
 func (c *historyClient) ReadDLQMessages(ctx context.Context, rp1 *types.ReadDLQMessagesRequest, p1 ...yarpc.CallOption) (rp2 *types.ReadDLQMessagesResponse, err error) {
 	c.metricsClient.IncCounter(metrics.HistoryClientReadDLQMessagesScope, metrics.CadenceClientRequests)
 
@@ -607,32 +633,4 @@ func (c *historyClient) TerminateWorkflowExecution(ctx context.Context, hp1 *typ
 		c.metricsClient.IncCounter(metrics.HistoryClientTerminateWorkflowExecutionScope, metrics.CadenceClientFailures)
 	}
 	return err
-}
-
-func (c *metricClient) RatelimitStartup(ctx context.Context, peer string, request *types.RatelimitStartupRequest, opts ...yarpc.CallOption) (*types.RatelimitStartupResponse, error) {
-	c.metricsClient.IncCounter(metrics.HistoryClientRatelimitStartupScope, metrics.CadenceClientRequests)
-
-	sw := c.metricsClient.StartTimer(metrics.HistoryClientRatelimitStartupScope, metrics.CadenceClientLatency)
-	resp, err := c.client.RatelimitStartup(ctx, peer, request, opts...)
-	sw.Stop()
-
-	if err != nil {
-		c.metricsClient.IncCounter(metrics.HistoryClientRatelimitStartupScope, metrics.CadenceClientFailures)
-	}
-
-	return resp, err
-}
-
-func (c *metricClient) RatelimitUpdate(ctx context.Context, peer string, request *types.RatelimitUpdateRequest, opts ...yarpc.CallOption) (*types.RatelimitUpdateResponse, error) {
-	c.metricsClient.IncCounter(metrics.HistoryClientRatelimitUpdateScope, metrics.CadenceClientRequests)
-
-	sw := c.metricsClient.StartTimer(metrics.HistoryClientRatelimitUpdateScope, metrics.CadenceClientLatency)
-	resp, err := c.client.RatelimitUpdate(ctx, peer, request, opts...)
-	sw.Stop()
-
-	if err != nil {
-		c.metricsClient.IncCounter(metrics.HistoryClientRatelimitUpdateScope, metrics.CadenceClientFailures)
-	}
-
-	return resp, err
 }

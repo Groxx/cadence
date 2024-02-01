@@ -25,10 +25,10 @@ package aggregator
 import (
 	"context"
 	"fmt"
-	"github.com/uber/cadence/common/clock"
 	"testing"
 	"time"
 
+	"github.com/uber/cadence/common/clock"
 	"github.com/uber/cadence/common/dynamicconfig"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/log/tag"
@@ -84,8 +84,7 @@ type (
 		stopped chan struct{}
 
 		// for tests
-		now             func() time.Time
-		rotateTicker    clock.TickSource
+		timesource      clock.TimeSource
 		hostObservedTTL time.Duration
 	}
 )
@@ -116,20 +115,14 @@ func New(
 		cancel:  cancel,
 		stopped: make(chan struct{}),
 
-		now:             time.Now,
-		rotateTicker:    clock.NewRealTickSource(time.Hour), // todo: inf
-		hostObservedTTL: time.Minute,                        // TODO: dynamic config?
+		timesource:      clock.NewRealTimeSource(),
+		hostObservedTTL: time.Minute, // TODO: dynamic config?
 	}, nil
 }
 
-func (i *Impl) TestOverrides(t *testing.T, now func() time.Time, rotateTicker clock.TickSource) {
+func (i *Impl) TestOverrides(t *testing.T, timesource clock.TimeSource) {
 	t.Helper()
-	if now != nil {
-		i.now = now
-	}
-	if rotateTicker != nil {
-		i.rotateTicker = rotateTicker
-	}
+	i.timesource = timesource
 }
 
 func (i *Impl) Start() {
@@ -138,17 +131,18 @@ func (i *Impl) Start() {
 		defer close(i.stopped)
 
 		tickRate := i.rotateRate()
-		i.rotateTicker.Reset(tickRate)
+		ticker := i.timesource.NewTicker(tickRate)
 		for {
 			select {
 			case <-i.ctx.Done():
+				ticker.Stop()
 				return // shutting down
-			case <-i.rotateTicker.Chan():
+			case <-ticker.Chan():
 				// update tick-rate if it changed
 				newTickRate := i.rotateRate()
 				if tickRate != newTickRate {
 					tickRate = newTickRate
-					i.rotateTicker.Reset(newTickRate)
+					ticker.Reset(newTickRate)
 				}
 
 				// rotate buckets
@@ -160,7 +154,6 @@ func (i *Impl) Start() {
 
 func (i *Impl) Stop(ctx context.Context) error {
 	i.cancel()
-	i.rotateTicker.Stop()
 	select {
 	case <-i.stopped:
 		return nil
@@ -179,13 +172,13 @@ func (i *Impl) rotate() {
 	})
 
 	// prune known limiting hosts
-	i.hostsLastSeen.GC(i.now(), i.hostObservedTTL)
+	i.hostsLastSeen.GC(i.timesource.Now(), i.hostObservedTTL)
 }
 
 // Update adds load information for the passed keys to this aggregator.
 func (i *Impl) Update(host string, elapsed time.Duration, load rpc.AnyUpdateRequest) {
 	// refresh the host-seen record
-	i.hostsLastSeen.Observe(host, i.now())
+	i.hostsLastSeen.Observe(host, i.timesource.Now())
 
 	for key, data := range load.Load {
 		limit := i.limits.Load(key)
@@ -200,7 +193,7 @@ func (i *Impl) Update(host string, elapsed time.Duration, load rpc.AnyUpdateRequ
 // Get retrieves the known load / desired RPS for this host for this key, as a read-only operation.
 func (i *Impl) Get(host string, keys []string) rpc.AnyAllowResponse {
 	// refresh the host-seen record
-	i.hostsLastSeen.Observe(host, i.now())
+	i.hostsLastSeen.Observe(host, i.timesource.Now())
 
 	result := rpc.AnyAllowResponse{
 		Allow: make(map[string]float64, len(keys)),
@@ -363,7 +356,7 @@ func (i *Impl) getLimit(host string, rps float64, current, previous map[string]i
 }
 
 func (i *Impl) GetAll(host string) rpc.AnyAllowResponse {
-	i.hostsLastSeen.Observe(host, i.now())
+	i.hostsLastSeen.Observe(host, i.timesource.Now())
 
 	result := rpc.AnyAllowResponse{
 		// allocate space plus i bit of buffer for additions while ranging

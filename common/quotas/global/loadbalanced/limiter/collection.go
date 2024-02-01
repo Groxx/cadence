@@ -25,11 +25,12 @@ package limiter
 import (
 	"context"
 	"fmt"
-	"github.com/uber/cadence/common/clock"
-	"golang.org/x/time/rate"
 	"testing"
 	"time"
 
+	"golang.org/x/time/rate"
+
+	"github.com/uber/cadence/common/clock"
 	"github.com/uber/cadence/common/dynamicconfig"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/log/tag"
@@ -72,8 +73,7 @@ type (
 		stopped chan struct{}
 
 		// now exists largely for tests, elsewhere it is always time.Now
-		now          func() time.Time
-		updateTicker clock.TickSource
+		timesource clock.TimeSource
 		// warmupTimeout exists largely for tests, in prod it's hardcoded
 		warmupTimeout time.Duration
 	}
@@ -119,20 +119,14 @@ func NewBalanced(
 		cancel:  cancel,
 
 		// override externally in tests
-		now:           time.Now,
-		updateTicker:  clock.NewRealTickSource(time.Hour), // TODO: inf
-		warmupTimeout: 10 * time.Second,                   // TODO: dynamic config?
+		timesource:    clock.NewRealTimeSource(), // TODO: inf
+		warmupTimeout: 10 * time.Second,          // TODO: dynamic config?
 	}
 }
 
-func (b *BalancedCollection) TestOverrides(t *testing.T, now func() time.Time, updateTicker clock.TickSource) {
+func (b *BalancedCollection) TestOverrides(t *testing.T, timesource clock.TimeSource) {
 	t.Helper()
-	if now != nil {
-		b.now = now
-	}
-	if updateTicker != nil {
-		b.updateTicker = updateTicker
-	}
+	b.timesource = timesource
 }
 
 // Start the collection's background updater, and begin warming the cache.
@@ -164,7 +158,7 @@ func (b *BalancedCollection) Start(startCtx context.Context) error {
 		deadline, ok := startCtx.Deadline()
 		var timeout time.Duration
 		if ok {
-			timeout = deadline.Sub(b.now())
+			timeout = deadline.Sub(b.timesource.Now())
 		}
 
 		ctx, cancel := context.WithTimeout(b.ctx, b.warmupTimeout)
@@ -240,20 +234,20 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 	logger := b.logger.WithTags(tag.Dynamic("limiter", "update"))
 	logger.Debug("update loop starting")
 
-	b.updateTicker.Reset(tickRate)
-	last := b.now()
+	ticker := b.timesource.NewTicker(tickRate)
+	last := b.timesource.Now()
 	for {
 		select {
 		// tick.C occurs every period regardless of time spent waiting on a response,
 		// which is probably preferred - it ensures more regular updates, rather than
 		// trying to reduce calls
-		case <-b.updateTicker.Chan():
+		case <-ticker.Chan():
 			logger.Debug("update tick")
 			// update tick-rate if it changed
 			newTickRate := b.updateRate()
 			if tickRate != newTickRate {
 				tickRate = newTickRate
-				b.updateTicker.Reset(newTickRate)
+				ticker.Reset(newTickRate)
 			}
 
 			// len is an estimate and more may be added while iterating.
@@ -269,7 +263,7 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 				Load: make(map[string]rpc.Metrics, capacity),
 			}
 
-			now := b.now()
+			now := b.timesource.Now()
 			b.usage.Range(func(k string, v *internal.BalancedLimit) bool {
 				used, refused, usingFallback := v.Collect()
 				_ = usingFallback // TODO: interesting for metrics?
@@ -343,6 +337,7 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 			// and loop
 			last = now
 		case <-b.ctx.Done():
+			ticker.Stop()
 			logger.Debug("shutting down update loop")
 			return
 		}
@@ -359,7 +354,6 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 // still stop ASAP.
 func (b *BalancedCollection) Stop(ctx context.Context) error {
 	b.cancel()
-	b.updateTicker.Stop()
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("timed out while stopping: %w", ctx.Err())

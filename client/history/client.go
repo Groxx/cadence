@@ -22,6 +22,7 @@ package history
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -1159,25 +1160,47 @@ func (c *clientImpl) GetFailoverInfo(
 	return c.client.GetFailoverInfo(ctx, request, append(opts, yarpc.WithShardKey(peer))...)
 }
 
-func (c *clientImpl) RatelimitStartup(ctx context.Context, peer string, request *types.RatelimitStartupRequest, opts ...yarpc.CallOption) (*types.RatelimitStartupResponse, error) {
+func (c *clientImpl) RatelimitStartup(ctx context.Context, request *types.RatelimitStartupRequest, opts ...yarpc.CallOption) (*types.RatelimitStartupResponse, error) {
+	if len(opts) == 0 {
+		// unfortunately there is not really any way to ensure "must have a shard key option"
+		// due to the closed nature of yarpc.CallOption's implementation, outside private-field-reading reflection.
+		return nil, fmt.Errorf("invalid arguments, missing yarpc.WithShardKey(peer) at a minimum")
+	}
+
 	var response *types.RatelimitStartupResponse
-	err := c.executeWithRedirect(ctx, peer, func(ctx context.Context, peer string) error {
+	// empty peer: first call uses the shard key in opts
+	err := c.executeWithRedirect(ctx, "", func(ctx context.Context, peer string) error {
 		ctx, cancel := c.createContext(ctx)
 		defer cancel()
+		if peer != "" {
+			// ownership lost, override with the new peer
+			opts = append(opts, yarpc.WithShardKey(peer))
+		}
 		var err error
-		response, err = c.client.RatelimitStartup(ctx, peer, request, opts...)
+		response, err = c.client.RatelimitStartup(ctx, request, append(opts, yarpc.WithShardKey(peer))...)
 		return err
 	})
 	return response, err
 }
 
-func (c *clientImpl) RatelimitUpdate(ctx context.Context, peer string, request *types.RatelimitUpdateRequest, opts ...yarpc.CallOption) (*types.RatelimitUpdateResponse, error) {
+func (c *clientImpl) RatelimitUpdate(ctx context.Context, request *types.RatelimitUpdateRequest, opts ...yarpc.CallOption) (*types.RatelimitUpdateResponse, error) {
+	if len(opts) == 0 {
+		// unfortunately there is not really any way to ensure "must have a shard key option"
+		// due to the closed nature of yarpc.CallOption's implementation, outside private-field-reading reflection.
+		return nil, fmt.Errorf("invalid arguments, missing yarpc.WithShardKey(peer) at a minimum")
+	}
+
 	var response *types.RatelimitUpdateResponse
-	err := c.executeWithRedirect(ctx, peer, func(ctx context.Context, peer string) error {
+	// empty peer: first call uses the shard key in opts
+	err := c.executeWithRedirect(ctx, "", func(ctx context.Context, peer string) error {
 		ctx, cancel := c.createContext(ctx)
 		defer cancel()
+		if peer != "" {
+			// ownership lost, override with the new peer
+			opts = append(opts, yarpc.WithShardKey(peer))
+		}
 		var err error
-		response, err = c.client.RatelimitUpdate(ctx, peer, request, opts...)
+		response, err = c.client.RatelimitUpdate(ctx, request, opts...)
 		return err
 	})
 	return response, err

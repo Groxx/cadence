@@ -83,13 +83,12 @@ type Client interface {
 
 	// RatelimitStartup requests initial data at startup, without influencing any existing tracking.
 	// Exact semantics beyond this depend on the load-balanced ratelimit implementation.
-	// Peer (used as yarpc.Shardkey) must be determined before calling, but will be retried if ownership is lost.
-	RatelimitStartup(ctx context.Context, peer string, request *types.RatelimitStartupRequest, opts ...yarpc.CallOption) (*types.RatelimitStartupResponse, error)
+	//
+	// Peer (via yarpc.WithShardkey(peer)) MUST be determined before calling and passed in yarpc opts, but will be internally retried if ownership is lost.
+	RatelimitStartup(ctx context.Context, request *types.RatelimitStartupRequest, opts ...yarpc.CallOption) (*types.RatelimitStartupResponse, error)
 	// RatelimitUpdate pushes usage info for the attached keys, and requests ratelimit info from common hosts.
 	// Exact semantics beyond this depend on the load-balanced ratelimit implementation.
-	// Peer (used as yarpc.Shardkey) must be determined before calling, but will be retried if ownership is lost.
-	RatelimitUpdate(ctx context.Context, peer string, request *types.RatelimitUpdateRequest, opts ...yarpc.CallOption) (*types.RatelimitUpdateResponse, error)
-
-	// TODO: to push a draining common host's info to other common-hosts:
-	// TODO: RatelimitDrain(ctx context.Context, any, ...yarpc.CallOption) error
+	//
+	// Peer (via yarpc.WithShardkey(peer)) MUST be determined before calling and passed in yarpc opts, but will be internally retried if ownership is lost.
+	RatelimitUpdate(ctx context.Context, request *types.RatelimitUpdateRequest, opts ...yarpc.CallOption) (*types.RatelimitUpdateResponse, error)
 }

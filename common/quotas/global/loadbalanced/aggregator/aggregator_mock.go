@@ -36,31 +36,31 @@ import (
 	rpc "github.com/uber/cadence/common/quotas/global/loadbalanced/rpc"
 )
 
-// MockAgg is a mock of Aggregator interface.
-type MockAgg struct {
+// MockAggregator is a mock of Aggregator interface.
+type MockAggregator struct {
 	ctrl     *gomock.Controller
-	recorder *MockAggMockRecorder
+	recorder *MockAggregatorMockRecorder
 }
 
-// MockAggMockRecorder is the mock recorder for MockAgg.
-type MockAggMockRecorder struct {
-	mock *MockAgg
+// MockAggregatorMockRecorder is the mock recorder for MockAggregator.
+type MockAggregatorMockRecorder struct {
+	mock *MockAggregator
 }
 
-// NewMockAgg creates a new mock instance.
-func NewMockAgg(ctrl *gomock.Controller) *MockAgg {
-	mock := &MockAgg{ctrl: ctrl}
-	mock.recorder = &MockAggMockRecorder{mock}
+// NewMockAggregator creates a new mock instance.
+func NewMockAggregator(ctrl *gomock.Controller) *MockAggregator {
+	mock := &MockAggregator{ctrl: ctrl}
+	mock.recorder = &MockAggregatorMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockAgg) EXPECT() *MockAggMockRecorder {
+func (m *MockAggregator) EXPECT() *MockAggregatorMockRecorder {
 	return m.recorder
 }
 
 // Get mocks base method.
-func (m *MockAgg) Get(host string, keys []string) rpc.AnyAllowResponse {
+func (m *MockAggregator) Get(host string, keys []string) rpc.AnyAllowResponse {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Get", host, keys)
 	ret0, _ := ret[0].(rpc.AnyAllowResponse)
@@ -68,13 +68,13 @@ func (m *MockAgg) Get(host string, keys []string) rpc.AnyAllowResponse {
 }
 
 // Get indicates an expected call of Get.
-func (mr *MockAggMockRecorder) Get(host, keys interface{}) *gomock.Call {
+func (mr *MockAggregatorMockRecorder) Get(host, keys interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockAgg)(nil).Get), host, keys)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockAggregator)(nil).Get), host, keys)
 }
 
 // GetAll mocks base method.
-func (m *MockAgg) GetAll(host string) rpc.AnyAllowResponse {
+func (m *MockAggregator) GetAll(host string) rpc.AnyAllowResponse {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetAll", host)
 	ret0, _ := ret[0].(rpc.AnyAllowResponse)
@@ -82,25 +82,25 @@ func (m *MockAgg) GetAll(host string) rpc.AnyAllowResponse {
 }
 
 // GetAll indicates an expected call of GetAll.
-func (mr *MockAggMockRecorder) GetAll(host interface{}) *gomock.Call {
+func (mr *MockAggregatorMockRecorder) GetAll(host interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAll", reflect.TypeOf((*MockAgg)(nil).GetAll), host)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAll", reflect.TypeOf((*MockAggregator)(nil).GetAll), host)
 }
 
 // Start mocks base method.
-func (m *MockAgg) Start() {
+func (m *MockAggregator) Start() {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "Start")
 }
 
 // Start indicates an expected call of Start.
-func (mr *MockAggMockRecorder) Start() *gomock.Call {
+func (mr *MockAggregatorMockRecorder) Start() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockAgg)(nil).Start))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockAggregator)(nil).Start))
 }
 
 // Stop mocks base method.
-func (m *MockAgg) Stop(ctx context.Context) error {
+func (m *MockAggregator) Stop(ctx context.Context) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Stop", ctx)
 	ret0, _ := ret[0].(error)
@@ -108,19 +108,19 @@ func (m *MockAgg) Stop(ctx context.Context) error {
 }
 
 // Stop indicates an expected call of Stop.
-func (mr *MockAggMockRecorder) Stop(ctx interface{}) *gomock.Call {
+func (mr *MockAggregatorMockRecorder) Stop(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockAgg)(nil).Stop), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockAggregator)(nil).Stop), ctx)
 }
 
 // Update mocks base method.
-func (m *MockAgg) Update(host string, elapsed time.Duration, load rpc.AnyUpdateRequest) {
+func (m *MockAggregator) Update(host string, elapsed time.Duration, load rpc.AnyUpdateRequest) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "Update", host, elapsed, load)
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockAggMockRecorder) Update(host, elapsed, load interface{}) *gomock.Call {
+func (mr *MockAggregatorMockRecorder) Update(host, elapsed, load interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockAgg)(nil).Update), host, elapsed, load)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockAggregator)(nil).Update), host, elapsed, load)
 }

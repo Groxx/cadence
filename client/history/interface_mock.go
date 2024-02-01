@@ -377,9 +377,9 @@ func (mr *MockClientMockRecorder) QueryWorkflow(arg0, arg1 interface{}, arg2 ...
 }
 
 // RatelimitStartup mocks base method.
-func (m *MockClient) RatelimitStartup(ctx context.Context, peer string, request *types.RatelimitStartupRequest, opts ...yarpc.CallOption) (*types.RatelimitStartupResponse, error) {
+func (m *MockClient) RatelimitStartup(ctx context.Context, request *types.RatelimitStartupRequest, opts ...yarpc.CallOption) (*types.RatelimitStartupResponse, error) {
 	m.ctrl.T.Helper()
-	varargs := []interface{}{ctx, peer, request}
+	varargs := []interface{}{ctx, request}
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
@@ -390,16 +390,16 @@ func (m *MockClient) RatelimitStartup(ctx context.Context, peer string, request 
 }
 
 // RatelimitStartup indicates an expected call of RatelimitStartup.
-func (mr *MockClientMockRecorder) RatelimitStartup(ctx, peer, request interface{}, opts ...interface{}) *gomock.Call {
+func (mr *MockClientMockRecorder) RatelimitStartup(ctx, request interface{}, opts ...interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]interface{}{ctx, peer, request}, opts...)
+	varargs := append([]interface{}{ctx, request}, opts...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RatelimitStartup", reflect.TypeOf((*MockClient)(nil).RatelimitStartup), varargs...)
 }
 
 // RatelimitUpdate mocks base method.
-func (m *MockClient) RatelimitUpdate(ctx context.Context, peer string, request *types.RatelimitUpdateRequest, opts ...yarpc.CallOption) (*types.RatelimitUpdateResponse, error) {
+func (m *MockClient) RatelimitUpdate(ctx context.Context, request *types.RatelimitUpdateRequest, opts ...yarpc.CallOption) (*types.RatelimitUpdateResponse, error) {
 	m.ctrl.T.Helper()
-	varargs := []interface{}{ctx, peer, request}
+	varargs := []interface{}{ctx, request}
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
@@ -410,9 +410,9 @@ func (m *MockClient) RatelimitUpdate(ctx context.Context, peer string, request *
 }
 
 // RatelimitUpdate indicates an expected call of RatelimitUpdate.
-func (mr *MockClientMockRecorder) RatelimitUpdate(ctx, peer, request interface{}, opts ...interface{}) *gomock.Call {
+func (mr *MockClientMockRecorder) RatelimitUpdate(ctx, request interface{}, opts ...interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]interface{}{ctx, peer, request}, opts...)
+	varargs := append([]interface{}{ctx, request}, opts...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RatelimitUpdate", reflect.TypeOf((*MockClient)(nil).RatelimitUpdate), varargs...)
 }
 

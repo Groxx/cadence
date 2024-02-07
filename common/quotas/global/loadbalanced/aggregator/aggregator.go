@@ -125,10 +125,6 @@ func (i *Impl) TestOverrides(t *testing.T, timesource clock.TimeSource) {
 	i.timesource = timesource
 }
 
-TODO: how about I just get rid of the internal mutexes and put a big one on the outside,
-and profile changes after that?
-simpler code to start with, and I know how to achieve it later.
-
 func (i *Impl) Start() {
 	go func() {
 		defer func() { log.CapturePanic(recover(), i.logger, nil) }() // todo: describe what failed? is stack enough?

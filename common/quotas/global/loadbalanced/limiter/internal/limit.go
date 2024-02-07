@@ -21,11 +21,11 @@
 // SOFTWARE.
 
 // Package internal protects these types' concurrency primitives and other internals from accidents.
+// this has been rolled back in favor of simplicity and avoiding premature optimization before measuring,
+// but the internal-separation is still broadly a good thing.  these are not dumb objects.
 package internal
 
 import (
-	"sync"
-
 	"golang.org/x/time/rate"
 
 	"github.com/uber/cadence/common/quotas"
@@ -33,8 +33,6 @@ import (
 
 type (
 	BalancedLimit struct {
-		mut sync.Mutex // rate.Limiter already has a mutex, should be minimal impact
-
 		// usage data cannot be gathered from rate.Limiter, sadly.
 		// so we need to gather it separately. or maybe find a fork.
 		usage    usage
@@ -62,8 +60,6 @@ func New(fallback quotas.Limiter) *BalancedLimit {
 
 // Collect returns the current used/refused values, and resets them to zero.
 func (b *BalancedLimit) Collect() (used int, refused int, usingFallback bool) {
-	b.mut.Lock()
-	defer b.mut.Unlock()
 	used, refused = b.usage.used, b.usage.refused
 	b.usage.used = 0
 	b.usage.refused = 0
@@ -72,9 +68,6 @@ func (b *BalancedLimit) Collect() (used int, refused int, usingFallback bool) {
 
 // Update adjusts the underlying ratelimit.
 func (b *BalancedLimit) Update(rps float64) {
-	b.mut.Lock()
-	defer b.mut.Unlock()
-
 	b.usage.failedUpdate = 0 // reset the use-fallback fuse
 
 	if b.limit == nil {
@@ -99,9 +92,6 @@ func (b *BalancedLimit) Update(rps float64) {
 //
 // After crossing a threshold of failures (currently 10), the fallback will be used.
 func (b *BalancedLimit) FailedUpdate() (failures int) {
-	b.mut.Lock()
-	defer b.mut.Unlock()
-
 	b.usage.failedUpdate++ // always increment the count for monitoring purposes
 	if b.usage.failedUpdate == 10 {
 		b.limit = nil // defer to fallback when crossing the threshold
@@ -112,16 +102,11 @@ func (b *BalancedLimit) FailedUpdate() (failures int) {
 // Clear erases the internal ratelimit, and defers to the fallback until an update is received.
 // This is intended to be used when the current limit is no longer trustworthy for some reason.
 func (b *BalancedLimit) Clear() {
-	b.mut.Lock()
-	defer b.mut.Unlock()
 	b.limit = nil
 }
 
 // Allow returns true if a request is allowed right now.
 func (b *BalancedLimit) Allow() bool {
-	b.mut.Lock()
-	defer b.mut.Unlock()
-
 	var allowed bool
 	if b.limit == nil {
 		allowed = b.fallback.Allow()

@@ -1348,6 +1348,8 @@ const (
 	CheckDataCorruptionWorkflowScope
 	// ESAnalyzerScope is scope used by ElasticSearch Analyzer (esanalyzer) workflow
 	ESAnalyzerScope
+	// AsyncWorkflowConsumerScope is scope used by async workflow consumer
+	AsyncWorkflowConsumerScope
 
 	NumWorkerScopes
 )
@@ -1964,6 +1966,7 @@ var ScopeDefs = map[ServiceIdx]map[int]scopeDefinition{
 		BatcherScope:                           {operation: "batcher"},
 		ParentClosePolicyProcessorScope:        {operation: "ParentClosePolicyProcessor"},
 		ESAnalyzerScope:                        {operation: "ESAnalyzer"},
+		AsyncWorkflowConsumerScope:             {operation: "AsyncWorkflowConsumer"},
 	},
 }
 
@@ -2447,6 +2450,8 @@ const (
 	LargeHistorySizeCount
 	UpdateWorkflowExecutionCount
 	WorkflowIDCacheSizeGauge
+	WorkflowIDCacheRequestsExternalRatelimitedCounter
+	WorkflowIDCacheRequestsInternalRatelimitedCounter
 	NumHistoryMetrics
 )
 
@@ -2573,6 +2578,7 @@ const (
 	ESAnalyzerNumStuckWorkflowsRefreshed
 	ESAnalyzerNumStuckWorkflowsFailedToRefresh
 	ESAnalyzerNumLongRunningWorkflows
+	AsyncWorkflowConsumerCount
 
 	NumWorkerMetrics
 )
@@ -3070,6 +3076,8 @@ var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 		LargeHistorySizeCount:                                        {metricName: "large_history_size_count", metricType: Counter},
 		UpdateWorkflowExecutionCount:                                 {metricName: "update_workflow_execution_count", metricType: Counter},
 		WorkflowIDCacheSizeGauge:                                     {metricName: "workflow_id_cache_size", metricType: Gauge},
+		WorkflowIDCacheRequestsExternalRatelimitedCounter:            {metricName: "workflow_id_external_requests_ratelimited", metricType: Counter},
+		WorkflowIDCacheRequestsInternalRatelimitedCounter:            {metricName: "workflow_id_internal_requests_ratelimited", metricType: Counter},
 	},
 	Matching: {
 		PollSuccessPerTaskListCounter:               {metricName: "poll_success_per_tl", metricRollupName: "poll_success"},
@@ -3189,6 +3197,7 @@ var MetricDefs = map[ServiceIdx]map[int]metricDefinition{
 		ESAnalyzerNumStuckWorkflowsRefreshed:          {metricName: "es_analyzer_num_stuck_workflows_refreshed", metricType: Counter},
 		ESAnalyzerNumStuckWorkflowsFailedToRefresh:    {metricName: "es_analyzer_num_stuck_workflows_failed_to_refresh", metricType: Counter},
 		ESAnalyzerNumLongRunningWorkflows:             {metricName: "es_analyzer_num_long_running_workflows", metricType: Counter},
+		AsyncWorkflowConsumerCount:                    {metricName: "async_workflow_consumer_count", metricType: Gauge},
 	},
 }
 

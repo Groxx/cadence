@@ -55,7 +55,7 @@ func TestSchedulerOptionsString(t *testing.T) {
 				"1": 500,
 				"9": 20,
 			}),
-			want: "{schedulerType:2, fifoSchedulerOptions:<nil>, wrrSchedulerOptions:{QueueSize: 3, WorkerCount: 4, DispatcherCount: 5, Weights: map[1:500 9:20]}}",
+			want: "{schedulerType:2, fifoSchedulerOptions:<nil>, wrrSchedulerOptions:{QueueSize: 3, WorkerCount: 4, DispatcherCount: 5, weights: map[1:500 9:20]}}",
 		},
 		{
 			desc:          "InvalidSchedulerType",

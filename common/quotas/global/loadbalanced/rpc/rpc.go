@@ -58,6 +58,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/yarpc"
+	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/uber/cadence/client/history"
@@ -70,16 +71,39 @@ import (
 const AnyUpdateRequestTypeID = "cadence:loadbalanced:update_request"
 const AnyAllowResponseTypeID = "cadence:loadbalanced:response"
 
-// serialized into types.Any, JSON format must remain stable
 type (
+	// AnyUpdateRequest is serialized into types.Any, JSON format must remain stable (or versioned to handle changes during deploy).
 	AnyUpdateRequest struct {
-		Load map[string]Metrics `json:"data,omitempty"`
+		// Elapsed time since last update, for calculating rps
+		Elapsed time.Duration `json:"elapsed"`
+		// Load contains total request data per key, containing two integers to be compact on the wire:
+		//  - first is the number of allowed requests
+		//  - second is rejected requests
+		//
+		// These values are counted since the last update (Elapsed time), both to give more
+		// data to the aggregating servers and to use integers which compact a bit better than floats.
+		//
+		// For the purposes of API flexibility, this is a slice and not a [2]int.
+		// This allows newer code to send additional values without failing deserialization,
+		// if for some reason this proves useful.
+		// Using an explicit version is generally safer though and should be preferred in most cases.
+		Load map[string][]int `json:"data,omitempty"`
 	}
-	Metrics struct {
-		Allowed  int `json:"allowed,omitempty"`
-		Rejected int `json:"rejected,omitempty"`
-	}
+	// AnyAllowResponse is serialized into types.Any, JSON format must remain stable (or versioned to handle changes during deploy)
 	AnyAllowResponse struct {
+		/*
+			Allow contains the per-key limit info:
+				{
+					"the-limit-key": rpsToAllow,
+				}
+
+			Zero RPS implies "do not allow any requests", which likely means the domain is using all
+			available RPS already, and you are a "new" host (for this limit).
+			The next update cycle will likely allocate a non-zero portion to this host.
+
+			Keys that were requested may be missing, which implies the key is currently allocated
+			zero RPS, likely due to being unknown (either new or garbage collected).
+		*/
 		Allow map[string]float64 `json:"allow,omitempty"`
 	}
 )
@@ -247,15 +271,19 @@ func (c *client) Startup(ctx context.Context, results func(batch *AnyAllowRespon
 // and synchronously calls the callback for each one before returning.
 //
 // if an error is returned, no callbacks will be performed.
+//
+// Caution for callers: this is quite CPU intensive.
+// Periodic calls from hosts-enforcing-limits is fine, but avoid calling it in order to calculate
+// responses on data-aggregating hosts - cumulative calls can easily consume multiple CPU cores per second.
 func (c *client) shard(r AnyUpdateRequest) (map[string]AnyUpdateRequest, error) {
-	byPeers, err := c.resolver.SplitFromLoadBalancedRatelimit(keys(r.Load))
+	byPeers, err := c.resolver.SplitFromLoadBalancedRatelimit(maps.Keys(r.Load))
 	if err != nil {
 		return nil, errors.ErrFromRPC(fmt.Errorf("unable to shard ratelimits to hosts: %w", err))
 	}
 	results := make(map[string]AnyUpdateRequest, len(byPeers))
 	for peerAddress, ratelimits := range byPeers {
 		batch := AnyUpdateRequest{
-			Load: make(map[string]Metrics, len(ratelimits)),
+			Load: make(map[string][2]int, len(ratelimits)),
 		}
 		for _, key := range ratelimits {
 			batch.Load[key] = r.Load[key]
@@ -263,14 +291,6 @@ func (c *client) shard(r AnyUpdateRequest) (map[string]AnyUpdateRequest, error) 
 		results[peerAddress] = batch
 	}
 	return results, nil
-}
-
-func keys[K comparable, V any](data map[K]V) []K {
-	result := make([]K, 0, len(data))
-	for k := range data {
-		result = append(result, k)
-	}
-	return result
 }
 
 // doesNotError recognizably wraps a "this should not occur" error so it can be
@@ -282,13 +302,6 @@ func doesNotError(format string, err error) error {
 		return nil
 	}
 	return fmt.Errorf("coding error: "+format+": %w", err)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func AnyToAllowResponse(a types.Any) (AnyAllowResponse, error) {

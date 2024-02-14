@@ -84,8 +84,17 @@ func (pr PeerResolver) FromHostAddress(hostAddress string) (string, error) {
 	return peer, common.ToServiceTransientError(err)
 }
 
-// FromLoadBalancedRatelimit partitions the ratelimit keys into map[host][]all_limits
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// SplitFromLoadBalancedRatelimit partitions the ratelimit keys into map[host][]host_owning_limits
 func (pr PeerResolver) SplitFromLoadBalancedRatelimit(ratelimits []string) (map[string][]string, error) {
+	// History was selected simply because it already has a ring and an internal-only API.
+	// Any service should be fine, it just needs to be shared.
 	hosts, err := pr.resolver.Members(service.History)
 	if err != nil {
 		// TODO: wrap with error cause when it's safe to do so
@@ -94,8 +103,16 @@ func (pr PeerResolver) SplitFromLoadBalancedRatelimit(ratelimits []string) (map[
 
 	results := make(map[string][]string, len(hosts))
 	initialCapacity := len(ratelimits) / len(hosts)
-	initialCapacity += initialCapacity / 10 // small buffer to reduce copies
+	// add a small buffer to reduce copies, as this is only an estimate.
+	// there's likely a mathematically-best value for reducing memory because this should be actually-randomly
+	// distributed, but I'm not sure what that would be, so +10% seems probably fine and probably not worse than 0.
+	initialCapacity = initialCapacity / 10
+	// but don't use zero, that'd be pointless
+	if initialCapacity < 1 {
+		initialCapacity = 1
+	}
 
+	// relatively lengthy but not worth parallelizing, the standard resolver needs to lock the ring to do a lookup
 	for _, r := range ratelimits {
 		// figure out the destination for this ratelimit
 		host, err := pr.resolver.Lookup(service.History, r)

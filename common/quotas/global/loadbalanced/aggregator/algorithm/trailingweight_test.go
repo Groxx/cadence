@@ -32,23 +32,43 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/uber/cadence/common/clock"
+	"github.com/uber/cadence/common/dynamicconfig"
 )
 
-func TestRapidlyCoalesces(t *testing.T) {
-	agg, err := New(0.5)
+// TODO: needs some smaller / simpler tests too
+
+func newForTest(t *testing.T, weight float64, updateRate time.Duration) (*impl, clock.MockedTimeSource) {
+	agg, err := New(weight, func(_ ...dynamicconfig.FilterOption) time.Duration {
+		return updateRate
+	})
 	require.NoError(t, err)
 
+	underlying := agg.(*impl)
 	tick := clock.NewMockedTimeSource()
-	agg.clock = tick
+	underlying.clock = tick
 
-	key := limit("start workflow")
-	h1, h2, h3 := identity("one"), identity("two"), identity("three")
+	return underlying, tick
+}
 
-	weights, used := agg.Weights(key)
+func TestRapidlyCoalesces(t *testing.T) {
+	// This test ensures that, regardless of starting weights, the algorithm
+	// "rapidly" achieves near-actual weight distribution after a small number of rounds.
+	//
+	// the exact numbers here don't really matter, it's just handy to show the behavior
+	// in semi-extreme scenarios.  logs show a quick adjustment which is what we want.
+	// if making changes, check with like 10k rounds to make sure it's stable.
+
+	updateRate := 3 * time.Second
+	agg, _ := newForTest(t, 0.5, updateRate)
+
+	key := Limit("start workflow")
+	h1, h2, h3 := Identity("one"), Identity("two"), Identity("three")
+
+	weights, used := agg.getWeights(key, updateRate)
 	assert.Zero(t, weights, "should have no weights")
 	assert.Zero(t, used, "should have no used RPS")
 
-	push := func(host identity, accept, reject int) {
+	push := func(host Identity, accept, reject int) {
 		agg.Update(key, host, accept, reject, time.Second)
 	}
 
@@ -63,21 +83,21 @@ func TestRapidlyCoalesces(t *testing.T) {
 	// which feels pretty reasonable: after ~10 seconds (3s updates), the oldest data only has ~10% weight.
 	const target = 10 + 200 + 999
 	for i := 0; i < 4; i++ {
-		weights, used = agg.Weights(key)
+		weights, used = agg.getWeights(key, updateRate)
 		t.Log("used:", used, "of actual:", target)
 		t.Log("weights so far:", weights)
 		push(h1, 10, 10)
 		push(h2, 200, 200)
 		push(h3, 999, 999)
 	}
-	weights, used = agg.Weights(key)
+	weights, used = agg.getWeights(key, updateRate)
 	t.Log("used:", used, "of actual:", target)
 	t.Log("weights so far:", weights)
 
 	// aggregated allowed-request values should be less than 10% off
 	assert.InDeltaf(t, target, used, target*0.1, "should have allowed >90%% of target rps by the 5th round") // actually ~94%
 	// also check weights, they should be within 10%
-	assert.InDeltaMapValues(t, map[identity]float64{
+	assert.InDeltaMapValues(t, map[Identity]float64{
 		h1: 10 / 1209.0,  // 0.07698229407
 		h2: 200 / 1209.0, // 0.1539645881
 		h3: 999 / 1209.0, // 0.7690531178
@@ -85,22 +105,28 @@ func TestRapidlyCoalesces(t *testing.T) {
 }
 
 func TestSimulate(t *testing.T) {
-	agg, err := New(0.5)
-	require.NoError(t, err)
-	tick := clock.NewMockedTimeSource()
-	agg.clock = tick
+	// Full fuzzy check with fully computed values.
+	//
+	// Everything about this test is sensitive to changes in behavior,
+	// so if that occurs, just update the values after ensuring they're reasonable.
+	// Exact matches after changes are not needed, just reasonable behavior.
+	//
+	// TODO: since this is a bit of a pain to update, maybe print copy/paste snapshots as it runs?
 
-	key := limit("start workflow")
-	h1, h2, h3 := identity("one"), identity("two"), identity("three")
+	updateRate := 3 * time.Second // both expected and duration fed to update
+	agg, tick := newForTest(t, 0.5, updateRate)
 
-	weights, used := agg.Weights(key)
+	key := Limit("start workflow")
+	h1, h2, h3 := Identity("one"), Identity("two"), Identity("three")
+
+	weights, used := agg.getWeights(key, updateRate)
 	assert.Zero(t, weights, "should have no weights")
 	assert.Zero(t, used, "should have no used RPS")
 
 	var adjust time.Duration
-	push := func(host identity, accept, reject int) {
+	push := func(host Identity, accept, reject int) {
 		adjust = advance(tick, time.Second+adjust, 100*time.Millisecond)
-		agg.Update(key, host, accept, reject, 3*time.Second)
+		agg.Update(key, host, accept, reject, updateRate)
 	}
 
 	// push in a random order
@@ -130,9 +156,9 @@ func TestSimulate(t *testing.T) {
 		accepted: 16 (sum of accept)
 	*/
 
-	weights, used = agg.Weights(key)
+	weights, used = agg.getWeights(key, updateRate)
 	assert.EqualValues(t, 16, used, "accepted rps should match sum of per-second accepted")
-	assert.EqualValues(t, map[identity]float64{
+	assert.EqualValues(t, map[Identity]float64{
 		h1: 10 / 122.0,
 		h2: 2 / 122.0,
 		h3: 110 / 122.0,
@@ -165,9 +191,9 @@ func TestSimulate(t *testing.T) {
 		total: 122 => 82 (sum of all)
 		accept: 16 => 21 (sum of accept)
 	*/
-	weights, used = agg.Weights(key)
+	weights, used = agg.getWeights(key, updateRate)
 	assert.EqualValues(t, 21, used, "accepted rps should match sum of new per-second accepted")
-	assert.EqualValues(t, map[identity]float64{
+	assert.EqualValues(t, map[Identity]float64{
 		h1: 15 / 82.0,
 		h2: 7 / 82.0,
 		h3: 60 / 82.0,
@@ -175,9 +201,9 @@ func TestSimulate(t *testing.T) {
 
 	// now advance time 3s -> everything is now +/-100ms within 3s old, nothing should drop
 	tick.Advance(3 * time.Second)
-	weights, used = agg.Weights(key)
+	weights, used = agg.getWeights(key, updateRate)
 	assert.EqualValues(t, 21, used, "accepted rps should not change yet")
-	assert.EqualValues(t, map[identity]float64{
+	assert.EqualValues(t, map[Identity]float64{
 		h1: 15 / 82.0,
 		h2: 7 / 82.0,
 		h3: 60 / 82.0,
@@ -185,9 +211,9 @@ func TestSimulate(t *testing.T) {
 
 	// another 3s -> everything is now +/-100ms within 6s old, nothing should drop (6.1s does not give a full old cycle yet)
 	tick.Advance(3 * time.Second)
-	weights, used = agg.Weights(key)
+	weights, used = agg.getWeights(key, updateRate)
 	assert.EqualValues(t, 21, used, "accepted rps should not change yet")
-	assert.EqualValues(t, map[identity]float64{
+	assert.EqualValues(t, map[Identity]float64{
 		h1: 15 / 82.0,
 		h2: 7 / 82.0,
 		h3: 60 / 82.0,
@@ -204,9 +230,9 @@ func TestSimulate(t *testing.T) {
 		total: 122 => 82 => 41 ("sum of all" or "half of prev" are both semantically correct)
 		accept: 16 => 21 => 10.5 (same, reduce by half)
 	*/
-	weights, used = agg.Weights(key)
+	weights, used = agg.getWeights(key, updateRate)
 	assert.EqualValues(t, 21/2.0, used, "accepted rps should have dropped to 1/2 due to data expiring")
-	assert.EqualValues(t, map[identity]float64{
+	assert.EqualValues(t, map[Identity]float64{
 		// same values because dividing everything by 2 gives the exact same ratios
 		h1: 15 / 82.0,
 		h2: 7 / 82.0,
@@ -215,10 +241,10 @@ func TestSimulate(t *testing.T) {
 
 	// and one last advance, to push everything another 3s (another drop)
 	tick.Advance(3 * time.Second)
-	weights, used = agg.Weights(key)
+	weights, used = agg.getWeights(key, updateRate)
 	// drops another /2.0
 	assert.EqualValues(t, (21/2.0)/2.0, used, "accepted rps should have dropped to 1/4 due to data expiring")
-	assert.EqualValues(t, map[identity]float64{
+	assert.EqualValues(t, map[Identity]float64{
 		// same weights because they all reduced again
 		h1: 15 / 82.0,
 		h2: 7 / 82.0,
@@ -250,20 +276,20 @@ func TestSimulate(t *testing.T) {
 		total: 122 => 82 => 41   => 13.25
 		accept: 16 => 21 => 10.5 => 4.125
 	*/
-	weights, used = agg.Weights(key)
+	weights, used = agg.getWeights(key, updateRate)
 	// drops another /2.0
 	assert.EqualValues(t, 4.125, used, "accepted rps should have dropped further from previous 5.25 due to new round of 3")
-	assert.EqualValues(t, map[identity]float64{
+	assert.EqualValues(t, map[Identity]float64{
 		h1: (1.4375 * 2) / 13.25,
 		h2: (0.9375 * 2) / 13.25,
 		h3: (1.75 + 6.75) / 13.25,
 	}, weights, "weights should have flattened to new values")
-	assert.NotEqualValues(t, map[identity]float64{
+	assert.NotEqualValues(t, map[Identity]float64{
 		// new values
 		h1: (1.4375 * 2) / 13.25,
 		h2: (0.9375 * 2) / 13.25,
 		h3: (1.75 + 6.75) / 13.25,
-	}, map[identity]float64{
+	}, map[Identity]float64{
 		// should NOT match old values
 		h1: 15 / 82.0,
 		h2: 7 / 82.0,
@@ -285,10 +311,14 @@ func fuzzy[T numeric](d T, spread T) T {
 }
 
 func BenchmarkAggregator_Update(b *testing.B) {
-	agg, err := New(0.5)
+	// intentionally using real clock source, time-gathering is relevant to benchmark
+	updateRate := 3 * time.Second
+	agg, err := New(0.5, func(_ ...dynamicconfig.FilterOption) time.Duration {
+		return updateRate
+	})
 	require.NoError(b, err)
 
-	// fairly fuzzy but somewhat representative:
+	// fairly fuzzy but somewhat representative of expected use:
 	// benchmark "update and get ~50 random limits for one of 20 random hosts" and accumulate data across all iterations.
 	// this is roughly what a server update operation will look like.
 	//
@@ -298,7 +328,7 @@ func BenchmarkAggregator_Update(b *testing.B) {
 	// general results imply:
 	// - updates are trivial, nice.  only 40k nanoseconds for 1m keys.
 	// - host-weight reading is MUCH more expensive.  2k host-limits -> 0.2ms, 200k host-limits -> 2ms.
-	// so it could be worth caching the weight calculation for... idk, like 1s?  could build a simple TTL-LRU and collect metrics on that.
+	// so it could be worth caching the weight calculation for... idk, like 1s?  could build a simple TTL-LRU and collect Metrics on that.
 	//
 	// results: this cuts cost about in half with perfect cache retention, which is depressingly low.
 	// 	weightcache: cache.New(&cache.Options{
@@ -312,15 +342,17 @@ func BenchmarkAggregator_Update(b *testing.B) {
 
 	sawnonzero := 0
 	for i := 0; i < b.N; i++ {
-		id := identity(fmt.Sprintf("host %d", rand.Intn(200)))
+		id := Identity(fmt.Sprintf("host %d", rand.Intn(200)))
 		for i, l := 0, rand.Intn(100); i < l; i++ {
 			agg.Update(
-				limit(fmt.Sprintf("key %d", rand.Intn(10000))),
+				Limit(fmt.Sprintf("key %d", rand.Intn(10000))),
 				id,
 				rand.Intn(1000), rand.Intn(1000),
 				time.Duration(rand.Int63n(3*time.Second.Nanoseconds())))
 		}
-		weights := agg.HostWeights(id)
+		var unused map[Limit]float64 // ensure non-error second return for test safety
+		weights, unused := agg.HostWeights(id)
+		_ = unused // ignore unused rps
 		if len(weights) > 0 {
 			// wrote data and later read it out, benchmark is likely functional
 			sawnonzero++
@@ -328,10 +360,60 @@ func BenchmarkAggregator_Update(b *testing.B) {
 	}
 	b.StopTimer()
 	b.Log("N was:", b.N)
-	b.Log("gc metrics:", agg.GC()) // to show how filled the data is, basically always hits max of {2k,100}
-	b.Log("cache size:", agg.weightcache.Size())
+	b.Log("gc Metrics:", agg.GC()) // to show how filled the data is, basically always hits max of {2k,100}
 
 	// sanity check, as "all zero" should mean something like "always looking at nonexistent keys" / bad benchmark code.
 	b.Log("nonzero results:", sawnonzero)
 	assert.True(b, b.N < 500 || sawnonzero > 0, "no non-zero result found on a large enough benchmark, likely not benchmarking anything useful")
+}
+
+func TestHashmapIterationIsRandom(t *testing.T) {
+	// is partial hashmap iteration reliably random each time so we can statistically ensure coverage,
+	// or is it relatively fixed per map?
+	// language spec is somewhat vague on the details here, so let's check.
+	//
+	// verdict: yes!  looks random each time.  so we can abuse it as an amortized cleanup tool.
+
+	const keys = 100
+	m := map[int]struct{}{}
+	for i := 0; i < keys; i++ {
+		m[i] = struct{}{}
+	}
+
+	allObserved := make(map[int]struct{}, len(m))
+	var orderObserved [][]int
+	singlePass := func() {
+		for i := 0; i < keys; i++ {
+			observed := make([]int, 0, keys/10)
+			for k := range m {
+				allObserved[k] = struct{}{}
+				observed = append(observed, k)
+				if len(observed) == cap(observed) {
+					break // interrupt part way through
+				}
+			}
+			orderObserved = append(orderObserved, observed)
+		}
+	}
+
+	// keep trying up to 10x to make it sufficiently-unlikely that randomness will fail.
+	// with only a single round it fails like 5% of the time, which is reasonable behavior
+	// but too much noise to allow to fail the test suite.
+	for i := 0; i < 10 && len(allObserved) < keys; i++ {
+		if i > 0 {
+			t.Logf("insufficient keys observed (%d), trying again in round %d", len(allObserved), i+1)
+		}
+		singlePass()
+	}
+
+	// complain if it still hasn't observed all keys
+	if !assert.Len(t, allObserved, keys) {
+		// super noisy when successful, so only log when failing
+		for idx, pass := range orderObserved {
+			t.Log("Pass", idx)
+			for _, keys := range pass {
+				t.Log("\t", keys)
+			}
+		}
+	}
 }

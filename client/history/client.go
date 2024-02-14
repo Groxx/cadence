@@ -1170,8 +1170,6 @@ func (c *clientImpl) RatelimitStartup(ctx context.Context, request *types.Rateli
 	var response *types.RatelimitStartupResponse
 	// empty peer: first call uses the shard key in opts
 	err := c.executeWithRedirect(ctx, "", func(ctx context.Context, peer string) error {
-		ctx, cancel := c.createContext(ctx)
-		defer cancel()
 		if peer != "" {
 			// ownership lost, override with the new peer
 			opts = append(opts, yarpc.WithShardKey(peer))
@@ -1187,14 +1185,15 @@ func (c *clientImpl) RatelimitUpdate(ctx context.Context, request *types.Ratelim
 	if len(opts) == 0 {
 		// unfortunately there is not really any way to ensure "must have a shard key option"
 		// due to the closed nature of yarpc.CallOption's implementation, outside private-field-reading reflection.
+		//
+		// we could achieve this by making this client a different interface,
+		// but that'd complicate wrappers quite a bit more.
 		return nil, fmt.Errorf("invalid arguments, missing yarpc.WithShardKey(peer) at a minimum")
 	}
 
 	var response *types.RatelimitUpdateResponse
 	// empty peer: first call uses the shard key in opts
 	err := c.executeWithRedirect(ctx, "", func(ctx context.Context, peer string) error {
-		ctx, cancel := c.createContext(ctx)
-		defer cancel()
 		if peer != "" {
 			// ownership lost, override with the new peer
 			opts = append(opts, yarpc.WithShardKey(peer))
@@ -1206,6 +1205,8 @@ func (c *clientImpl) RatelimitUpdate(ctx context.Context, request *types.Ratelim
 	return response, err
 }
 
+// Deprecated: using this method leads to ignoring cancellation.
+// Avoid in new code, and remove after verifying it's safe.
 func (c *clientImpl) createContext(parent context.Context) (context.Context, context.CancelFunc) {
 	if parent == nil {
 		return context.WithTimeout(context.Background(), c.timeout)

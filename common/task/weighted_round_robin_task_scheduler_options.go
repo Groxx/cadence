@@ -37,5 +37,5 @@ type WeightedRoundRobinTaskSchedulerOptions struct {
 }
 
 func (o *WeightedRoundRobinTaskSchedulerOptions) String() string {
-	return fmt.Sprintf("{QueueSize: %v, WorkerCount: %v, DispatcherCount: %v, Weights: %v}", o.QueueSize, o.WorkerCount(), o.DispatcherCount, o.Weights())
+	return fmt.Sprintf("{QueueSize: %v, WorkerCount: %v, DispatcherCount: %v, weights: %v}", o.QueueSize, o.WorkerCount(), o.DispatcherCount, o.Weights())
 }

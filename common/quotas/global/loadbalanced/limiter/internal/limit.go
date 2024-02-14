@@ -36,7 +36,7 @@ type (
 		// usage data cannot be gathered from rate.Limiter, sadly.
 		// so we need to gather it separately. or maybe find a fork.
 		usage    usage
-		fallback quotas.Limiter // fallback when limit is nil, used until updated
+		fallback quotas.Limiter // fallback when limit is nil, accepted until updated
 		limit    *rate.Limiter  // local-only limiter based on remote data.
 	}
 
@@ -46,8 +46,8 @@ type (
 	// abnormal spikes within report times, widely-varying behavior across reports,
 	// etc - that kind of logic is left to the common hosts, not the limiting ones.
 	usage struct {
-		used         int
-		refused      int
+		accepted     int
+		rejected     int
 		failedUpdate int // reset when an update occurs
 	}
 )
@@ -58,11 +58,11 @@ func New(fallback quotas.Limiter) *BalancedLimit {
 	}
 }
 
-// Collect returns the current used/refused values, and resets them to zero.
+// Collect returns the current accepted/rejected values, and resets them to zero.
 func (b *BalancedLimit) Collect() (used int, refused int, usingFallback bool) {
-	used, refused = b.usage.used, b.usage.refused
-	b.usage.used = 0
-	b.usage.refused = 0
+	used, refused = b.usage.accepted, b.usage.rejected
+	b.usage.accepted = 0
+	b.usage.rejected = 0
 	return used, refused, b.limit == nil
 }
 
@@ -74,7 +74,7 @@ func (b *BalancedLimit) Update(rps float64) {
 		// fallback no longer needed, use limiter only
 		b.limit = rate.NewLimiter(
 			rate.Limit(rps),
-			// 0 disallows all requests, so allow at least 1 and rely on rps to fill sanely
+			// 0 disallows all requests, so allow at least 1 and rely on rps to fill sanely.
 			max(1, int(rps)),
 		)
 		return
@@ -115,9 +115,9 @@ func (b *BalancedLimit) Allow() bool {
 	}
 
 	if allowed {
-		b.usage.used++
+		b.usage.accepted++
 	} else {
-		b.usage.refused++
+		b.usage.rejected++
 	}
 	return allowed
 }

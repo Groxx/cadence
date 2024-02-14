@@ -40,7 +40,7 @@ import (
 type Resource interface {
 	resource.Resource
 	GetEventCache() events.Cache
-	GetRatelimitAggregator() aggregator.Aggregator
+	GetRatelimitAggregator() aggregator.Aggregator // TODO: here vs inside Resource?  not sure what the difference is tbh.
 }
 
 type resourceImpl struct {

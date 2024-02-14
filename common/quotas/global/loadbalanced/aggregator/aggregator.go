@@ -62,48 +62,60 @@ type Load struct {
 	Rejected int
 }
 
+type UpdateRequest struct {
+	Host    algorithm.Identity
+	Elapsed time.Duration
+	Load    map[algorithm.Limit]Load
+}
+
 // Update adds load information for the passed keys to this aggregator.
-func (i *Impl) Update(host string, elapsed time.Duration, load map[string]Load) error {
-	for key, data := range load {
+func (i *Impl) Update(req UpdateRequest) error {
+	for key, data := range req.Load {
 		// update is cheap enough to do separately from get, no need to combine
 		i.weights.Update(
-			algorithm.Limit(key),
-			algorithm.Identity(host),
+			key,
+			req.Host,
 			data.Allowed,
 			data.Rejected,
-			elapsed,
+			req.Elapsed,
 		)
 	}
 	return nil
 }
 
-func (i *Impl) Get(host string, limits []string) (map[string]float64, error) {
-	result := make(map[string]float64, len(limits))
+type GetRequest struct {
+	Host   algorithm.Identity
+	Limits []algorithm.Limit
+}
+type GetResponse struct {
+	RPS map[string]float64
+}
+
+func (i *Impl) Get(req GetRequest) (GetResponse, error) {
+	result := GetResponse{
+		RPS: make(map[string]float64, len(req.Limits)),
+	}
 
 	frontendHosts, err := i.peers.MemberCount(service.Frontend)
 	if err != nil {
-		return nil, fmt.Errorf("unable to get number of frontend hosts: %w", err)
+		return result, fmt.Errorf("unable to get number of frontend hosts: %w", err)
 	}
 
-	typed := make([]algorithm.Limit, len(limits))
-	for i := range limits {
-		typed[i] = algorithm.Limit(limits[i])
-	}
-	weights, usedRPS := i.weights.HostWeights(algorithm.Identity(host), typed)
-	for _, limit := range typed {
+	weights, usedRPS := i.weights.HostWeights(algorithm.Identity(req.Host), req.Limits)
+	for _, limit := range req.Limits {
 		target := i.limits.Get(string(limit))
 
 		if weight, ok := weights[limit]; ok {
 			// known limit with known weight for this host.
 			// host is allowed a weighted amount of the target limit.
 			weighted := target * weight
-			result[string(limit)] = weighted
+			result.RPS[string(limit)] = weighted
 		}
 
 		if used, ok := usedRPS[limit]; ok {
 			// whether known-weight or not, every host also gets a fraction of the
 			// unused RPS to go above its exact weight, to allow some free growth
-			result[string(limit)] += max(0, (target-used)/float64(frontendHosts))
+			result.RPS[string(limit)] += max(0, (target-used)/float64(frontendHosts))
 		}
 
 		// if neither, the limit is completely unknown, caller can just use fallback.

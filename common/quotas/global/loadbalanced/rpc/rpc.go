@@ -64,6 +64,8 @@ import (
 	"github.com/uber/cadence/client/history"
 	"github.com/uber/cadence/common/log"
 	"github.com/uber/cadence/common/metrics"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator/algorithm"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/errors"
 	"github.com/uber/cadence/common/types"
 )
@@ -195,7 +197,7 @@ func (c *client) Update(ctx context.Context, period time.Duration, load AnyUpdat
 		g.Go(func() error {
 			defer func() { log.CapturePanic(recover(), c.logger, nil) }() // todo: describe what failed? is stack enough?
 
-			push, err := UpdateRequestToAny(batch)
+			push, err := updateRequestToAny(batch)
 			if err != nil {
 				// serialization is treated as a fatal coding error, it should never happen outside dev-ing.
 				return err
@@ -211,7 +213,7 @@ func (c *client) Update(ctx context.Context, period time.Duration, load AnyUpdat
 				return nil
 			}
 
-			resp, err := AnyToAllowResponse(result.Data)
+			resp, err := anyToAllowResponse(result.Data)
 			if err != nil {
 				results(load, nil, err)
 				return nil
@@ -249,7 +251,7 @@ func (c *client) Startup(ctx context.Context, results func(batch *AnyAllowRespon
 				return nil
 			}
 
-			resp, err := AnyToAllowResponse(result.Data)
+			resp, err := anyToAllowResponse(result.Data)
 			if err != nil {
 				results(nil, err)
 				return nil
@@ -305,18 +307,52 @@ func doesNotError(format string, err error) error {
 	return fmt.Errorf("coding error: "+format+": %w", err)
 }
 
-func AnyToAllowResponse(a types.Any) (AnyAllowResponse, error) {
+// converting types to/from the aggregator's API (convenience for handlers)
+
+func AggGetResponseToAny(res aggregator.GetResponse) (types.Any, error) {
+	return AllowResponseToAny(AnyAllowResponse{
+		Allow: res.RPS,
+	})
+}
+func AnyToAggUpdate(caller string, a types.Any) (aggregator.UpdateRequest, error) {
+	req, err := anyToUpdateRequest(a)
+	if err != nil {
+		return aggregator.UpdateRequest{}, fmt.Errorf("unable to convert to update request: %w", err)
+	}
+	load := make(map[algorithm.Limit]aggregator.Load, len(req.Load))
+	for k, v := range req.Load {
+		if len(v) < 2 {
+			return aggregator.UpdateRequest{}, fmt.Errorf("insufficient values in load info for key %q, expected [allowed, rejected] but got %v", k, v)
+		}
+		load[algorithm.Limit(k)] = aggregator.Load{
+			Allowed:  v[0],
+			Rejected: v[1],
+		}
+	}
+	return aggregator.UpdateRequest{
+		Host:    algorithm.Identity(caller),
+		Elapsed: req.Elapsed,
+		Load:    load,
+	}, nil
+}
+
+// typed to/from json
+
+func anyToAllowResponse(a types.Any) (AnyAllowResponse, error) {
 	return deserializeTo[AnyAllowResponse](a, AnyAllowResponseTypeID)
 }
-func AnyToUpdateRequest(a types.Any) (AnyUpdateRequest, error) {
+func anyToUpdateRequest(a types.Any) (AnyUpdateRequest, error) {
 	return deserializeTo[AnyUpdateRequest](a, AnyUpdateRequestTypeID)
 }
-func UpdateRequestToAny(r AnyUpdateRequest) (types.Any, error) {
+func updateRequestToAny(r AnyUpdateRequest) (types.Any, error) {
 	return serializeTo(r, AnyUpdateRequestTypeID)
 }
 func AllowResponseToAny(r AnyAllowResponse) (types.Any, error) {
 	return serializeTo(r, AnyAllowResponseTypeID)
 }
+
+// general to/from json via Any
+
 func serializeTo[T any](r T, typeID string) (types.Any, error) {
 	data, err := json.Marshal(r)
 	if err != nil {

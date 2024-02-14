@@ -22,10 +22,6 @@
 
 package aggregator
 
-import (
-	"time"
-)
-
 // mockgen is archived and does not understand generics in -source mode, so this needs to be in its own file.
 // TODO: we should really move off mockgen
 
@@ -33,7 +29,7 @@ import (
 
 type (
 	Aggregator interface {
-		Update(host string, elapsed time.Duration, load map[string]Load) error
-		Get(host string, limits []string) (map[string]float64, error)
+		Update(req UpdateRequest) error
+		Get(req GetRequest) (GetResponse, error)
 	}
 )

@@ -2131,36 +2131,32 @@ func (h *handlerImpl) RatelimitUpdate(ctx context.Context, request *types.Rateli
 	}
 
 	// perform the update
-	// TODO: push (de)serialization into the agg-API, it should be implementation-decided
-	updateData, err := rpc.AnyToUpdateRequest(request.Data)
+	// TODO: push (de)serialization into the agg-API, it should be implementation-decided.
+	// TODO: bundle update-and-get inside the api, this is excessive for a handler.  hide in a 2-layer api?
+	updateReq, err := rpc.AnyToAggUpdate(request.Caller, request.Data)
 	if err != nil {
 		return nil, h.error(err, scope, "", "", "")
 	}
-
-	typed := make(map[string]aggregator.Load, len(updateData.Load))
-	for k, v := range updateData.Load {
-		typed[k] = aggregator.Load{
-			Allowed:  v[0], // TODO: this belongs in rpc, yea?  limit calls rpc calls agg, no cycles
-			Rejected: v[1],
-		}
-	}
-	h.ratelimitAgg.Update(request.Caller, request.LastUpdated, typed)
-
-	// retrieve all (now updated) rps data
-	rps, err := h.ratelimitAgg.Get(request.Caller, maps.Keys(updateData.Load))
+	// perform the update
+	err = h.ratelimitAgg.Update(updateReq)
 	if err != nil {
 		return nil, h.error(err, scope, "", "", "")
 	}
-	respondData, err := rpc.AllowResponseToAny(rpc.AnyAllowResponse{
-		Allow: rps,
+	// pull the updated values
+	response, err := h.ratelimitAgg.Get(aggregator.GetRequest{
+		Host:   updateReq.Host,
+		Limits: maps.Keys(updateReq.Load),
 	})
 	if err != nil {
 		return nil, h.error(err, scope, "", "", "")
 	}
-	resp = &types.RatelimitUpdateResponse{
-		Data: respondData,
+	getAny, err := rpc.AggGetResponseToAny(response)
+	if err != nil {
+		return nil, h.error(err, scope, "", "", "")
 	}
-	return resp, nil
+	return &types.RatelimitUpdateResponse{
+		Data: getAny,
+	}, nil
 }
 
 // convertError is a helper method to convert ShardOwnershipLostError from persistence layer returned by various

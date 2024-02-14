@@ -20,20 +20,5 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-package aggregator
-
-import (
-	"time"
-)
-
-// mockgen is archived and does not understand generics in -source mode, so this needs to be in its own file.
-// TODO: we should really move off mockgen
-
-//go:generate mockgen -package $GOPACKAGE -source $GOFILE -destination aggregator_mock.go -self_package github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator
-
-type (
-	Aggregator interface {
-		Update(host string, elapsed time.Duration, load map[string]Load) error
-		Get(host string, limits []string) (map[string]float64, error)
-	}
-)
+// Package rpc contains the request sharding, fan-out, and RPC-type conversion for global ratelimiting.
+package rpc

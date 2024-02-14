@@ -32,7 +32,27 @@ import (
 )
 
 type (
-	BalancedLimit struct {
+	// FallbackLimiter wraps a rate.Limiter with a fallback quotas.Limiter to use
+	// after a configurable number of failed updates.
+	//
+	// Intended use is:
+	//   - collect allowed vs rejected metrics
+	//   - periodically, the limiting host gathers all FallbackLimiter metrics and zeros them
+	//   - this info is submitted to aggregating hosts, who compute new target RPS values
+	//   - these new updates adjust this ratelimiter
+	//
+	// During this sequence, an individual limit may not be returned for two major reasons:
+	//   - this limit is legitimately unused and no data exists for it
+	//   - ring re-sharding led to losing track of the limit, and it is now owned by a host without sufficient data
+	//
+	// To mitigate the impact of the second case, "insufficient data" responses from aggregating hosts
+	// are temporarily ignored, and the previously-configured update is used.  This gives the aggregating host time
+	// to fill in its data, and then the next cycle should use "real" values.
+	//
+	// If no data has been returned for a sufficiently long time, the "smart" ratelimit will be dropped, and
+	// the fallback limit will be used exclusively.  This is intended as a safety fallback, e.g. during initial
+	// rollout and outage scenarios, normal use is not expected to rely on it.
+	FallbackLimiter struct {
 		// usage data cannot be gathered from rate.Limiter, sadly.
 		// so we need to gather it separately. or maybe find a fork.
 		usage    usage
@@ -52,14 +72,14 @@ type (
 	}
 )
 
-func New(fallback quotas.Limiter) *BalancedLimit {
-	return &BalancedLimit{
+func New(fallback quotas.Limiter) *FallbackLimiter {
+	return &FallbackLimiter{
 		fallback: fallback,
 	}
 }
 
 // Collect returns the current accepted/rejected values, and resets them to zero.
-func (b *BalancedLimit) Collect() (used int, refused int, usingFallback bool) {
+func (b *FallbackLimiter) Collect() (used int, refused int, usingFallback bool) {
 	used, refused = b.usage.accepted, b.usage.rejected
 	b.usage.accepted = 0
 	b.usage.rejected = 0
@@ -67,7 +87,7 @@ func (b *BalancedLimit) Collect() (used int, refused int, usingFallback bool) {
 }
 
 // Update adjusts the underlying ratelimit.
-func (b *BalancedLimit) Update(rps float64) {
+func (b *FallbackLimiter) Update(rps float64) {
 	b.usage.failedUpdate = 0 // reset the use-fallback fuse
 
 	if b.limit == nil {
@@ -90,8 +110,8 @@ func (b *BalancedLimit) Update(rps float64) {
 // FailedUpdate should be called when a key fails to update from a common host,
 // possibly implying some kind of problem, possibly with this key.
 //
-// After crossing a threshold of failures (currently 10), the fallback will be used.
-func (b *BalancedLimit) FailedUpdate() (failures int) {
+// After crossing a threshold of failures (currently 10), the fallback will be switched to.
+func (b *FallbackLimiter) FailedUpdate() (failures int) {
 	b.usage.failedUpdate++ // always increment the count for monitoring purposes
 	if b.usage.failedUpdate == 10 {
 		b.limit = nil // defer to fallback when crossing the threshold
@@ -101,12 +121,12 @@ func (b *BalancedLimit) FailedUpdate() (failures int) {
 
 // Clear erases the internal ratelimit, and defers to the fallback until an update is received.
 // This is intended to be used when the current limit is no longer trustworthy for some reason.
-func (b *BalancedLimit) Clear() {
+func (b *FallbackLimiter) Clear() {
 	b.limit = nil
 }
 
 // Allow returns true if a request is allowed right now.
-func (b *BalancedLimit) Allow() bool {
+func (b *FallbackLimiter) Allow() bool {
 	var allowed bool
 	if b.limit == nil {
 		allowed = b.fallback.Allow()

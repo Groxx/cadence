@@ -38,8 +38,8 @@ import (
 	"github.com/uber/cadence/common/quotas"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/errors"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/limiter/internal"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/limiter/typedmap"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/rpc"
-	"github.com/uber/cadence/common/quotas/global/loadbalanced/typedmap"
 )
 
 type (
@@ -65,7 +65,7 @@ type (
 
 		// usage info, held in a sync.Map because it matches one of its documented "good fit" cases:
 		// write once + read many times per key.
-		usage *typedmap.TypedMap[string, *internal.BalancedLimit]
+		usage *typedmap.TypedMap[string, *internal.FallbackLimiter]
 
 		// lifecycle ctx, used for background requests
 		ctx     context.Context
@@ -97,7 +97,7 @@ func NewBalanced(
 	logger log.Logger,
 	scope metrics.Scope,
 ) *BalancedCollection {
-	contents, err := typedmap.New(func(key string) *internal.BalancedLimit {
+	contents, err := typedmap.New(func(key string) *internal.FallbackLimiter {
 		instance := internal.New(fallback.For(key))
 		return instance
 	})
@@ -260,20 +260,17 @@ func (b *BalancedCollection) backgroundUpdateLoop() {
 			capacity := b.usage.Len()
 			capacity += capacity / 10
 			all := rpc.AnyUpdateRequest{
-				Load: make(map[string]rpc.Metrics, capacity),
+				Load: make(map[string][]int, capacity),
 			}
 
 			now := b.timesource.Now()
-			b.usage.Range(func(k string, v *internal.BalancedLimit) bool {
+			b.usage.Range(func(k string, v *internal.FallbackLimiter) bool {
 				used, refused, usingFallback := v.Collect()
 				_ = usingFallback // TODO: interesting for metrics?
 				if used+refused == 0 {
 					return true // no requests -> no update sent
 				}
-				all.Load[k] = rpc.Metrics{
-					Allowed:  used,
-					Rejected: refused,
-				}
+				all.Load[k] = []int{used, refused}
 				return true
 			})
 

@@ -343,15 +343,19 @@ func BenchmarkAggregator_Update(b *testing.B) {
 	sawnonzero := 0
 	for i := 0; i < b.N; i++ {
 		id := Identity(fmt.Sprintf("host %d", rand.Intn(200)))
-		for i, l := 0, rand.Intn(100); i < l; i++ {
+		num := rand.Intn(100)
+		limits := make([]Limit, 0, num)
+		for i := 0; i < num; i++ {
+			lim := Limit(fmt.Sprintf("key %d", rand.Intn(10000)))
+			limits = append(limits, lim)
 			agg.Update(
-				Limit(fmt.Sprintf("key %d", rand.Intn(10000))),
+				lim,
 				id,
 				rand.Intn(1000), rand.Intn(1000),
 				time.Duration(rand.Int63n(3*time.Second.Nanoseconds())))
 		}
 		var unused map[Limit]float64 // ensure non-error second return for test safety
-		weights, unused := agg.HostWeights(id)
+		weights, unused := agg.HostWeights(id, limits)
 		_ = unused // ignore unused rps
 		if len(weights) > 0 {
 			// wrote data and later read it out, benchmark is likely functional

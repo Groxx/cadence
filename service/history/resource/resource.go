@@ -23,13 +23,11 @@ package resource
 import (
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	"github.com/uber/cadence/common"
-	"github.com/uber/cadence/common/dynamicconfig"
 	"github.com/uber/cadence/common/log/tag"
-	"github.com/uber/cadence/common/metrics"
 	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator"
+	"github.com/uber/cadence/common/quotas/global/loadbalanced/aggregator/algorithm"
 	"github.com/uber/cadence/common/resource"
 	"github.com/uber/cadence/common/service"
 	"github.com/uber/cadence/service/history/config"
@@ -135,17 +133,15 @@ func New(
 		serviceResource.GetDomainCache(),
 	)
 
+	// TODO: fill out with real values
+	alg, err := algorithm.New(0.5, nil)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create ratelimiter algorithm: %w", err)
+	}
 	agg, err := aggregator.New(
-		// TODO: make a real config
-		func(opts ...dynamicconfig.FilterOption) int {
-			return 10
-		},
-		// TODO: make a real config
-		func(opts ...dynamicconfig.FilterOption) time.Duration {
-			return 10 * time.Second
-		},
-		params.Logger,
-		params.MetricsClient.Scope(metrics.HistoryRatelimitStartupScope), // TODO: need new scope const / double check purpose of scope
+		alg,
+		nil,
+		nil,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create ratelimit aggregator: %w", err)

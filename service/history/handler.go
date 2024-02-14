@@ -31,6 +31,7 @@ import (
 
 	"github.com/pborman/uuid"
 	"go.uber.org/yarpc/yarpcerrors"
+	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/uber/cadence/common"
@@ -197,7 +198,7 @@ func (h *handlerImpl) Start() {
 	if h.config.EnableGracefulFailover() {
 		h.failoverCoordinator.Start()
 	}
-	h.ratelimitAgg.Start()
+	// h.ratelimitAgg.Start() // TODO: change to limiter
 
 	h.controller.Start()
 
@@ -214,14 +215,15 @@ func (h *handlerImpl) Stop() {
 	h.historyEventNotifier.Stop()
 	h.failoverCoordinator.Stop()
 
-	// TODO: raise this limit if we implement draining
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	err := h.ratelimitAgg.Stop(ctx)
-	if err != nil {
-		h.GetLogger().Error("failed to shut down ratelimit aggregator quickly", tag.Error(err))
-		// non-fatal because it'll still stop eventually / the process will go away
-	}
+	// TODO: replace with limiter
+	// // TODO: raise this limit if we implement draining
+	// ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	// defer cancel()
+	// err := h.ratelimitAgg.Stop(ctx)
+	// if err != nil {
+	// 	h.GetLogger().Error("failed to shut down ratelimit aggregator quickly", tag.Error(err))
+	// 	// non-fatal because it'll still stop eventually / the process will go away
+	// }
 }
 
 // PrepareToStop starts graceful traffic drain in preparation for shutdown
@@ -2093,22 +2095,28 @@ func (h *handlerImpl) RatelimitStartup(ctx context.Context, request *types.Ratel
 	defer func() { log.CapturePanic(recover(), h.GetLogger(), &retError) }()
 	h.startWG.Wait()
 
-	scope, sw := h.startRequestProfile(ctx, metrics.HistoryRatelimitStartupScope)
-	defer sw.Stop()
+	// scope, sw := h.startRequestProfile(ctx, metrics.HistoryRatelimitStartupScope)
+	// defer sw.Stop()
 
 	if h.isShuttingDown() {
 		return nil, errShuttingDown
 	}
 
-	all := h.ratelimitAgg.GetAll(request.Caller)
-	data, err := rpc.AllowResponseToAny(all)
-	if err != nil {
-		return nil, h.error(err, scope, "", "", "")
-	}
-	resp = &types.RatelimitStartupResponse{
-		Data: data,
-	}
-	return resp, nil
+	// rps, err := h.ratelimitAgg.Get(request.Caller, maps.Keys(request.Load))
+	// if err != nil {
+	// 	return nil, h.error(err, scope, "", "", "")
+	// }
+	// respondData, err := rpc.AllowResponseToAny(rpc.AnyAllowResponse{
+	// 	Allow: rps,
+	// })
+	// if err != nil {
+	// 	return nil, h.error(err, scope, "", "", "")
+	// }
+	// resp = &types.RatelimitStartupResponse{
+	// 	Data: respondData,
+	// }
+	// return resp, nil
+	return nil, nil
 }
 
 func (h *handlerImpl) RatelimitUpdate(ctx context.Context, request *types.RatelimitUpdateRequest) (resp *types.RatelimitUpdateResponse, retError error) {
@@ -2129,11 +2137,23 @@ func (h *handlerImpl) RatelimitUpdate(ctx context.Context, request *types.Rateli
 		return nil, h.error(err, scope, "", "", "")
 	}
 
-	h.ratelimitAgg.Update(request.Caller, request.LastUpdated, updateData)
+	typed := make(map[string]aggregator.Load, len(updateData.Load))
+	for k, v := range updateData.Load {
+		typed[k] = aggregator.Load{
+			Allowed:  v[0], // TODO: this belongs in rpc, yea?  limit calls rpc calls agg, no cycles
+			Rejected: v[1],
+		}
+	}
+	h.ratelimitAgg.Update(request.Caller, request.LastUpdated, typed)
 
 	// retrieve all (now updated) rps data
-	all := h.ratelimitAgg.GetAll(request.Caller)
-	respondData, err := rpc.AllowResponseToAny(all)
+	rps, err := h.ratelimitAgg.Get(request.Caller, maps.Keys(updateData.Load))
+	if err != nil {
+		return nil, h.error(err, scope, "", "", "")
+	}
+	respondData, err := rpc.AllowResponseToAny(rpc.AnyAllowResponse{
+		Allow: rps,
+	})
 	if err != nil {
 		return nil, h.error(err, scope, "", "", "")
 	}

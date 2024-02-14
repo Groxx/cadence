@@ -283,7 +283,8 @@ func (c *client) shard(r AnyUpdateRequest) (map[string]AnyUpdateRequest, error) 
 	results := make(map[string]AnyUpdateRequest, len(byPeers))
 	for peerAddress, ratelimits := range byPeers {
 		batch := AnyUpdateRequest{
-			Load: make(map[string][2]int, len(ratelimits)),
+			Elapsed: r.Elapsed,
+			Load:    make(map[string][]int, len(ratelimits)),
 		}
 		for _, key := range ratelimits {
 			batch.Load[key] = r.Load[key]

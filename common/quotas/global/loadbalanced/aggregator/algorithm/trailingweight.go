@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Package algorithm contains a weighted average calculator for ratelimits.
+// It is unaware of RPC or desired limits, it just tracks the observed rates of requests.
 package algorithm
 
 import (
@@ -31,35 +33,6 @@ import (
 	"github.com/uber/cadence/common/clock"
 	"github.com/uber/cadence/common/dynamicconfig"
 )
-
-/*
-plan:
-- implement a running weighted distribution per host
-- detect update rate and use to handle degrading values
-- prune when below a value
-- offer at max [(remaining unused quota / num unused hosts) * 2] to unrecognized hosts
-
-base assumption:
-- more ratelimits than hosts (more domains than hosts * multiple limits per domain)
-- limits are relatively stable per host
-  - i.e. keys are fairly stable, and weights per domain are pretty stable, and they change relatively slowly compared to check-in cadence
-- each Limit should check all hosts
-  - needed for weight calculation
-- limits can be ignored until they're checked
-  - can defer zero-accounting until it's loaded
-  - can clean up statistically if needed
-  - background cleanup may also be worth doing
-
-*/
-
-/*
-Overall concept is pretty simple:
-- assume there are many more limits than frontend hosts, so the top-level key should be Limit to reduce cardinality as fast as possible.
-- per Limit per host, maintain a rolling average of the last few updates.
-- when figuring out [weight of host X in Limit Y], just compute the Limit's current weight for that host and return it.  it'll eventually become more correct.
-- don't try to be clever with locks, many mutexes or atomics can cost much more than one coarse one.  benchmark before optimizing.
-- garbage-collect as you go, removing things with >10x no updates.
-*/
 
 type (
 	// history holds the running per-second running average for a single key from a single host, and the last time it was updated.
@@ -108,9 +81,9 @@ type (
 	WeightedAverage interface {
 		Update(key Limit, id Identity, accepted, rejected int, elapsed time.Duration)
 
-		// HostWeights returns the per-[Limit] weights for all known keys for this host,
+		// HostWeights returns the per-[Limit] weights for all requested + known keys for this Identity,
 		// as well as the Limit's overall used RPS (to decide RPS to allow for new hosts).
-		HostWeights(host Identity) (weights map[Limit]float64, usedRPS map[Limit]float64)
+		HostWeights(host Identity, limits []Limit) (weights map[Limit]float64, usedRPS map[Limit]float64)
 
 		// GC can be called periodically to prune old ratelimits.
 		//
@@ -223,28 +196,20 @@ func (a *impl) getWeights(key Limit, minRate time.Duration) (weights map[Identit
 	return weights, usedRPS
 }
 
-// HostWeights returns the weighted limits for all known keys for this host,
-// and how many RPS total are estimated to be used (to allow room for hosts to burst higher).
-//
-// Callers should use this to determine:
-// - existing identities get their weight-of-the-ratelimit
-// - new identities can only consume some portion of remaining-in-ratelimit (accepted rps), and they will auto-adjust to be more accurate on the next cycle
-func (a *impl) HostWeights(host Identity) (weights map[Limit]float64, usedRPS map[Limit]float64) {
+func (a *impl) HostWeights(host Identity, limits []Limit) (weights map[Limit]float64, usedRPS map[Limit]float64) {
 	a.mut.Lock()
 	defer a.mut.Unlock()
 
-	// TODO: relatively slow, 100,000ns or so for large sizes.  worth doing something about it?
-	// e.g. what about a host-to-Limit map to reduce the keys scanned?
-	// - ... would that even be useful if we assume balanced load?  maybe internally it'd cut out like 3/4?
-	weights = make(map[Limit]float64, len(a.usage))
-	usedRPS = make(map[Limit]float64, len(a.usage))
+	weights = make(map[Limit]float64, len(limits))
+	usedRPS = make(map[Limit]float64, len(limits))
 	minRate := a.updateRateMin()
-	for key, data := range a.usage {
-		_, ok := data[host]
-		if ok {
-			computed, consumed := a.getWeights(key, minRate)
-			usedRPS[key] = consumed
-			weights[key] = computed[host]
+	for _, lim := range limits {
+		hosts, used := a.getWeights(lim, minRate)
+		if len(hosts) > 0 {
+			usedRPS[lim] = used // limit is known, has some usage
+			if weight, ok := hosts[host]; ok {
+				weights[lim] = weight // host has a known weight
+			}
 		}
 	}
 	return weights, usedRPS

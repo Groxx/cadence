@@ -2133,6 +2133,7 @@ func (h *handlerImpl) RatelimitUpdate(ctx context.Context, request *types.Rateli
 	// perform the update
 	// TODO: push (de)serialization into the agg-API, it should be implementation-decided.
 	// TODO: bundle update-and-get inside the api, this is excessive for a handler.  hide in a 2-layer api?
+	// no need to add strategy args / etc to the request, the `type_url` covers that perfectly well
 	updateReq, err := rpc.AnyToAggUpdate(request.Caller, request.Data)
 	if err != nil {
 		return nil, h.error(err, scope, "", "", "")

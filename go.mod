@@ -37,10 +37,10 @@ require (
 	github.com/pborman/uuid v0.0.0-20180906182336-adf5a7427709
 	github.com/robfig/cron v1.2.0
 	github.com/sirupsen/logrus v1.9.0 // indirect
-	github.com/startreedata/pinot-client-go v0.0.0-20230303070132-3b84c28a9e95 // latest release doesn't support pinot v0.12, so use master branch
+	github.com/startreedata/pinot-client-go v0.2.0 // latest release supports pinot v0.12.0 which is also internal version
 	github.com/stretchr/testify v1.8.3
 	github.com/uber-go/tally v3.3.15+incompatible
-	github.com/uber/cadence-idl v0.0.0-20240208213432-2e3c661bfb7c
+	github.com/uber/cadence-idl v0.0.0-20240212223805-34b4519b2709
 	github.com/uber/ringpop-go v0.8.5
 	github.com/uber/tchannel-go v1.22.2
 	github.com/urfave/cli v1.22.4
@@ -83,6 +83,7 @@ require (
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/go-stack/stack v1.8.0 // indirect
+	github.com/go-zookeeper/zk v1.0.3 // indirect
 	github.com/gogo/googleapis v1.3.2 // indirect
 	github.com/gogo/status v1.1.0 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
@@ -118,7 +119,6 @@ require (
 	github.com/prometheus/procfs v0.6.0 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
 	github.com/russross/blackfriday/v2 v2.0.1 // indirect
-	github.com/samuel/go-zookeeper v0.0.0-20201211165307-7117e9ea2414 // indirect
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
 	github.com/stretchr/objx v0.5.0 // indirect
 	github.com/uber-common/bark v1.2.1 // indirect

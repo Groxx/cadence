@@ -528,6 +528,12 @@ const (
 	// Default value: UnlimitedRPS
 	// Allowed filters: N/A
 	FrontendVisibilityRPS
+	// FrontendAsync is the async workflow request rate limit per second
+	// KeyName: frontend.asyncrps
+	// Value type: Int
+	// Default value: 10000
+	// Allowed filters: N/A
+	FrontendAsyncRPS
 	// FrontendMaxDomainUserRPSPerInstance is workflow domain rate limit per second
 	// KeyName: frontend.domainrps
 	// Value type: Int
@@ -546,6 +552,12 @@ const (
 	// Default value: UnlimitedRPS
 	// Allowed filters: DomainName
 	FrontendMaxDomainVisibilityRPSPerInstance
+	// FrontendMaxDomainAsyncRPSPerInstance is the per-instance async workflow request rate limit per second
+	// KeyName: frontend.domainasyncrps
+	// Value type: Int
+	// Default value: 10000
+	// Allowed filters: DomainName
+	FrontendMaxDomainAsyncRPSPerInstance
 	// FrontendGlobalDomainUserRPS is workflow domain rate limit per second for the whole Cadence cluster
 	// KeyName: frontend.globalDomainrps
 	// Value type: Int
@@ -564,6 +576,12 @@ const (
 	// Default value: UnlimitedRPS
 	// Allowed filters: DomainName
 	FrontendGlobalDomainVisibilityRPS
+	// FrontendGlobalDomainAsyncRPS is the per-domain async workflow request rate limit per second
+	// KeyName: frontend.globalDomainAsyncrps
+	// Value type: Int
+	// Default value: 100000
+	// Allowed filters: DomainName
+	FrontendGlobalDomainAsyncRPS
 	// FrontendDecisionResultCountLimit is max number of decisions per RespondDecisionTaskCompleted request
 	// KeyName: frontend.decisionResultCountLimit
 	// Value type: Int
@@ -1712,7 +1730,7 @@ const (
 	// Default value: true
 	// Allowed filters: DomainName
 	EnableRecordWorkflowExecutionUninitialized
-	// WorkflowIDCacheEnabled is the key to enable/disable caching of workflowID specific information
+	// WorkflowIDCacheExternalEnabled is the key to enable/disable caching of workflowID specific information for external requests
 	// KeyName: history.workflowIDCacheExternalEnabled
 	// Value type: Bool
 	// Default value: false
@@ -1846,12 +1864,6 @@ const (
 	// Default value: true
 	// Allowed filters: N/A
 	EnableFailoverManager
-	// EnableWorkflowShadower indicates if workflow shadower is enabled
-	// KeyName: system.enableWorkflowShadower
-	// Value type: Bool
-	// Default value: true
-	// Allowed filters: N/A
-	EnableWorkflowShadower
 	// ConcreteExecutionFixerDomainAllow is which domains are allowed to be fixed by concrete fixer workflow
 	// KeyName: worker.concreteExecutionFixerDomainAllow
 	// Value type: Bool
@@ -3024,6 +3036,11 @@ var IntKeys = map[IntKey]DynamicInt{
 		Description:  "FrontendVisibilityRPS is the global workflow List*WorkflowExecutions request rate limit per second",
 		DefaultValue: UnlimitedRPS,
 	},
+	FrontendAsyncRPS: DynamicInt{
+		KeyName:      "frontend.asyncrps",
+		Description:  "FrontendAsyncRPS is the async workflow request rate limit per second",
+		DefaultValue: 10000,
+	},
 	FrontendMaxDomainUserRPSPerInstance: DynamicInt{
 		KeyName:      "frontend.domainrps",
 		Filters:      []Filter{DomainName},
@@ -3042,6 +3059,12 @@ var IntKeys = map[IntKey]DynamicInt{
 		Description:  "FrontendMaxDomainVisibilityRPSPerInstance is the per-instance List*WorkflowExecutions request rate limit per second",
 		DefaultValue: UnlimitedRPS,
 	},
+	FrontendMaxDomainAsyncRPSPerInstance: DynamicInt{
+		KeyName:      "frontend.domainasyncrps",
+		Filters:      []Filter{DomainName},
+		Description:  "FrontendMaxDomainAsyncRPSPerInstance is the per-instance async workflow request rate limit per second",
+		DefaultValue: 10000,
+	},
 	FrontendGlobalDomainUserRPS: DynamicInt{
 		KeyName:      "frontend.globalDomainrps",
 		Filters:      []Filter{DomainName},
@@ -3059,6 +3082,12 @@ var IntKeys = map[IntKey]DynamicInt{
 		Filters:      []Filter{DomainName},
 		Description:  "FrontendGlobalDomainVisibilityRPS is the per-domain List*WorkflowExecutions request rate limit per second",
 		DefaultValue: UnlimitedRPS,
+	},
+	FrontendGlobalDomainAsyncRPS: DynamicInt{
+		KeyName:      "frontend.globalDomainAsyncrps",
+		Filters:      []Filter{DomainName},
+		Description:  "FrontendGlobalDomainAsyncRPS is the per-domain async workflow request rate limit per second",
+		DefaultValue: 100000,
 	},
 	FrontendDecisionResultCountLimit: DynamicInt{
 		KeyName:      "frontend.decisionResultCountLimit",
@@ -4149,11 +4178,6 @@ var BoolKeys = map[BoolKey]DynamicBool{
 	EnableFailoverManager: DynamicBool{
 		KeyName:      "system.enableFailoverManager",
 		Description:  "EnableFailoverManager indicates if failover manager is enabled",
-		DefaultValue: true,
-	},
-	EnableWorkflowShadower: DynamicBool{
-		KeyName:      "system.enableWorkflowShadower",
-		Description:  "EnableWorkflowShadower indicates if workflow shadower is enabled",
 		DefaultValue: true,
 	},
 	ConcreteExecutionFixerDomainAllow: DynamicBool{

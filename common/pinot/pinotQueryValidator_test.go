@@ -77,9 +77,13 @@ func TestValidateQuery(t *testing.T) {
 			query: "Invalid SQL",
 			err:   "Invalid query.",
 		},
-		"Case8: query with missing val": {
+		"Case8-1: query with missing val": {
 			query:     "CloseTime = missing",
-			validated: "CloseTime = `-1`",
+			validated: "CloseTime = -1",
+		},
+		"Case8-2: query with not missing case": {
+			query:     "CloseTime != missing",
+			validated: "CloseTime != -1",
 		},
 		"Case9: invalid where expression": {
 			query: "InvalidWhereExpr",
@@ -152,22 +156,22 @@ func TestValidateQuery(t *testing.T) {
 		"Case15-8: invalid string for trim": {
 			query:     "CloseTime = abc",
 			validated: "",
-			err:       "error: failed to convert val",
+			err:       "right comparison is invalid string value: abc",
 		},
 		"Case15-9: invalid value for trim": {
 			query:     "CloseTime = 123.45",
 			validated: "",
-			err:       "error: failed to parse int from SQLVal 123.45",
+			err:       "trim time field CloseTime got error: error: failed to parse int from SQLVal 123.45",
 		},
 		"Case15-10: invalid from time for range query": {
 			query:     "StartTime BETWEEN 17.50 AND 1707319950935000128",
 			validated: "",
-			err:       "error: failed to parse int from SQLVal 17.50",
+			err:       "trim time field StartTime got error: error: failed to parse int from SQLVal 17.50",
 		},
 		"Case15-11: invalid to time for range query": {
 			query:     "StartTime BETWEEN 1707319950934000128 AND 1707319950935000128.1",
 			validated: "",
-			err:       "error: failed to parse int from SQLVal 1707319950935000128.1",
+			err:       "trim time field StartTime got error: error: failed to parse int from SQLVal 1707319950935000128.1",
 		},
 		"Case15-12: value already in milliseconds": {
 			query:     "StartTime = 170731995093",
@@ -184,6 +188,10 @@ func TestValidateQuery(t *testing.T) {
 		"Case15-15: value in raw string for range statement": {
 			query:     "StartTime between '2024-02-07T15:32:30Z' and '2024-02-07T15:33:30Z'",
 			validated: "StartTime between 1707319950000 and 1707320010000",
+		},
+		"Case15-16: combined time and missing case": {
+			query:     "CloseTime != missing and StartTime >= 1707662555754408145",
+			validated: "CloseTime != -1 and StartTime >= 1707662555754",
 		},
 		"Case16-1: custom int attribute greater than or equal to": {
 			query:     "CustomIntField >= 0",

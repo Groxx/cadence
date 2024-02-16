@@ -28,7 +28,6 @@ package aggregator
 
 import (
 	reflect "reflect"
-	time "time"
 
 	gomock "github.com/golang/mock/gomock"
 )
@@ -57,30 +56,30 @@ func (m *MockAggregator) EXPECT() *MockAggregatorMockRecorder {
 }
 
 // Get mocks base method.
-func (m *MockAggregator) Get(host string, limits []string) (map[string]float64, error) {
+func (m *MockAggregator) Get(req GetRequest) (GetResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Get", host, limits)
-	ret0, _ := ret[0].(map[string]float64)
+	ret := m.ctrl.Call(m, "Get", req)
+	ret0, _ := ret[0].(GetResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // Get indicates an expected call of Get.
-func (mr *MockAggregatorMockRecorder) Get(host, limits interface{}) *gomock.Call {
+func (mr *MockAggregatorMockRecorder) Get(req interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockAggregator)(nil).Get), host, limits)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockAggregator)(nil).Get), req)
 }
 
 // Update mocks base method.
-func (m *MockAggregator) Update(host string, elapsed time.Duration, load map[string]Load) error {
+func (m *MockAggregator) Update(req UpdateRequest) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", host, elapsed, load)
+	ret := m.ctrl.Call(m, "Update", req)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Update indicates an expected call of Update.
-func (mr *MockAggregatorMockRecorder) Update(host, elapsed, load interface{}) *gomock.Call {
+func (mr *MockAggregatorMockRecorder) Update(req interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockAggregator)(nil).Update), host, elapsed, load)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockAggregator)(nil).Update), req)
 }

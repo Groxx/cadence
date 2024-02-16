@@ -95,8 +95,6 @@ type (
 const (
 	guessNumKeys   = 1024 // guesstimate at num of ratelimit keys in a cluster
 	guessHostCount = 32   // guesstimate at num of frontend hosts in a cluster that receive traffic for each key
-
-	updateRateMin = 3 * time.Second // TODO: configurable
 )
 
 // New returns a host-weight aggregator.

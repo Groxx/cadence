@@ -1,0 +1,36 @@
+import "time"
+
+// GetType returns the type of the task
+func (t *{{.type}}) GetType() int {
+	return TransferTaskType{{.type}}
+}
+
+// GetVersion returns the version of the task
+func (t *{{.type}}) GetVersion() int64 {
+	return t.Version
+}
+
+// SetVersion returns the version of the task
+func (t *{{.type}}) SetVersion(version int64) {
+	t.Version = version
+}
+
+// GetTaskID returns the sequence ID of the task
+func (t *{{.type}}) GetTaskID() int64 {
+	return t.TaskID
+}
+
+// SetTaskID sets the sequence ID of the task
+func (t *{{.type}}) SetTaskID(id int64) {
+	t.TaskID = id
+}
+
+// GetVisibilityTimestamp gets the visibility timestamp of the task
+func (t *{{.type}}) GetVisibilityTimestamp() time.Time {
+	return t.VisibilityTimestamp
+}
+
+// SetVisibilityTimestamp sets the visibility timestamp of the task
+func (t *{{.type}}) SetVisibilityTimestamp(timestamp time.Time) {
+	t.VisibilityTimestamp = timestamp
+}

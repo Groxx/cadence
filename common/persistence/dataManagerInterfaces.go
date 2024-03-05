@@ -49,6 +49,10 @@
 // execution metered wrapper is special
 //go:generate gowrap gen -g -p . -i ExecutionManager -t ./wrappers/templates/metered_execution.tmpl -o wrappers/metered/execution_generated.go
 
+// Persistence tasks share some trivial boilerplate getters/setters on shared fields.
+// Embedding is more annoying due to construction elsewhere than codegen, so they're generated.
+//go:generate tmpl persistencetask -type ActivityTask
+
 package persistence
 
 import (
@@ -1162,7 +1166,7 @@ type (
 		TaskID            int64
 	}
 
-	//RangeDeleteReplicationTaskFromDLQRequest is used to delete replication tasks from DLQ
+	// RangeDeleteReplicationTaskFromDLQRequest is used to delete replication tasks from DLQ
 	RangeDeleteReplicationTaskFromDLQRequest struct {
 		SourceClusterName    string
 		ExclusiveBeginTaskID int64
@@ -1170,7 +1174,7 @@ type (
 		PageSize             int
 	}
 
-	//RangeDeleteReplicationTaskFromDLQResponse is the response of RangeDeleteReplicationTaskFromDLQ
+	// RangeDeleteReplicationTaskFromDLQResponse is the response of RangeDeleteReplicationTaskFromDLQ
 	RangeDeleteReplicationTaskFromDLQResponse struct {
 		TasksCompleted int
 	}
@@ -1535,7 +1539,7 @@ type (
 		// The shard to get history node data
 		ShardID *int
 
-		//DomainName to get metrics created with the domain
+		// DomainName to get metrics created with the domain
 		DomainName string
 	}
 
@@ -1616,7 +1620,7 @@ type (
 		Info string
 		// The shard to get history branch data
 		ShardID *int
-		//DomainName to create metrics for Domain Cost Attribution
+		// DomainName to create metrics for Domain Cost Attribution
 		DomainName string
 	}
 
@@ -1642,7 +1646,7 @@ type (
 		BranchToken []byte
 		// The shard to delete history branch data
 		ShardID *int
-		//DomainName to generate metrics for Domain Cost Attribution
+		// DomainName to generate metrics for Domain Cost Attribution
 		DomainName string
 	}
 
@@ -1654,7 +1658,7 @@ type (
 		ShardID *int
 		// optional: can provide treeID via branchToken if treeID is empty
 		BranchToken []byte
-		//DomainName to create metrics
+		// DomainName to create metrics
 		DomainName string
 	}
 
@@ -1863,7 +1867,7 @@ type (
 		Closeable
 		FetchDynamicConfig(ctx context.Context, cfgType ConfigType) (*FetchDynamicConfigResponse, error)
 		UpdateDynamicConfig(ctx context.Context, request *UpdateDynamicConfigRequest, cfgType ConfigType) error
-		//can add functions for config types other than dynamic config
+		// can add functions for config types other than dynamic config
 	}
 )
 
@@ -1871,41 +1875,6 @@ type (
 func IsTimeoutError(err error) bool {
 	_, ok := err.(*TimeoutError)
 	return ok
-}
-
-// GetType returns the type of the activity task
-func (a *ActivityTask) GetType() int {
-	return TransferTaskTypeActivityTask
-}
-
-// GetVersion returns the version of the activity task
-func (a *ActivityTask) GetVersion() int64 {
-	return a.Version
-}
-
-// SetVersion returns the version of the activity task
-func (a *ActivityTask) SetVersion(version int64) {
-	a.Version = version
-}
-
-// GetTaskID returns the sequence ID of the activity task
-func (a *ActivityTask) GetTaskID() int64 {
-	return a.TaskID
-}
-
-// SetTaskID sets the sequence ID of the activity task
-func (a *ActivityTask) SetTaskID(id int64) {
-	a.TaskID = id
-}
-
-// GetVisibilityTimestamp get the visibility timestamp
-func (a *ActivityTask) GetVisibilityTimestamp() time.Time {
-	return a.VisibilityTimestamp
-}
-
-// SetVisibilityTimestamp set the visibility timestamp
-func (a *ActivityTask) SetVisibilityTimestamp(timestamp time.Time) {
-	a.VisibilityTimestamp = timestamp
 }
 
 // GetType returns the type of the decision task

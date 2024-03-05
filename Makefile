@@ -222,6 +222,10 @@ $(BUILD)/go_mod_check: go.mod internal/tools/go.mod
 $(BIN)/copyright: cmd/tools/copyright/licensegen.go
 	$Q go build -o $@ ./cmd/tools/copyright/licensegen.go
 
+# generic simple-template runner
+$(BIN)/tmpl: go.mod $(wildcard cmd/tools/tmpl/*) | $(BIN)
+	$Q go build -o $@ ./cmd/tools/tmpl
+
 # https://docs.buf.build/
 # changing BUF_VERSION will automatically download and use the specified version.
 BUF_VERSION = 0.36.0

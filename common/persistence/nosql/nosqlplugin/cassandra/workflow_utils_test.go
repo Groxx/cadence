@@ -41,6 +41,14 @@ import (
 	"github.com/uber/cadence/common/types"
 )
 
+var _ gocql.UUID = fakeUUID("")
+
+type fakeUUID string
+
+func (u fakeUUID) String() string {
+	return string(u)
+}
+
 // fakeSession is fake implementation of gocql.Session
 type fakeSession struct {
 	// inputs

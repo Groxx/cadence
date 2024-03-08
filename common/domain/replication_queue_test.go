@@ -167,48 +167,23 @@ func TestGetReplicationMessages(t *testing.T) {
 }
 
 func TestUpdateAckLevel(t *testing.T) {
-	tests := []struct {
-		name      string
-		lastID    int64
-		cluster   string
-		wantErr   bool
-		setupMock func(q *persistence.MockQueueManager)
-	}{
-		{
-			name:    "successful ack level update",
-			lastID:  100,
-			cluster: "testCluster",
-			wantErr: false,
-			setupMock: func(q *persistence.MockQueueManager) {
-				q.EXPECT().UpdateAckLevel(gomock.Any(), gomock.Eq(int64(100)), gomock.Eq("testCluster")).Return(nil)
-			},
-		},
-		{
-			name:    "ack level update fails",
-			lastID:  100,
-			cluster: "testCluster",
-			wantErr: true,
-			setupMock: func(q *persistence.MockQueueManager) {
-				q.EXPECT().UpdateAckLevel(gomock.Any(), gomock.Eq(int64(100)), gomock.Eq("testCluster")).Return(errors.New("update error"))
-			},
-		},
-	}
+	updateAckLevel := func(t *testing.T, err error) error {
+		level, cluster := int64(100), "testCluster" // could be random
+		mockQueue := persistence.NewMockQueueManager(gomock.NewController(t))
+		rq := NewReplicationQueue(mockQueue, cluster, nil, nil)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			mockQueue := persistence.NewMockQueueManager(ctrl)
-
-			rq := NewReplicationQueue(mockQueue, "testCluster", nil, nil)
-			tt.setupMock(mockQueue)
-			err := rq.UpdateAckLevel(context.Background(), tt.lastID, tt.cluster)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
+		mockQueue.EXPECT().UpdateAckLevel(gomock.Any(), level, cluster).Return(err)
+		return rq.UpdateAckLevel(context.Background(), level, cluster)
 	}
+	t.Run("success", func(t *testing.T) {
+		err := updateAckLevel(t, nil)
+		assert.NoError(t, err)
+	})
+	t.Run("error", func(t *testing.T) {
+		cause := errors.New("update error")
+		err := updateAckLevel(t, cause)
+		assert.ErrorIs(t, err, cause)
+	})
 }
 
 func TestReplicationQueueImpl_GetAckLevels(t *testing.T) {

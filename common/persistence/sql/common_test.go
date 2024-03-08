@@ -26,7 +26,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -236,46 +235,28 @@ func TestGobSerialize(t *testing.T) {
 }
 
 func TestGobDeserialize(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   []byte
-		target  interface{}
-		want    interface{}
-		wantErr bool
-	}{
-		{
-			name:    "Deserialize to string",
-			input:   mustGobSerialize("test string"),
-			target:  new(string),
-			want:    "test string",
-			wantErr: false,
-		},
-		{
-			name:    "Deserialize to struct",
-			input:   mustGobSerialize(struct{ A int }{1}),
-			target:  new(struct{ A int }),
-			want:    struct{ A int }{1},
-			wantErr: false,
-		},
-		{
-			name:    "Deserialize with invalid data",
-			input:   []byte("invalid"),
-			target:  new(string),
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := gobDeserialize(tt.input, tt.target)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.want, reflect.ValueOf(tt.target).Elem().Interface())
-			}
-		})
-	}
+	t.Run("string", func(t *testing.T) {
+		in := "test"
+		var out string
+		err := gobDeserialize(mustGobSerialize(in), &out)
+		assert.NoError(t, err)
+		assert.Equal(t, out, in)
+	})
+	t.Run("struct", func(t *testing.T) {
+		type typ struct{ A int }
+		in := typ{1}
+		var out typ
+		err := gobDeserialize(mustGobSerialize(in), &out)
+		assert.NoError(t, err)
+		assert.Equal(t, out, in)
+	})
+	t.Run("invalid data", func(t *testing.T) {
+		var out string
+		err := gobDeserialize([]byte("invalid"), &out)
+		assert.Error(t, err)
+		var errtype *types.InternalServiceError
+		assert.ErrorAs(t, err, &errtype, "deserialization failures should never occur, so they are internal service errors at all levels")
+	})
 }
 
 // mustGobSerialize is a helper function that panics if serialization fails. Used for setting up tests.

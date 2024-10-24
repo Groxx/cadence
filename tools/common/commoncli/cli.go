@@ -24,8 +24,6 @@ package commoncli
 
 import (
 	"errors"
-	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -52,7 +50,7 @@ func ExitHandler(err error) {
 
 	// print what we can to stderr.
 	// and ignore errs while doing so, since we have no real alternative.
-	_ = printErr(err, os.Stderr)
+	_ = printErr(err, WriteTo(os.Stderr))
 
 	// all errors are "fatal", unlike default behavior which only fails if you
 	// return an ExitCoder error.
@@ -61,7 +59,7 @@ func ExitHandler(err error) {
 
 // prints this (possibly printable) error to the given io.Writer.
 // write-errors will be returned, if any are encountered.
-func printErr(err error, to io.Writer) (writeErr error) {
+func printErr(err error, to Output) (writeErr error) {
 	// the way Go does error wrapping is really a massive pain, as the stdlib encourages
 	// people to wrap *and duplicate* basically every error message, because they don't
 	// provide any API for getting "just this error" content.
@@ -69,18 +67,6 @@ func printErr(err error, to io.Writer) (writeErr error) {
 	// we can live with that.
 	// build strings recursively, stripping out matching suffixes, and hope for the best.
 	// it's quite wasteful, but it's only done once per process so it's fine.
-
-	// error-coalescing write-helper.
-	// if an error is encountered, the first will be saved, and later calls will no-op.
-	write := func(format string, a ...any) {
-		if writeErr != nil {
-			return
-		}
-		_, tmpErr := fmt.Fprintf(to, format, a...)
-		if tmpErr != nil {
-			writeErr = tmpErr
-		}
-	}
 
 	var topPrintable *printableErr
 	_ = errors.As(err, &topPrintable)
@@ -133,12 +119,12 @@ func printErr(err error, to io.Writer) (writeErr error) {
 	}
 
 	if topPrintable != nil {
-		write("%s %s\n", colorRed("Error:"), topPrintable.display)
+		to.Printf("%s %s\n", colorRed("Error:"), topPrintable.display)
 		if allParsed[0].err == topPrintable {
 			allParsed = allParsed[1:] // already printed, skip
 		}
 	} else { // len(allParsed) > 0
-		write("%s %s\n", colorRed("Error:"), allParsed[0].msg)
+		to.Printf("%s %s\n", colorRed("Error:"), allParsed[0].msg)
 		allParsed = allParsed[1:] // already printed, skip
 	}
 
@@ -147,18 +133,18 @@ func printErr(err error, to io.Writer) (writeErr error) {
 	}
 
 	indent := "  "
-	write("%s\n", colorMagenta("Error details:")) // only the top level gets color
+	to.Printf("%s\n", colorMagenta("Error details:")) // only the top level gets color
 	// and now write the rest
 	needDetails := false
 	for _, this := range allParsed {
 		lines := strings.Split(this.msg, "\n")
 		if needDetails {
-			write("%s%s\n", indent, "Error details:")
+			to.Printf("%s%s\n", indent, "Error details:")
 			indent += "  " // next errors indent further
 			needDetails = false
 		}
 		for _, line := range lines {
-			write("%s%s\n", indent, line)
+			to.Printf("%s%s\n", indent, line)
 		}
 		if _, ok := this.err.(*printableErr); ok { // already unwrapped
 			needDetails = true

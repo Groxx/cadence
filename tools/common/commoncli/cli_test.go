@@ -25,7 +25,6 @@ package commoncli
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -34,13 +33,13 @@ import (
 func TestPrintErr(t *testing.T) {
 	run := func(t *testing.T, err error) string {
 		t.Helper()
-		buf := strings.Builder{}
-		// improves t.Log display by placing it all on a common start column, and easier to read the Equal below
-		buf.WriteString("\n")
-		failed := printErr(err, &buf)
+		out := NewMockOutput(t)
+		failed := printErr(err, out)
 		assert.NoError(t, failed, "error during printing")
-		t.Log(buf.String())
-		return buf.String()
+		// leading newline improves t.Log display by placing it all on a common start column, and easier to read the Equal below
+		s := "\n" + out.String()
+		t.Log(s)
+		return s
 	}
 	t.Run("printable only", func(t *testing.T) {
 		str := run(t, Problem("a problem", nil))

@@ -186,7 +186,7 @@ $(BIN)/mockgen: internal/tools/go.mod go.work
 	$(call go_build_tool,go.uber.org/mock/mockgen)
 
 $(BIN)/mockery: internal/tools/go.mod go.work
-	$(call go_build_tool,github.com/vektra/mockery/v2,mockery)
+	$(call go_build_tool,github.com/vektra/mockery/v3,mockery)
 
 $(BIN)/enumer: internal/tools/go.mod go.work
 	$(call go_build_tool,github.com/dmarkham/enumer)

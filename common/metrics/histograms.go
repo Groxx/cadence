@@ -76,6 +76,33 @@ type SubsettableHistogram struct {
 	scale int
 }
 
+// ExpHistogram attempts to match OTEL and Prometheus's "[native] histogram" behavior:
+//   - it takes a unit
+//   - it always starts at "1" of that unit
+//   - it always has a 0
+//   - it always uses floats
+//
+// and uniquely:
+//   - there is an end bound and an OPTIONAL start bound (implied: 1).
+//     this is different from OTEL and Prometheus's, which are "infinite"
+//     histograms with no upper or lower limit
+//   - negative indexes are not allowed, i.e. values between 0 and start all
+//     fall into the `[0, start)` bucket and there are no <1-unit values.
+//     negative values fall into the (-inf, 0) bucket.
+//
+// this does not attempt to unify the bucket IDs with Prometheus or OTEL,
+// both because they differ (OTEL says ID 0 is `1<n<=2` (at scale 0), which
+// means that *value* zero is at index 9223372036854775807, while
+// Prometheus says that's `0<=n<1`)
+// and because we simply have no control over that in Tally.
+//
+// TODO: verify their behavior
+type ExpHistogram struct {
+	tallyBuckets tally.ValueBuckets
+	scale        int
+	unit         string
+}
+
 // IntSubsettableHistogram is a non-duration-based integer-distribution histogram, otherwise identical
 // to SubsettableHistogram but built as a separate type so you cannot pass the wrong one.
 //
@@ -155,6 +182,7 @@ func (s SubsettableHistogram) tags() map[string]string {
 		// both visually when querying by hand and for any future automation (if needed).
 		"histogram_start": s.start().String(),
 		"histogram_end":   s.end().String(),
+		"histogram_unit":  s.unit, // TODO: redo this in terms of float, to match OTEL/Prometheus's values
 		"histogram_scale": strconv.Itoa(s.scale),
 	}
 }
@@ -163,6 +191,7 @@ func (i IntSubsettableHistogram) tags() map[string]string {
 	return map[string]string{
 		"histogram_start": strconv.Itoa(int(i.start())),
 		"histogram_end":   strconv.Itoa(int(i.end())),
+		"histogram_unit":  i.unit,
 		"histogram_scale": strconv.Itoa(i.scale),
 	}
 }
